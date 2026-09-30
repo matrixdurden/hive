@@ -1,0 +1,6 @@
+# WSL'den Windows'a çapraz derleme. `cargo run` .exe'yi WSL interop ile doğrudan başlatır.
+[build]
+target = "x86_64-pc-windows-gnu"
+
+[target.x86_64-pc-windows-gnu]
+linker = "x86_64-w64-mingw32-gcc"

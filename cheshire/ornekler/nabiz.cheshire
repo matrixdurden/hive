@@ -1,0 +1,46 @@
+// @cheshire
+// ad: Nabız
+// yazar: Claude
+// fps: 60
+// param renk: #ff6ec7
+// param hassasiyet: 1.0 [0.3, 3]
+//
+// Çalan müziğe tepki veren halka. Frekanslar halkanın etrafına simetrik dizilir
+// (üstte bas, altta tiz); bas vuruşları merkezi parlatır, alt kenarda dalga biçimi akar.
+// iAudio: 1. satır (y = 0.25) spektrum, 2. satır (y = 0.75) dalga biçimi.
+
+float spectrum(float x) { return texture(iAudio, vec2(x, 0.25)).r; }
+// Komşu kutuları ortala: halka tek bir kutunun sıçramasıyla kırılmasın.
+float smoothSpectrum(float x) { return (spectrum(x - 0.006) + spectrum(x) + spectrum(x + 0.006)) / 3.0; }
+float waveform(float x) { return texture(iAudio, vec2(x, 0.75)).r; }
+
+void mainImage(out vec4 fragColor, in vec2 fragCoord) {
+    vec2 uv = (fragCoord - 0.5 * iResolution.xy) / iResolution.y;
+    float r = length(uv);
+
+    float bass = (spectrum(0.01) + spectrum(0.02) + spectrum(0.03) + spectrum(0.05)) * 0.25;
+    bass = clamp(bass * bass * hassasiyet, 0.0, 1.5);
+
+    // Üstten saat yönünde açı → 0 (üst) .. 1 (alt), iki yan ayna.
+    float f = abs(atan(uv.x, uv.y)) / 3.14159265;
+    // Kulak logaritmik duyar: kutuların ilk yarısına daha çok yer ver.
+    float amp = smoothSpectrum(0.01 + f * f * 0.45) * hassasiyet;
+
+    float ringR = 0.23 + bass * 0.04 + amp * 0.11;
+    float d = abs(r - ringR);
+    float line = smoothstep(0.0035, 0.0, d);
+    float glow = 0.006 / (d + 0.006);
+
+    vec3 accent = mix(renk, renk.bgr, f);
+    vec3 col = mix(vec3(0.03, 0.025, 0.05), vec3(0.06, 0.03, 0.08), fragCoord.y / iResolution.y);
+    col += accent * (line * (0.6 + amp) + glow * 0.18 * (0.4 + amp));
+    col += renk * exp(-r * r * 30.0) * bass * 0.5;
+
+    // Alt kenarda ince dalga biçimi.
+    float y = fragCoord.y / iResolution.y;
+    float w = (waveform(fragCoord.x / iResolution.x) - 0.5) * 0.08 + 0.06;
+    col += accent.bgr * smoothstep(1.5 / iResolution.y, 0.0, abs(y - w)) * 0.5;
+
+    col *= 1.0 - 0.35 * dot(uv, uv); // hafif vinyet
+    fragColor = vec4(col, 1.0);
+}
