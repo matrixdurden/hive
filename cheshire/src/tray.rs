@@ -4,8 +4,7 @@
 use std::cell::RefCell;
 use std::sync::atomic::{AtomicU32, Ordering};
 
-use windows::Win32::Foundation::{HANDLE, HWND, LPARAM, LRESULT, POINT, WPARAM};
-use windows::Win32::Graphics::Gdi::*;
+use windows::Win32::Foundation::{HANDLE, HINSTANCE, HWND, LPARAM, LRESULT, POINT, WPARAM};
 use windows::Win32::System::DataExchange::COPYDATASTRUCT;
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::System::Power::{POWERBROADCAST_SETTING, RegisterPowerSettingNotification};
@@ -156,7 +155,7 @@ impl Tray {
                 let _ = RegisterPowerSettingNotification(HANDLE(hwnd.0), guid, DEVICE_NOTIFY_WINDOW_HANDLE);
             }
 
-            let tray = Self { hwnd, icon: make_icon()? };
+            let tray = Self { hwnd, icon: load_icon(hinstance.into())? };
             tray.add();
             Ok(tray)
         }
@@ -270,46 +269,11 @@ unsafe fn build_menu(items: &[Item]) -> Res<HMENU> {
     }
 }
 
-/// 32x32 ikonu kodla çizer: maviden pembeye akan halkalar. Kaynak dosyası gerekmez.
-fn make_icon() -> Res<HICON> {
-    const S: i32 = 32;
+/// Exe'ye gömülü ikonu (build.rs, kaynak 1) tepsi boyutunda yükler.
+fn load_icon(hinstance: HINSTANCE) -> Res<HICON> {
     unsafe {
-        let bmi = BITMAPINFO {
-            bmiHeader: BITMAPINFOHEADER {
-                biSize: size_of::<BITMAPINFOHEADER>() as u32,
-                biWidth: S,
-                biHeight: -S, // yukarıdan aşağı
-                biPlanes: 1,
-                biBitCount: 32,
-                biCompression: BI_RGB.0,
-                ..Default::default()
-            },
-            ..Default::default()
-        };
-        let mut bits: *mut std::ffi::c_void = std::ptr::null_mut();
-        let color = CreateDIBSection(None, &bmi, DIB_RGB_COLORS, &mut bits, None, 0)?;
-        let px = std::slice::from_raw_parts_mut(bits as *mut u32, (S * S) as usize);
-        for y in 0..S {
-            for x in 0..S {
-                let (fx, fy) = (x as f32 - 15.5, y as f32 - 15.5);
-                let r = (fx * fx + fy * fy).sqrt();
-                let alpha = (15.5 - r).clamp(0.0, 1.0);
-                let t = (x as f32 / S as f32 + (fy * 0.35).sin() * 0.15).clamp(0.0, 1.0);
-                let wave = 0.75 + 0.25 * ((fx * 0.45 + (fy * 0.3).sin() * 2.0).sin());
-                let (cr, cg, cb) = (
-                    (60.0 + 190.0 * t) * wave,
-                    (150.0 - 60.0 * t) * wave,
-                    (255.0 - 40.0 * t) * wave,
-                );
-                let a = (alpha * 255.0) as u32;
-                px[(y * S + x) as usize] = (a << 24) | ((cr as u32) << 16) | ((cg as u32) << 8) | cb as u32;
-            }
-        }
-        let mask = CreateBitmap(S, S, 1, 1, None);
-        let info = ICONINFO { fIcon: true.into(), hbmMask: mask, hbmColor: color, ..Default::default() };
-        let icon = CreateIconIndirect(&info)?;
-        let _ = DeleteObject(color.into());
-        let _ = DeleteObject(mask.into());
-        Ok(icon)
+        let (cx, cy) = (GetSystemMetrics(SM_CXSMICON), GetSystemMetrics(SM_CYSMICON));
+        let h = LoadImageW(Some(hinstance), PCWSTR(1 as *const u16), IMAGE_ICON, cx, cy, LR_DEFAULTCOLOR)?;
+        Ok(HICON(h.0))
     }
 }
