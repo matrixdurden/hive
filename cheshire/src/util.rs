@@ -1,9 +1,11 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use windows::Win32::System::Power::{GetSystemPowerStatus, SYSTEM_POWER_STATUS};
+use windows::Win32::Foundation::CloseHandle;
 use windows::Win32::System::SystemInformation::GetLocalTime;
+use windows::Win32::System::Threading::{CreateProcessW, PROCESS_CREATION_FLAGS, PROCESS_INFORMATION, STARTUPINFOW};
 use windows::Win32::UI::WindowsAndMessaging::{MB_ICONERROR, MB_OK, MessageBoxW};
-use windows::core::{PCWSTR, w};
+use windows::core::{PCWSTR, PWSTR, w};
 
 pub type Res<T> = Result<T, Box<dyn std::error::Error>>;
 
@@ -19,14 +21,19 @@ pub fn error_box(msg: &str) {
     }
 }
 
-/// %APPDATA%\cheshire — ayarlar, log ve duvar kâğıtları burada durur.
-pub fn data_dir() -> PathBuf {
-    let base = std::env::var_os("APPDATA").map(PathBuf::from).unwrap_or_else(std::env::temp_dir);
-    base.join("cheshire")
+/// %LOCALAPPDATA%\Programs\cheshire — kurulu exe, ayarlar, log ve duvar kâğıtları hep burada.
+/// Kaldırınca bu klasör silinir, geride bir şey kalmaz.
+pub fn app_dir() -> PathBuf {
+    let base = std::env::var_os("LOCALAPPDATA").map(PathBuf::from).unwrap_or_else(std::env::temp_dir);
+    base.join("Programs").join("cheshire")
+}
+
+pub fn installed_exe() -> PathBuf {
+    app_dir().join("cheshire.exe")
 }
 
 pub fn wallpapers_dir() -> PathBuf {
-    data_dir().join("duvarlar")
+    app_dir().join("duvarlar")
 }
 
 /// (iDate, iLocalTime). iDate Shadertoy'daki gibi: yıl, ay (0 tabanlı), gün, gece yarısından beri saniye.
@@ -45,4 +52,31 @@ pub fn battery_level() -> f32 {
         }
     }
     1.0
+}
+
+/// Süreci tutamaç mirası olmadan başlatır. std `Command` bütün miras alınabilir tutamaçları
+/// geçirir; o zaman çağıran (ör. WSL'den `make install`) başlatılan kopya kapanana dek bekler.
+/// `command_line` ilk öğesi exe olan tam komut satırıdır, tırnaklama çağıranda.
+pub fn spawn_detached(command_line: &str, cwd: Option<&Path>, flags: PROCESS_CREATION_FLAGS) -> Res<()> {
+    let mut line = wide(command_line);
+    let cwd = cwd.map(|d| wide(&d.to_string_lossy()));
+    let si = STARTUPINFOW { cb: size_of::<STARTUPINFOW>() as u32, ..Default::default() };
+    let mut pi = PROCESS_INFORMATION::default();
+    unsafe {
+        CreateProcessW(
+            PCWSTR::null(),
+            Some(PWSTR(line.as_mut_ptr())),
+            None,
+            None,
+            false,
+            flags,
+            None,
+            cwd.as_ref().map_or(PCWSTR::null(), |d| PCWSTR(d.as_ptr())),
+            &si,
+            &mut pi,
+        )?;
+        let _ = CloseHandle(pi.hThread);
+        let _ = CloseHandle(pi.hProcess);
+    }
+    Ok(())
 }

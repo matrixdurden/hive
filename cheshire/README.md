@@ -35,9 +35,13 @@ Masaüstü ikonlarının arkasında Shadertoy lehçesinde GLSL shader'lar çizer
 
 ## Kullanım
 
-- `cheshire.exe`'yi çalıştır. Sistem tepsisindeki simgeden duvar kâğıdını seç, parametreleri ayarla, "Windows ile başlat"ı aç.
-- Bir `.cheshire` dosyasına çift tıkla ya da exe'nin üstüne sürükle: kurulur ve uygulanır.
-- Ayarlar, log ve duvar kâğıtları `%APPDATA%\cheshire` altında durur.
+1. [Son sürümden](https://github.com/matrixdurden/cheshire/releases/latest) `cheshire.exe`'yi indir ve çalıştır. Kendini kurar, Windows ile başlar. Yönetici izni gerekmez. İndirdiğin dosyayı sonra silebilirsin.
+2. Duvar kâğıdını ve ayarlarını sistem tepsisindeki simgeden seç.
+3. Bir `.cheshire` dosyasına çift tıkla: eklenir ve uygulanır.
+
+Yeni sürümler kendiliğinden gelir (tepsi menüsünden "Otomatik güncelle" ile kapatılabilir). Kaldırmak için: Ayarlar → Uygulamalar → cheshire.
+
+Her şey tek klasörde durur: `%LOCALAPPDATA%\Programs\cheshire` (exe, `cheshire.ini`, `duvarlar\`, log). Bunun dışında yalnızca Başlat menüsü kısayolu ve kullanıcıya ait kayıt defteri girdileri var (Windows ile başlat, `.cheshire` ilişkilendirmesi, kaldırma kaydı). Kaldırınca hepsi silinir.
 
 ```sh
 cheshire --dogrula dosya.cheshire               # derle, 120 kare çiz, GPU süresini raporla
@@ -73,8 +77,11 @@ WSL'den Windows için çapraz derlenir (`x86_64-pc-windows-gnu`, mingw gerekir):
 
 ```sh
 make build     # target/x86_64-pc-windows-gnu/release/cheshire.exe
-make install   # %LOCALAPPDATA%\Programs\cheshire altına kopyala ve başlat
+make install   # bu derlemeyi Windows'a kur ve başlat
+make release   # Cargo.toml'daki sürümle GitHub'da yayın aç
 ```
+
+Yayın akışı: `Cargo.toml`'da `version`'ı artır, commit'le, push'la, `make release`. Kurulu kopyalar yeni sürümü bir gün içinde indirir, SHA-256'sını doğrular ve kendini yeniler.
 
 <br>
 

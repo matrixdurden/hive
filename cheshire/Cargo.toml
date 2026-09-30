@@ -4,6 +4,8 @@ version = "0.1.0"
 edition = "2024"
 description = "Hafif, açık kaynak, GPU tabanlı canlı duvar kâğıdı motoru (Windows)"
 license = "MIT"
+# Otomatik güncelleme bu reponun GitHub Releases sayfasına bakar.
+repository = "https://github.com/matrixdurden/cheshire"
 
 [dependencies]
 wgpu = { version = "30", default-features = false, features = ["std", "parking_lot", "dx12", "wgsl", "naga-ir"] }
@@ -21,6 +23,8 @@ features = [
     "Win32_Media_Audio",
     "Win32_Media_KernelStreaming",
     "Win32_Media_Multimedia",
+    "Win32_Networking_WinHttp",
+    "Win32_Security_Cryptography",
     "Win32_Security",
     "Win32_Storage_FileSystem",
     "Win32_System_Com",

@@ -17,6 +17,7 @@ use windows::core::{PCWSTR, w};
 use crate::util::{Res, wide};
 
 const WM_TRAY: u32 = WM_APP + 1;
+const WM_UPDATE_READY: u32 = WM_APP + 2;
 const WTS_SESSION_LOCK: usize = 0x7;
 const WTS_SESSION_UNLOCK: usize = 0x8;
 const PBT_POWERSETTINGCHANGE: usize = 0x8013;
@@ -38,6 +39,10 @@ pub enum Event {
     ScreenOn(bool),
     /// Başka bir `cheshire.exe` sürecinden gelen dosya adı (zaten `duvarlar` klasörüne kopyalanmış).
     Install(String),
+    /// Yeni sürüm indirildi ve doğrulandı.
+    UpdateReady,
+    /// Kurulum ya da kaldırma çalışan kopyayı kapatıyor.
+    Quit,
 }
 
 thread_local! {
@@ -72,6 +77,8 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
             }
         }
         WM_DISPLAYCHANGE => push(Event::DisplayChanged),
+        WM_UPDATE_READY => push(Event::UpdateReady),
+        WM_CLOSE => push(Event::Quit),
         WM_WTSSESSION_CHANGE => match wp.0 {
             WTS_SESSION_LOCK => push(Event::SessionLocked(true)),
             WTS_SESSION_UNLOCK => push(Event::SessionLocked(false)),
@@ -191,14 +198,32 @@ impl Tray {
         }
     }
 
+    /// Uyarı balonu.
     pub fn notify(&self, title: &str, text: &str) {
+        self.balloon(title, text, NIIF_WARNING);
+    }
+
+    /// Bilgi balonu.
+    pub fn inform(&self, title: &str, text: &str) {
+        self.balloon(title, text, NIIF_INFO);
+    }
+
+    fn balloon(&self, title: &str, text: &str, icon: NOTIFY_ICON_INFOTIP_FLAGS) {
         let mut d = self.data();
         d.uFlags = NIF_INFO;
-        d.dwInfoFlags = NIIF_WARNING;
+        d.dwInfoFlags = icon;
         copy_into(&mut d.szInfoTitle, title);
         copy_into(&mut d.szInfo, text);
         unsafe {
             let _ = Shell_NotifyIconW(NIM_MODIFY, &d);
+        }
+    }
+
+    /// Başka iş parçacığından çağrılabilir: tepsi penceresine "güncelleme hazır" mesajı atar.
+    pub fn update_waker(&self) -> impl Fn() + Send + 'static {
+        let raw = self.hwnd.0 as usize;
+        move || unsafe {
+            let _ = PostMessageW(Some(HWND(raw as *mut _)), WM_UPDATE_READY, WPARAM(0), LPARAM(0));
         }
     }
 

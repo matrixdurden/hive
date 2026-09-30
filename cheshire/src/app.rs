@@ -26,7 +26,7 @@ use crate::render::{self, Engine, Inputs};
 use crate::timer::{DirWatch, Waiter};
 use crate::tray::{self, Event, Item, Tray};
 use crate::util::{self, Res, wide};
-use crate::{log, shell};
+use crate::{log, shell, update};
 
 /// İlk açılışta `duvarlar` klasörü boşsa kopyalanan örnekler.
 pub const BUNDLED: &[(&str, &str)] = &[
@@ -41,6 +41,7 @@ mod id {
     pub const BATTERY: u32 = 3002;
     pub const AUTOSTART: u32 = 3003;
     pub const OPEN_FOLDER: u32 = 3004;
+    pub const AUTO_UPDATE: u32 = 3005;
     pub const QUIT: u32 = 3999;
     pub const PARAM: u32 = 4000; // + parametre * 16 + hazır değer
 }
@@ -195,8 +196,13 @@ impl App {
     pub fn new() -> Res<Self> {
         let cfg = Config::load();
         ensure_wallpapers();
-        shell::associate();
+        shell::register();
         let tray = Tray::new()?;
+        // Geliştirme kopyası güncellenmez: kurulu olmayan exe'nin üstüne yazmak anlamsız.
+        update::ENABLED.store(cfg.auto_update, std::sync::atomic::Ordering::Relaxed);
+        if shell::installed_copy() {
+            update::spawn(tray.update_waker());
+        }
         let window = WallpaperWindow::attach(&cfg.host)?;
         let (gpu, surface) = Gpu::new(Some(window.hwnd), cfg.high_performance_gpu)?;
         let target = Target::new(&gpu, surface.ok_or("yüzey oluşturulamadı")?, window.width, window.height)?;
@@ -235,6 +241,11 @@ impl App {
             }
         }
         Ok(app)
+    }
+
+    /// Tepsiden bilgi balonu (kuruldu, güncellendi).
+    pub fn announce(&self, title: &str, text: &str) {
+        self.tray.inform(title, text);
     }
 
     fn mode(&self) -> Mode {
@@ -323,6 +334,11 @@ impl App {
         for ev in tray::take_events() {
             match ev {
                 Event::MenuRequested => self.menu(),
+                Event::Quit => self.quit = true,
+                Event::UpdateReady => match update::apply() {
+                    Ok(()) => self.quit = true,
+                    Err(e) => log!("güncelleme uygulanamadı: {e}"),
+                },
                 Event::SessionLocked(l) => self.policy.locked = l,
                 Event::WindowsChanged => self.policy.refresh_windows(),
                 Event::OnBattery(b) => self.policy.on_battery = b,
@@ -369,7 +385,7 @@ impl App {
             .collect();
 
         let mut items = vec![
-            Item::Label(format!("cheshire — {}", self.status)),
+            Item::Label(format!("cheshire {} — {}", env!("CARGO_PKG_VERSION"), self.status)),
             Item::Separator,
             Item::Submenu { label: "Duvar kâğıdı".into(), items: wallpapers },
         ];
@@ -401,6 +417,7 @@ impl App {
             Item::Action { id: id::PAUSE, label: "Duraklat".into(), checked: self.policy.user_paused },
             Item::Action { id: id::BATTERY, label: "Pildeyken duraklat".into(), checked: self.cfg.pause_on_battery },
             Item::Action { id: id::AUTOSTART, label: "Windows ile başlat".into(), checked: shell::autostart_enabled() },
+            Item::Action { id: id::AUTO_UPDATE, label: "Otomatik güncelle".into(), checked: self.cfg.auto_update },
             Item::Action { id: id::OPEN_FOLDER, label: "Duvar kâğıdı klasörünü aç".into(), checked: false },
             Item::Separator,
             Item::Action { id: id::QUIT, label: "Çıkış".into(), checked: false },
@@ -411,9 +428,13 @@ impl App {
             id::PAUSE => self.policy.user_paused = !self.policy.user_paused,
             id::BATTERY => self.cfg.pause_on_battery = !self.cfg.pause_on_battery,
             id::AUTOSTART if !shell::installed_copy() => {
-                self.tray.notify("Önce kur", "Windows ile başlatmak için `make install` ile kurulan kopyayı kullan.")
+                self.tray.notify("Geliştirme kopyası", "Windows ile başlatmak için `make install` ile kurulan kopyayı kullan.")
             }
             id::AUTOSTART => shell::set_autostart(!shell::autostart_enabled()),
+            id::AUTO_UPDATE => {
+                self.cfg.auto_update = !self.cfg.auto_update;
+                update::ENABLED.store(self.cfg.auto_update, std::sync::atomic::Ordering::Relaxed);
+            }
             id::OPEN_FOLDER => {
                 let dir = wide(&util::wallpapers_dir().to_string_lossy());
                 unsafe {
@@ -515,6 +536,10 @@ impl App {
 
         while pump() && !self.quit {
             self.handle_events();
+            // Duraklatılmışken aşağıda süresiz beklenir: çıkış isteği orada kaybolmasın.
+            if self.quit {
+                break;
+            }
             if self.rescan_at.is_some_and(|t| Instant::now() >= t) {
                 self.rescan_at = None;
                 self.rescan();

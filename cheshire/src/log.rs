@@ -6,10 +6,10 @@ use std::time::Instant;
 static START: OnceLock<Instant> = OnceLock::new();
 static FILE: Mutex<Option<File>> = Mutex::new(None);
 
-/// Her açılışta %APPDATA%\cheshire\cheshire.log dosyasını sıfırdan başlatır.
+/// Her açılışta %LOCALAPPDATA%\Programs\cheshire\cheshire.log dosyasını sıfırdan başlatır.
 pub fn init() {
     START.get_or_init(Instant::now);
-    let dir = crate::util::data_dir();
+    let dir = crate::util::app_dir();
     let _ = std::fs::create_dir_all(&dir);
     if let Ok(f) = File::create(dir.join("cheshire.log")) {
         *FILE.lock().unwrap() = Some(f);

@@ -13,9 +13,11 @@ mod log;
 mod png;
 mod policy;
 mod render;
+mod setup;
 mod shell;
 mod timer;
 mod tray;
+mod update;
 mod util;
 
 use std::path::{Path, PathBuf};
@@ -32,12 +34,14 @@ const USAGE: &str = "\
 cheshire — GPU shader duvar kâğıdı motoru
 
 kullanım:
-  cheshire                                        masaüstünde çalıştır
-  cheshire dosya.cheshire                         kur ve uygula
+  cheshire                                        masaüstünde çalıştır (kurulu değilse önce kendini kurar)
+  cheshire dosya.cheshire                         duvar kâğıdını ekle ve uygula
   cheshire --dogrula dosya.cheshire               derle, 120 kare çiz, GPU süresini raporla
   cheshire --onizleme dosya.cheshire cikti.png    PNG üret
         [--zaman 5] [--fare 0.5,0.5] [--basili] [--boyut 1280x720] [--param ad=deger]...
-  cheshire --agac                                 masaüstü pencere ağacını logla";
+  cheshire --agac                                 masaüstü pencere ağacını logla
+  cheshire --kur                                  bu exe'yi kur (geliştirme kopyası için)
+  cheshire --kaldir                               kaldır: kayıtlar, kısayol ve kurulum klasörü";
 
 fn flag<'a>(args: &'a [String], name: &str) -> Option<&'a str> {
     args.iter().position(|a| a == name).and_then(|i| args.get(i + 1)).map(String::as_str)
@@ -92,6 +96,8 @@ fn tool(args: &[String]) -> Option<i32> {
             desktop::restore_static_wallpaper();
             Ok(true)
         }
+        Some("--kur") => setup::install(None).map(|()| true),
+        Some("--kaldir") => setup::uninstall(),
         Some("--yardim" | "-h" | "--help") => {
             println!("{USAGE}");
             Ok(true)
@@ -120,8 +126,42 @@ fn install(src: &Path) -> Res<String> {
     Ok(name)
 }
 
-fn desktop(file: Option<&str>) -> Res<()> {
-    let installed = file.map(|f| install(Path::new(f))).transpose()?;
+/// Masaüstü modunun argümanları: `[dosya.cheshire] [--kuruldu] [--guncellendi] [--sonra PID]`.
+#[derive(Default)]
+struct Launch<'a> {
+    file: Option<&'a str>,
+    installed: bool,
+    updated: bool,
+    after: Option<u32>,
+}
+
+fn launch_args(args: &[String]) -> Launch<'_> {
+    let mut l = Launch::default();
+    let mut it = args.iter().skip(1).map(String::as_str);
+    while let Some(a) = it.next() {
+        match a {
+            "--kuruldu" => l.installed = true,
+            "--guncellendi" => l.updated = true,
+            "--sonra" => l.after = it.next().and_then(|p| p.parse().ok()),
+            a if !a.starts_with("--") && l.file.is_none() => l.file = Some(a),
+            _ => {}
+        }
+    }
+    l
+}
+
+fn desktop(args: &[String]) -> Res<()> {
+    let launch = launch_args(args);
+    // İndirilen exe: kendini kur, kurulu kopyayı başlat, çık.
+    if !shell::installed_copy() && !shell::dev_copy() {
+        return setup::install(launch.file);
+    }
+    if shell::installed_copy() {
+        update::cleanup();
+    }
+    setup::migrate();
+
+    let installed = launch.file.map(|f| install(Path::new(f))).transpose()?;
     // Tek örnek: motor zaten çalışıyorsa dosyayı ona ilet ve çık.
     let _mutex = unsafe { CreateMutexW(None, true, w!("Local\\cheshire-tek-kopya")) };
     if unsafe { GetLastError() } == ERROR_ALREADY_EXISTS {
@@ -138,12 +178,22 @@ fn desktop(file: Option<&str>) -> Res<()> {
     unsafe {
         let _ = SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
     }
-    app::App::new()?.run()
+    let app = app::App::new()?;
+    if launch.installed {
+        app.announce("cheshire kuruldu", "Duvar kâğıdını ve ayarları buradaki simgeden seçebilirsin.");
+    } else if launch.updated {
+        app.announce(concat!("cheshire ", env!("CARGO_PKG_VERSION"), " sürümüne güncellendi"), env!("CARGO_PKG_REPOSITORY"));
+    }
+    app.run()
 }
 
 fn main() {
-    log::init();
     let args: Vec<String> = std::env::args().collect();
+    // Güncellemeden sonra: eski süreç çıksın, tek örnek kilidini ve log dosyasını bıraksın.
+    if let Some(pid) = launch_args(&args).after {
+        setup::wait_for(pid);
+    }
+    log::init();
     if args.get(1).is_some_and(|a| a.starts_with("--") || a == "-h") {
         // GUI alt sisteminde stdout yoksa çağıran konsola bağlan (cmd/PowerShell).
         unsafe {
@@ -153,7 +203,7 @@ fn main() {
     if let Some(code) = tool(&args) {
         std::process::exit(code);
     }
-    if let Err(e) = desktop(args.get(1).map(String::as_str)) {
+    if let Err(e) = desktop(&args) {
         log!("hata: {e}");
         util::error_box(&format!("cheshire başlatılamadı:\n\n{e}"));
     }
