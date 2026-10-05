@@ -28,10 +28,14 @@ use crate::tray::{self, Event, Item, Tray};
 use crate::util::{self, Res, wide};
 use crate::{hub, log, shell, update};
 
-/// İlk açılışta `duvarlar` klasörü boşsa kopyalanan örnekler.
+/// Motorla gelen örnek duvar kâğıtları (`ensure_wallpapers` duvarlar klasörüne koyar).
 pub const BUNDLED: &[(&str, &str)] = &[
     ("akis.cheshire", include_str!("../ornekler/akis.cheshire")),
     ("nabiz.cheshire", include_str!("../ornekler/nabiz.cheshire")),
+    ("domore.cheshire", include_str!("../ornekler/domore.cheshire")),
+    ("pus.cheshire", include_str!("../ornekler/pus.cheshire")),
+    ("kum.cheshire", include_str!("../ornekler/kum.cheshire")),
+    ("deco.cheshire", include_str!("../ornekler/deco.cheshire")),
 ];
 
 mod id {
@@ -155,15 +159,51 @@ fn catalog() -> Vec<Entry> {
         .collect()
 }
 
-/// `duvarlar` klasörü yoksa oluşturur ve örnekleri koyar.
+fn fnv(data: &[u8]) -> u64 {
+    data.iter().fold(0xcbf29ce484222325u64, |h, &b| (h ^ b as u64).wrapping_mul(0x100000001b3))
+}
+
+/// Örnekleri duvarlar klasörüyle eşler. `.sunulan` dosyası her örneğin en son yazılan sürümünün
+/// özetini tutar:
+/// - hiç sunulmamış örnek eklenir (yeni sürümle gelen duvar kâğıtları),
+/// - kullanıcının dokunmadığı (özeti kayıtlı olanla aynı) eski örnek yenisiyle değişir,
+/// - kullanıcının sildiği örnek geri gelmez, değiştirdiği ezilmez.
+/// `.sunulan` hiç yoksa (önceki sürümlerden kalma klasör) adı tutan örnekler bizimdir: yenilenir.
 pub fn ensure_wallpapers() {
     let dir = util::wallpapers_dir();
-    if dir.exists() {
-        return;
-    }
     let _ = std::fs::create_dir_all(&dir);
+    let manifest = dir.join(".sunulan");
+    let legacy = !manifest.exists();
+    let mut offered: Vec<(String, u64)> = std::fs::read_to_string(&manifest)
+        .unwrap_or_default()
+        .lines()
+        .filter_map(|l| l.split_once(' ').and_then(|(n, h)| Some((n.to_string(), u64::from_str_radix(h, 16).ok()?))))
+        .collect();
+    let mut changed = legacy;
     for (name, src) in BUNDLED {
-        let _ = std::fs::write(dir.join(name), src);
+        let path = dir.join(name);
+        let new = fnv(src.as_bytes());
+        let known = offered.iter().find(|(n, _)| n == name).map(|(_, h)| *h);
+        let current = std::fs::read(&path).ok().map(|d| fnv(&d));
+        let write = match (current, known) {
+            (None, None) => true,                         // ilk kez sunuluyor
+            (None, Some(_)) => false,                     // kullanıcı silmiş
+            (Some(c), _) if c == new => false,            // zaten güncel
+            (Some(c), Some(k)) => c == k,                 // dokunulmamış eski sürüm
+            (Some(_), None) => legacy,                    // eski klasör: örnek bizim
+        };
+        if write && std::fs::write(&path, src).is_ok() {
+            log!("örnek duvar kâğıdı yazıldı: {name}");
+        }
+        if known != Some(new) && (write || current == Some(new)) {
+            offered.retain(|(n, _)| n != name);
+            offered.push((name.to_string(), new));
+            changed = true;
+        }
+    }
+    if changed {
+        let text: String = offered.iter().map(|(n, h)| format!("{n} {h:016x}\n")).collect();
+        let _ = std::fs::write(&manifest, text);
     }
 }
 

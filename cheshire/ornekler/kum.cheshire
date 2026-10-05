@@ -1,0 +1,104 @@
+// @cheshire
+// ad: Dune
+// ad.tr: Kum
+// yazar: Claude
+// fps: 20
+// param saat "Follow the clock" "Saati izle": on
+// param an "Time of day" "Günün saati": 0.75 [0, 1]
+// param hiz "Drift" "Kayma": 1.0 [0, 3]
+// param tane "Film grain" "Film tanesi": 1.0 [0, 2]
+//
+// Katman katman kum tepeleri; gökyüzü ve ışık bilgisayarın saatini izler: gece lacivert ve
+// yıldızlı, şafak şeftali, öğle açık kum, akşam terrakota. Güneş soldan doğar, sağdan batar; gece
+// ay çıkar. Uzaktaki tepeler gökyüzüne karışır (hava perspektifi), yakındakiler daha koyu ve
+// yavaşça kayar. `saat` kapalıyken `an` kullanılır (0 gece yarısı, 0.5 öğle).
+
+float hash12(vec2 p) {
+    vec3 p3 = fract(vec3(p.xyx) * 0.1031);
+    p3 += dot(p3, p3.yzx + 33.33);
+    return fract((p3.x + p3.y) * p3.z);
+}
+
+// Dört anahtar an: 0 gece, 1 şafak, 2 öğle, 3 akşam. ufuk, tepe ve kum rengi.
+void key(int k, out vec3 hor, out vec3 zen, out vec3 sand) {
+    if (k == 0) {
+        hor = vec3(0.10, 0.12, 0.22); zen = vec3(0.02, 0.03, 0.08); sand = vec3(0.30, 0.32, 0.46);
+    } else if (k == 1) {
+        hor = vec3(0.98, 0.66, 0.48); zen = vec3(0.32, 0.38, 0.62); sand = vec3(0.72, 0.46, 0.38);
+    } else if (k == 2) {
+        hor = vec3(0.90, 0.84, 0.72); zen = vec3(0.50, 0.66, 0.84); sand = vec3(0.86, 0.66, 0.46);
+    } else {
+        hor = vec3(0.96, 0.52, 0.32); zen = vec3(0.28, 0.20, 0.38); sand = vec3(0.66, 0.34, 0.24);
+    }
+}
+
+void sky(float p, out vec3 hor, out vec3 zen, out vec3 sand) {
+    float x = fract(p) * 4.0;
+    int k = int(floor(x));
+    float f = smoothstep(0.0, 1.0, fract(x));
+    vec3 h0, z0, s0, h1, z1, s1;
+    key(k, h0, z0, s0);
+    key(k == 3 ? 0 : k + 1, h1, z1, s1);
+    hor = mix(h0, h1, f);
+    zen = mix(z0, z1, f);
+    sand = mix(s0, s1, f);
+}
+
+// Tepe silüeti: birkaç sinüsün toplamı, katmana göre farklı.
+float ridge(float x, float i, float t) {
+    float s = i * 1.7 + 0.3;
+    return 0.6 * sin(x * (1.3 + i * 0.35) + s + t)
+         + 0.3 * sin(x * (2.9 + i * 0.6) - s * 1.3 + t * 0.6)
+         + 0.1 * sin(x * (6.1 + i) + s * 2.1);
+}
+
+void mainImage(out vec4 fragColor, in vec2 fragCoord) {
+    vec2 uv = (fragCoord - 0.5 * iResolution.xy) / iResolution.y;
+    float aspect = iResolution.x / iResolution.y;
+    float px = 1.0 / iResolution.y;
+
+    float p = saat >= 0.5 ? iDate.w / 86400.0 : an;
+    vec3 hor, zen, sand;
+    sky(p, hor, zen, sand);
+    // Gündüz ışığı: gece 0, öğle 1.
+    float day = smoothstep(-0.25, 0.35, sin((p - 0.25) * 6.2831853));
+
+    // Gökyüzü.
+    vec3 col = mix(hor, zen, smoothstep(-0.05, 0.55, uv.y));
+
+    // Yıldızlar: yalnızca gece, hafifçe göz kırpar.
+    vec2 g = floor(fragCoord / 3.0);
+    float star = step(0.9975, hash12(g)) * (0.6 + 0.4 * sin(iTime * 2.0 + hash12(g + 7.0) * 30.0));
+    // Gece: yıldızlar ve ay ancak gerçekten kararınca çıkar.
+    float night = pow(1.0 - smoothstep(0.0, 0.4, day), 2.0);
+    col += star * night * smoothstep(0.0, 0.3, uv.y) * 0.9;
+
+    // Güneş (6'da solda doğar, 18'de sağda batar) ve gece karşısında ay.
+    float a = (p - 0.25) * 6.2831853;
+    vec2 sun = vec2(-cos(a) * 0.62 * aspect * 0.8, sin(a) * 0.42 - 0.08);
+    vec2 moon = vec2(cos(a) * 0.62 * aspect * 0.8, -sin(a) * 0.42 - 0.08);
+    float ds = length(uv - sun), dm = length(uv - moon);
+    vec3 sunCol = mix(vec3(1.0, 0.62, 0.38), vec3(1.0, 0.95, 0.82), day);
+    col += sunCol * (smoothstep(0.055, 0.050, ds) * 0.9 + 0.18 * exp(-ds * 6.0)) * step(-0.12, sun.y);
+    col += vec3(0.85, 0.88, 1.0) * smoothstep(0.035, 0.031, dm) * night * step(-0.12, moon.y);
+
+    // Tepeler: uzaktan yakına; uzaktakiler gökyüzüne karışır, yakındakiler koyulaşır ve kayar.
+    float t = iTime * 0.02 * hiz;
+    for (int k = 0; k < 4; k++) {
+        float i = float(k);
+        float base = -0.02 - i * 0.11;
+        float amp = 0.05 + i * 0.022;
+        float h = base + amp * ridge(uv.x * (1.0 + i * 0.25), i, t * (0.4 + i * 0.5));
+        float inside = smoothstep(px, -px, uv.y - h);
+        // Sırtta ince aydınlık, aşağı doğru gölge: kum gibi yumuşak bir hacim.
+        float shade = mix(0.78, 1.06, smoothstep(h - 0.14, h, uv.y));
+        float depth = 1.0 - i / 3.0;
+        vec3 layer = sand * (0.55 + 0.45 * day) * shade * (0.50 + 0.35 * (1.0 - depth));
+        layer = mix(layer, hor, depth * 0.55 * (0.5 + 0.5 * day));
+        col = mix(col, layer, inside);
+    }
+
+    col *= 1.0 - 0.18 * dot(uv, uv);
+    col += (hash12(fragCoord + fract(iTime) * 97.0) - 0.5) * 0.035 * tane;
+    fragColor = vec4(col, 1.0);
+}

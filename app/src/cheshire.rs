@@ -50,6 +50,8 @@ const PANEL_HEAD: f32 = 56.0;
 const LABEL_W: f32 = 180.0;
 /// Panellerin zemini: sayfadan bir ton açık.
 const PANEL: Color = Color::rgb(0x141416);
+/// Bu kadar seçeneğe kadar bölmeli seçici; fazlası ‹ › ile.
+const MAX_SEGMENTS: usize = 5;
 
 struct Layout {
     cards: Vec<Rect>,
@@ -583,6 +585,14 @@ impl Cheshire {
     }
 
     /// Satırın sağına yaslı bölmeli seçici.
+    /// Çok seçenekte (örneğin sloganlar) bölmeli seçici sığmaz: ‹ seçili › ile gezilir.
+    fn stepper(r: Rect) -> (Rect, Rect, Rect) {
+        let next = Rect::new(r.r - 32.0, r.cy() - 14.0, r.r - 3.0, r.cy() + 14.0);
+        let label = Rect::new(next.l - 190.0, next.t, next.l, next.b);
+        let prev = Rect::new(label.l - 29.0, next.t, label.l, next.b);
+        (prev, label, next)
+    }
+
     fn segments(g: &Gfx, r: Rect, labels: &[String]) -> Vec<Rect> {
         let widths: Vec<f32> = labels.iter().map(|l| g.measure(l, &g.f.button) + 26.0).collect();
         let total: f32 = widths.iter().sum::<f32>() + 6.0;
@@ -639,6 +649,15 @@ impl Cheshire {
                 Kind::Slider { .. } => {
                     let (a, b) = Self::slider_track(r);
                     if x >= a - 10.0 && x <= b + 10.0 { Hit::Slider(n) } else { Hit::None }
+                }
+                Kind::Choice { options, value, .. } if options.len() > MAX_SEGMENTS => {
+                    let (prev, _, next) = Self::stepper(r);
+                    let len = options.len();
+                    match () {
+                        _ if prev.contains(x, y) => Hit::Choice(n, (value + len - 1) % len),
+                        _ if next.contains(x, y) => Hit::Choice(n, (value + 1) % len),
+                        _ => Hit::None,
+                    }
                 }
                 Kind::Choice { options, .. } => Self::segments(g, r, &choice_labels(options))
                     .iter()
@@ -799,6 +818,17 @@ impl Cheshire {
                         let v = if max > min { (value - min) / (max - min) } else { 0.0 };
                         slider(g, a, b, r.cy(), v, ACCENT, active);
                         g.text(&format!("{value:.2}"), &g.f.small_right, Rect::new(b + 8.0, r.t, r.r, r.b), MUTED);
+                    }
+                    Kind::Choice { options, value, .. } if options.len() > MAX_SEGMENTS => {
+                        let (prev, label, next) = Self::stepper(r);
+                        let len = options.len();
+                        g.fill(Rect::new(prev.l - 3.0, prev.t - 3.0, next.r + 3.0, next.b + 3.0), 8.0, HOVER);
+                        let hp = self.hover == Hit::Choice(n, (value + len - 1) % len);
+                        let hn = self.hover == Hit::Choice(n, (value + 1) % len);
+                        icon_button(g, prev, "\u{E76B}", MUTED, hp);
+                        icon_button(g, next, "\u{E76C}", MUTED, hn);
+                        let current = options.get(*value).map(|o| choice_label(o)).unwrap_or_default();
+                        g.text(&current, &g.f.button, label, TEXT);
                     }
                     Kind::Choice { options, value, .. } => {
                         self.paint_segments(g, r, &choice_labels(options), *value, |j| self.hover == Hit::Choice(n, j));

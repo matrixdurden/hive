@@ -1,0 +1,92 @@
+// @cheshire
+// ad: Deco
+// yazar: Claude
+// fps: 30
+// param palet "Palette" "Palet": emerald [emerald/zümrüt, navy/lacivert, onyx/oniks, blush/pudra]
+// param isin "Rays" "Işın": 22 [12, 36]
+// param parilti "Shimmer" "Parıltı": 1.0 [0, 2]
+// param tane "Film grain" "Film tanesi": 1.0 [0, 2]
+//
+// Art Deco güneş patlaması: alttaki yarım güneşten açılan ışınlar, kademeli altın kemerler ve
+// ince çift çizgiler. Işınların üstünde yavaşça bir ışık gezinir, altın çizgiler o geçerken
+// parlar. Paletler derin zemin + altın: zümrüt, lacivert, oniks, pudra.
+
+float hash12(vec2 p) {
+    vec3 p3 = fract(vec3(p.xyx) * 0.1031);
+    p3 += dot(p3, p3.yzx + 33.33);
+    return fract((p3.x + p3.y) * p3.z);
+}
+
+void palette(int p, out vec3 deep, out vec3 mid, out vec3 gold) {
+    gold = vec3(0.84, 0.67, 0.38);
+    if (p == 0) {
+        deep = vec3(0.020, 0.090, 0.075); mid = vec3(0.045, 0.170, 0.140);
+    } else if (p == 1) {
+        deep = vec3(0.025, 0.040, 0.095); mid = vec3(0.050, 0.080, 0.170);
+    } else if (p == 2) {
+        deep = vec3(0.030, 0.030, 0.032); mid = vec3(0.075, 0.072, 0.070);
+    } else {
+        deep = vec3(0.310, 0.200, 0.200); mid = vec3(0.450, 0.300, 0.290);
+        gold = vec3(0.92, 0.80, 0.62);
+    }
+}
+
+// Halkaya (yarıçap r, kalınlık w) uzaklık.
+float ring(float d, float r, float w) {
+    return abs(d - r) - w;
+}
+
+void mainImage(out vec4 fragColor, in vec2 fragCoord) {
+    vec2 uv = (fragCoord - 0.5 * iResolution.xy) / iResolution.y;
+    float px = 1.0 / iResolution.y;
+    vec3 deep, mid, gold;
+    palette(int(palet + 0.5), deep, mid, gold);
+
+    // Merkez ekranın altında: yarım güneş.
+    vec2 c = vec2(0.0, -0.58);
+    vec2 q = uv - c;
+    float r = length(q);
+    float a = atan(q.x, q.y); // üstte 0, iki yana ±π
+
+    // Işınlar: dönüşümlü iki ton, aralarında ince altın çizgi.
+    float n = floor(isin + 0.5);
+    float seg = a / 3.14159265 * n * 0.5;
+    float tone = mod(floor(seg + 0.5), 2.0);
+    vec3 col = mix(deep, mid, 0.35 + 0.65 * tone);
+    col = mix(col, deep, smoothstep(0.2, 1.4, r)); // dışa doğru koyulaşır
+
+    // Gezinen ışık: açısı zamanla gidip gelir; ışınlar ve altın çizgiler geçerken parlar.
+    float sweep = sin(iTime * 0.18) * 1.15;
+    float glow = exp(-pow(a - sweep, 2.0) / 0.035) * parilti;
+    col += mid * glow * 0.35;
+
+    // Ton sınırları seg = k + 0.5'te; sınıra yay uzunluğu cinsinden uzaklık.
+    float f = fract(seg + 0.5);
+    float edge = min(f, 1.0 - f) * (6.2831853 / n) * r;
+    float rayLine = smoothstep(px * 1.2, 0.0, edge - 0.0009);
+    // Kademeli kemerler: çift çizgi.
+    float arcs = 1e9;
+    arcs = min(arcs, ring(r, 0.30, 0.0016));
+    arcs = min(arcs, ring(r, 0.315, 0.0010));
+    arcs = min(arcs, ring(r, 0.56, 0.0020));
+    arcs = min(arcs, ring(r, 0.58, 0.0010));
+    arcs = min(arcs, ring(r, 0.86, 0.0016));
+    arcs = min(arcs, ring(r, 0.88, 0.0010));
+    float arcLine = smoothstep(px, -px, arcs);
+    // Işın çizgileri iç kemerden başlar.
+    float lines = max(rayLine * smoothstep(0.16, 0.18, r), arcLine);
+
+    // Yarım güneş: altın dolgu, ince halkalı.
+    float sunD = r - 0.15;
+    float sun = smoothstep(px, -px, sunD);
+    vec3 sunCol = gold * (0.75 + 0.35 * (q.y / 0.15));
+
+    vec3 g = gold * (0.75 + 0.6 * glow);
+    col = mix(col, g, lines * 0.85);
+    col = mix(col, sunCol, sun);
+    col = mix(col, gold, smoothstep(px, -px, ring(r, 0.165, 0.0014)));
+
+    col *= 1.0 - 0.28 * dot(uv * vec2(0.8, 1.0), uv * vec2(0.8, 1.0));
+    col += (hash12(fragCoord) - 0.5) * 0.03 * tane;
+    fragColor = vec4(col, 1.0);
+}

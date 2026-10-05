@@ -6,42 +6,48 @@
 // param renk "Color" "Renk": #ff6ec7
 // param hassasiyet "Sensitivity" "Hassasiyet": 1.0 [0.3, 3]
 //
-// Çalan müziğe tepki veren halka. Frekanslar halkanın etrafına simetrik dizilir
-// (üstte bas, altta tiz); bas vuruşları merkezi parlatır, alt kenarda dalga biçimi akar.
-// iAudio: 1. satır (y = 0.25) spektrum, 2. satır (y = 0.75) dalga biçimi.
+// Müzikle nefes alan tek bir halka. Bas vuruşları halkayı büyütüp parlatır, frekanslar onu
+// yumuşakça dalgalandırır (üstte bas, altta tiz, iki yan ayna). Müzik yokken de sakin sakin
+// soluk alır. Koyu zemin, tek renk, yumuşak ışıma: başka bir şey yok.
+// iAudio: 1. satır (y = 0.25) spektrum.
 
 float spectrum(float x) { return texture(iAudio, vec2(x, 0.25)).r; }
-// Komşu kutuları ortala: halka tek bir kutunun sıçramasıyla kırılmasın.
-float smoothSpectrum(float x) { return (spectrum(x - 0.006) + spectrum(x) + spectrum(x + 0.006)) / 3.0; }
-float waveform(float x) { return texture(iAudio, vec2(x, 0.75)).r; }
+
+// Geniş ortalama: halka tek bir kutunun sıçramasıyla kırılmasın, dalgalar yumuşak kalsın.
+float band(float x) {
+    float s = 0.0;
+    for (int i = -3; i <= 3; i++) {
+        s += spectrum(x + float(i) * 0.008);
+    }
+    return s / 7.0;
+}
 
 void mainImage(out vec4 fragColor, in vec2 fragCoord) {
     vec2 uv = (fragCoord - 0.5 * iResolution.xy) / iResolution.y;
     float r = length(uv);
 
     float bass = (spectrum(0.01) + spectrum(0.02) + spectrum(0.03) + spectrum(0.05)) * 0.25;
-    bass = clamp(bass * bass * hassasiyet, 0.0, 1.5);
+    bass = clamp(bass * bass * hassasiyet, 0.0, 1.2);
 
-    // Üstten saat yönünde açı → 0 (üst) .. 1 (alt), iki yan ayna.
+    // Üstten açı → 0 (üst) .. 1 (alt); kulak logaritmik duyar, basa daha çok yer.
     float f = abs(atan(uv.x, uv.y)) / 3.14159265;
-    // Kulak logaritmik duyar: kutuların ilk yarısına daha çok yer ver.
-    float amp = smoothSpectrum(0.01 + f * f * 0.45) * hassasiyet;
+    float amp = band(0.01 + f * f * 0.40) * hassasiyet;
 
-    float ringR = 0.23 + bass * 0.04 + amp * 0.11;
+    // Sessizlikte de nefes: yavaş bir sinüs.
+    float breath = 0.006 * sin(iTime * 1.1);
+    float ringR = 0.22 + breath + bass * 0.05 + amp * 0.05;
     float d = abs(r - ringR);
-    float line = smoothstep(0.0035, 0.0, d);
-    float glow = 0.006 / (d + 0.006);
 
-    vec3 accent = mix(renk, renk.bgr, f);
-    vec3 col = mix(vec3(0.03, 0.025, 0.05), vec3(0.06, 0.03, 0.08), fragCoord.y / iResolution.y);
-    col += accent * (line * (0.6 + amp) + glow * 0.18 * (0.4 + amp));
-    col += renk * exp(-r * r * 30.0) * bass * 0.5;
+    float px = 1.0 / iResolution.y;
+    float width = 0.0025 + amp * 0.004;
+    float line = smoothstep(width + px, width - px, d);
+    float glow = exp(-d * (38.0 - bass * 12.0));
 
-    // Alt kenarda ince dalga biçimi.
-    float y = fragCoord.y / iResolution.y;
-    float w = (waveform(fragCoord.x / iResolution.x) - 0.5) * 0.08 + 0.06;
-    col += accent.bgr * smoothstep(1.5 / iResolution.y, 0.0, abs(y - w)) * 0.5;
+    vec3 col = vec3(0.018, 0.016, 0.024) + renk * 0.05 * exp(-r * 2.2);
+    col += renk * (line * (0.75 + 0.5 * bass) + glow * (0.22 + 0.35 * bass));
+    // İç dolgu: vuruşta hafifçe dolar.
+    col += renk * smoothstep(ringR, 0.0, r) * (0.03 + 0.10 * bass);
 
-    col *= 1.0 - 0.35 * dot(uv, uv); // hafif vinyet
+    col *= 1.0 - 0.3 * dot(uv, uv);
     fragColor = vec4(col, 1.0);
 }

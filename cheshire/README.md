@@ -21,8 +21,18 @@ Draws GLSL shaders in the Shadertoy dialect behind the desktop icons. Pauses whe
   </tr>
   <tr>
     <td align="center"><b>Flow</b><br><sub>Colored fibres flowing through a curling field. The mouse pushes them away.</sub></td>
-    <td align="center"><b>Pulse</b><br><sub>A ring that reacts to the music playing.</sub></td>
-    <td align="center"><b>Do more</b><br><sub>Clock and slogan over paper-cut layers, 5 color themes. Text from embedded Montserrat outlines.</sub></td>
+    <td align="center"><b>Pulse</b><br><sub>A single ring that breathes with the music playing.</sub></td>
+    <td align="center"><b>Do more</b><br><sub>Clock and a slogan of your choice over paper-cut layers, 5 color themes. Text from embedded Montserrat outlines.</sub></td>
+  </tr>
+  <tr>
+    <td width="33%"><img src="assets/pus.jpg" alt="Haze wallpaper"></td>
+    <td width="33%"><img src="assets/kum.jpg" alt="Dune wallpaper"></td>
+    <td width="33%"><img src="assets/deco.jpg" alt="Deco wallpaper"></td>
+  </tr>
+  <tr>
+    <td align="center"><b>Haze</b><br><sub>Soft glowing clouds drifting into each other, in warm earthy palettes with film grain.</sub></td>
+    <td align="center"><b>Dune</b><br><sub>Layered dunes under a sky that follows your clock: dawn, noon, dusk and a starry night.</sub></td>
+    <td align="center"><b>Deco</b><br><sub>An Art Deco sunburst with gold rays and arches; a slow shimmer sweeps across.</sub></td>
   </tr>
 </table>
 
