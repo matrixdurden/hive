@@ -57,7 +57,7 @@ pub fn setup(install: bool) -> i32 {
         }
         Err(e) => {
             log!("lyrebird kurulum hatası: {e}");
-            println!("HATA {e}");
+            println!("{} {e}", t!("ERROR", "HATA"));
             1
         }
     }
@@ -424,9 +424,9 @@ impl Lyrebird {
 
     fn chip_text(&self, key: Option<Hotkey>, binding: bool) -> String {
         match (binding, key) {
-            (true, _) => "tuşa bas".into(),
+            (true, _) => t!("press a key", "tuşa bas").into(),
             (false, Some(k)) => k.to_string(),
-            (false, None) => "kısayol".into(),
+            (false, None) => t!("shortcut", "kısayol").into(),
         }
     }
 
@@ -440,10 +440,10 @@ impl Lyrebird {
     fn pill_label(&self) -> &'static str {
         match &self.mic {
             MicState::Unknown => "",
-            MicState::Missing => "Mikrofon yok",
-            MicState::Busy => "Bağlanıyor…",
-            MicState::Detached => "Mikrofona bağla",
-            MicState::Attached(_) => "Bağlı",
+            MicState::Missing => t!("No microphone", "Mikrofon yok"),
+            MicState::Busy => t!("Connecting…", "Bağlanıyor…"),
+            MicState::Detached => t!("Connect microphone", "Mikrofona bağla"),
+            MicState::Attached(_) => t!("Connected", "Bağlı"),
         }
     }
 
@@ -461,7 +461,7 @@ impl Lyrebird {
     /// Boş listede ortadaki "Ses ekle" düğmesi.
     fn empty_rect(&self, g: &Gfx) -> Rect {
         let cy = (HEADER + self.h - BOTTOM) / 2.0;
-        let b = button_rect(g, 0.0, cy + 34.0, "Ses ekle", true);
+        let b = button_rect(g, 0.0, cy + 34.0, t!("Add sounds", "Ses ekle"), true);
         let l = self.w / 2.0 - b.w() / 2.0;
         Rect::new(l, b.t, l + b.w(), b.b)
     }
@@ -574,10 +574,12 @@ impl Lyrebird {
         if self.items.is_empty() {
             let cy = list.cy();
             g.text(ICON_AUDIO, &g.f.icon_large, Rect::new(0.0, cy - 62.0, w, cy - 22.0), FAINT);
-            text_center(g, "Ses dosyalarını buraya sürükle", &g.f.strong, w / 2.0, cy - 14.0, cy + 8.0, TEXT);
-            g.text("mp3, wav, m4a, aac, wma ya da flac", &g.f.small_center, Rect::new(0.0, cy + 8.0, w, cy + 26.0), MUTED);
+            let title = t!("Drop sound files here", "Ses dosyalarını buraya sürükle");
+            text_center(g, title, &g.f.strong, w / 2.0, cy - 14.0, cy + 8.0, TEXT);
+            let kinds = t!("mp3, wav, m4a, aac, wma or flac", "mp3, wav, m4a, aac, wma ya da flac");
+            g.text(kinds, &g.f.small_center, Rect::new(0.0, cy + 8.0, w, cy + 26.0), MUTED);
             let b = self.empty_rect(g);
-            button(g, b, "Ses ekle", Some(ICON_ADD), Some(ACCENT), self.hover == Hit::Empty);
+            button(g, b, t!("Add sounds", "Ses ekle"), Some(ICON_ADD), Some(ACCENT), self.hover == Hit::Empty);
         }
         g.clip(list, || {
             for (n, item) in self.items.iter().enumerate() {
@@ -814,7 +816,10 @@ impl Lyrebird {
         self.mic = MicState::Unknown;
         self.refresh_mic();
         if code == 1 {
-            error_box("Mikrofona bağlanamadı.\n\nAyrıntılar: %LOCALAPPDATA%\\Programs\\hive\\hive.log");
+            error_box(t!(
+                "Could not connect to the microphone.\n\nDetails: %LOCALAPPDATA%\\Programs\\hive\\hive.log",
+                "Mikrofona bağlanamadı.\n\nAyrıntılar: %LOCALAPPDATA%\\Programs\\hive\\hive.log"
+            ));
         }
     }
 }
@@ -823,9 +828,9 @@ fn add_dialog(hwnd: HWND) -> Res<Vec<PathBuf>> {
     unsafe {
         let dlg: IFileOpenDialog = CoCreateInstance(&FileOpenDialog, None, CLSCTX_INPROC_SERVER)?;
         dlg.SetOptions(dlg.GetOptions()? | FOS_ALLOWMULTISELECT | FOS_FILEMUSTEXIST | FOS_FORCEFILESYSTEM)?;
-        dlg.SetTitle(w!("Ses ekle"))?;
+        dlg.SetTitle(t!(w!("Add sounds"), w!("Ses ekle")))?;
         dlg.SetFileTypes(&[COMDLG_FILTERSPEC {
-            pszName: w!("Ses dosyaları"),
+            pszName: t!(w!("Sound files"), w!("Ses dosyaları")),
             pszSpec: w!("*.mp3;*.wav;*.m4a;*.aac;*.wma;*.flac"),
         }])?;
         if dlg.Show(Some(hwnd)).is_err() {
@@ -890,10 +895,13 @@ impl ToolPage for Lyrebird {
     }
     fn tip(&self) -> Option<(Rect, String)> {
         match (&self.hover, &self.mic) {
-            (Hit::Stop, _) => Some((self.stop_rect(), "Hepsini sustur".into())),
-            (Hit::Add, _) => Some((self.add_rect(), "Ses ekle".into())),
+            (Hit::Stop, _) => Some((self.stop_rect(), t!("Mute all", "Hepsini sustur").into())),
+            (Hit::Add, _) => Some((self.add_rect(), t!("Add sounds", "Ses ekle").into())),
             (Hit::Status, MicState::Attached(name)) => {
-                let state = if self.active { "bir uygulama dinliyor" } else { "şu an dinleyen yok" };
+                let state = match self.active {
+                    true => t!("an app is listening", "bir uygulama dinliyor"),
+                    false => t!("nothing is listening", "şu an dinleyen yok"),
+                };
                 Some((Rect::new(self.head_x + 14.0, HEAD_CY - 13.0, self.head_x + 90.0, HEAD_CY + 13.0), format!("{name} · {state}")))
             }
             _ => None,

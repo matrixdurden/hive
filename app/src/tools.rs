@@ -26,11 +26,22 @@ pub struct Tool {
     pub id: &'static str,
     pub name: &'static str,
     pub accent: u32,
-    pub tagline: &'static str,
-    /// Araçlar sayfasında kurulumun ne getirdiği.
-    pub note: &'static str,
+    /// [İngilizce, Türkçe]; `tagline()` seçili dildekini verir.
+    tagline: [&'static str; 2],
+    /// Araçlar sayfasında kurulumun ne getirdiği: [İngilizce, Türkçe].
+    note: [&'static str; 2],
     /// (piksel, PNG) — çizilecek boyuta en yakın olan seçilir.
     pub icons: &'static [(u32, &'static [u8])],
+}
+
+impl Tool {
+    pub fn tagline(&self) -> &'static str {
+        t!(self.tagline[0], self.tagline[1])
+    }
+
+    pub fn note(&self) -> &'static str {
+        t!(self.note[0], self.note[1])
+    }
 }
 
 macro_rules! icons {
@@ -51,24 +62,24 @@ pub static TOOLS: [Tool; 3] = [
         id: "lyrebird",
         name: "lyrebird",
         accent: 0xfbbf24,
-        tagline: "Sesi doğrudan mikrofona veren soundboard",
-        note: "Mikrofonuna bir ses efekti takar · yönetici izni ister",
+        tagline: ["A soundboard that plays straight into your microphone", "Sesi doğrudan mikrofona veren soundboard"],
+        note: ["Adds an effect to your microphone · needs admin", "Mikrofonuna bir ses efekti takar · yönetici izni ister"],
         icons: icons!("lyrebird"),
     },
     Tool {
         id: "cheshire",
         name: "cheshire",
         accent: 0xf472b6,
-        tagline: "GPU ile çizilen canlı duvar kâğıdı",
-        note: "hive ile birlikte gelir · internet gerekmez",
+        tagline: ["Live wallpapers drawn by your GPU", "GPU ile çizilen canlı duvar kâğıdı"],
+        note: ["Comes with hive · no internet needed", "hive ile birlikte gelir · internet gerekmez"],
         icons: icons!("cheshire"),
     },
     Tool {
         id: "rabbithole",
         name: "rabbithole",
         accent: 0xa78bfa,
-        tagline: "Bütün bilgisayarı ağ engellerinin ötesine geçiren tünel",
-        note: "GitHub'dan indirilir (~40 MB) · yönetici izni ister",
+        tagline: ["Tunnels your whole computer past network blocks", "Bütün bilgisayarı ağ engellerinin ötesine geçiren tünel"],
+        note: ["Downloaded from GitHub (~40 MB) · needs admin", "GitHub'dan indirilir (~40 MB) · yönetici izni ister"],
         icons: icons!("rabbithole"),
     },
 ];
@@ -85,9 +96,9 @@ pub fn installed(i: usize) -> bool {
 /// Kurulum ya da kaldırma sırasında düğmede görünen yazı.
 pub fn busy_label(i: usize, install: bool) -> &'static str {
     match (i, install) {
-        (RABBITHOLE, true) => "İndiriliyor…",
-        (_, true) => "Kuruluyor…",
-        _ => "Kaldırılıyor…",
+        (RABBITHOLE, true) => t!("Downloading…", "İndiriliyor…"),
+        (_, true) => t!("Installing…", "Kuruluyor…"),
+        _ => t!("Removing…", "Kaldırılıyor…"),
     }
 }
 
@@ -129,7 +140,7 @@ fn uninstall(i: usize) -> Result<(), String> {
         Ok(())
     } else {
         log!("{} kalıntıları: {left:?}", TOOLS[i].name);
-        Err(format!("tam kaldırılamadı, kalanlar: {}", left.join(" · ")))
+        Err(format!("{} {}", t!("not fully removed, left behind:", "tam kaldırılamadı, kalanlar:"), left.join(" · ")))
     }
 }
 
@@ -153,12 +164,12 @@ pub fn leftovers(i: usize) -> Vec<String> {
             let mut l: Vec<String> =
                 [rabbithole::install_dir(), rabbithole::data_dir()].into_iter().filter_map(exists).collect();
             if rabbithole::installed() {
-                l.push("rabbithole hizmeti".into());
+                l.push(t!("rabbithole service", "rabbithole hizmeti").into());
             }
             let env = r"SYSTEM\CurrentControlSet\Control\Session Manager\Environment";
             let path = util::reg_string(HKEY_LOCAL_MACHINE, env, "Path").unwrap_or_default().to_lowercase();
             if path.split(';').any(|p| p.trim_end_matches('\\').ends_with(r"\rabbithole")) {
-                l.push("sistem PATH'inde rabbithole".into());
+                l.push(t!("rabbithole in the system PATH", "sistem PATH'inde rabbithole").into());
             }
             l
         }
@@ -174,8 +185,8 @@ fn lyrebird_setup(install: bool) -> Result<(), String> {
     let arg = if install { lyrebird::ARG_INSTALL } else { lyrebird::ARG_UNINSTALL };
     match lyrebird::install::run_elevated(arg) {
         Ok(true) => Ok(()),
-        Ok(false) => Err("mikrofon efekti ayarlanamadı · ayrıntılar logda".into()),
-        Err(_) => Err("yönetici izni verilmedi".into()),
+        Ok(false) => Err(t!("the microphone effect could not be set up · see the log", "mikrofon efekti ayarlanamadı · ayrıntılar logda").into()),
+        Err(_) => Err(t!("administrator permission was not given", "yönetici izni verilmedi").into()),
     }
 }
 
@@ -190,11 +201,11 @@ fn rabbithole_install() -> Result<(), String> {
         .find(|l| l.trim_end().ends_with(asset))
         .and_then(|l| l.split_whitespace().next())
         .map(str::to_ascii_lowercase)
-        .ok_or("checksums.txt içinde exe yok")?;
+        .ok_or(t!("the exe is missing from checksums.txt", "checksums.txt içinde exe yok"))?;
     let exe = net::download(&format!("{base}{asset}")).map_err(|e| e.to_string())?;
     let actual = net::sha256(&exe).map_err(|e| e.to_string())?;
     if !exe.starts_with(b"MZ") || actual != expected {
-        return Err("indirilen dosya doğrulanamadı (SHA-256 tutmadı)".into());
+        return Err(t!("the download could not be verified (SHA-256 mismatch)", "indirilen dosya doğrulanamadı (SHA-256 tutmadı)").into());
     }
     let tmp = std::env::temp_dir().join("rabbithole-kurulum.exe");
     std::fs::write(&tmp, &exe).map_err(|e| e.to_string())?;

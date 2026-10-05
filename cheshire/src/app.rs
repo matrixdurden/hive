@@ -57,6 +57,7 @@ enum Mode {
 struct Entry {
     file: String,
     name: String,
+    name_tr: Option<String>,
 }
 
 /// Shadertoy iMouse: xy konum (biz fare masaüstündeyken üzerinde gezinmeyi de izliyoruz),
@@ -143,13 +144,13 @@ fn catalog() -> Vec<Entry> {
         .into_iter()
         .map(|p| {
             let file = p.file_name().unwrap_or_default().to_string_lossy().into_owned();
-            let name = std::fs::read_to_string(&p)
-                .ok()
-                .and_then(|s| format::parse(&s).ok())
+            let parsed = std::fs::read_to_string(&p).ok().and_then(|s| format::parse(&s).ok());
+            let name_tr = parsed.as_ref().and_then(|d| d.name_tr.clone());
+            let name = parsed
                 .map(|d| d.name)
                 .filter(|n| !n.is_empty())
                 .unwrap_or_else(|| p.file_stem().unwrap_or_default().to_string_lossy().into_owned());
-            Entry { file, name }
+            Entry { file, name, name_tr }
         })
         .collect()
 }
@@ -543,11 +544,15 @@ impl App {
         if !hub::active() {
             return;
         }
+        // neden: duraklama sebebi (dilden bağımsız), fps_etkin: duvar kâğıdının kendi sınırıyla.
         let mut s = format!(
-            "surum={}\ndurum={}\nduraklama={}\nkullanici_duraklatti={}\npilde={}\nfps={}\nsecili={}\nhata={}\n",
+            "surum={}\ndurum={}\nduraklama={}\nneden={}\nfps_etkin={}\nmotor={}\nkullanici_duraklatti={}\npilde={}\nfps={}\nsecili={}\nhata={}\n",
             env!("CARGO_PKG_VERSION"),
             self.status,
             paused.map_or("", |r| r.label()),
+            paused.map_or("", |r| r.key()),
+            self.fps(),
+            self.engine.is_some() as u8,
             self.policy.user_paused as u8,
             self.cfg.pause_on_battery as u8,
             self.cfg.fps,
@@ -555,18 +560,19 @@ impl App {
             self.error.as_deref().unwrap_or(""),
         );
         for e in &self.catalog {
-            s.push_str(&format!("duvar={}|{}\n", e.file, e.name));
+            s.push_str(&format!("duvar={}|{}|{}\n", e.file, e.name, e.name_tr.as_deref().unwrap_or("")));
         }
         if let Some(e) = &self.engine {
             for (i, p) in e.duvar.params.iter().enumerate() {
                 let v = e.param(i);
-                // param=sıra|ad|tür|min|max|değer|varsayılan|görünen ad|seçenekler (; ile)
+                // param=sıra|ad|tür|min|max|değer|varsayılan|görünen ad|seçenekler (; ile)|Türkçe ad
                 let label = p.label.as_deref().unwrap_or(&p.name);
+                let label_tr = p.label_tr.as_deref().unwrap_or("");
                 let line = match p.kind {
                     ParamKind::Float { min, max } => {
                         let kind = if p.toggle { "anahtar" } else if p.choices.is_empty() { "sayi" } else { "secim" };
                         format!(
-                            "param={i}|{}|{kind}|{min}|{max}|{}|{}|{label}|{}\n",
+                            "param={i}|{}|{kind}|{min}|{max}|{}|{}|{label}|{}|{label_tr}\n",
                             p.name,
                             v[0],
                             p.default[0],
@@ -574,7 +580,7 @@ impl App {
                         )
                     }
                     ParamKind::Color => format!(
-                        "param={i}|{}|renk|||{}|{}|{label}|\n",
+                        "param={i}|{}|renk|||{}|{}|{label}||{label_tr}\n",
                         p.name,
                         format::color_hex(v),
                         format::color_hex(p.default)

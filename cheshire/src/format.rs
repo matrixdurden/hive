@@ -5,9 +5,11 @@
 //! // ad: Akış
 //! // fps: 30
 //! // param hiz: 1.0 [0.1, 3]
-//! // param tema "Tema": gece [kömür, çam, gece]     (seçenek: değer sıra numarası, 0..)
-//! // param saat24 "24 saat": açık                   (aç/kapa: 1 ya da 0)
-//! // param renk "Renk": #4fc3f7
+//! // ad.tr: Akış                                       (isteğe bağlı Türkçe ad)
+//! // param hiz "Speed" "Hız": 1.0 [0.1, 3]               (görünen ad: İngilizce, isteğe bağlı Türkçe)
+//! // param tema "Theme" "Tema": night [charcoal/kömür, night/gece]   (seçenek: değer sıra no, 0..)
+//! // param saat24 "24-hour clock" "24 saat": on         (aç/kapa: on/off ya da açık/kapalı; 1 ya da 0)
+//! // param renk "Color" "Renk": #4fc3f7
 //! //--- ortak      (isteğe bağlı, her geçişin başına eklenir)
 //! //--- buf A      (isteğe bağlı, A..D)
 //! //--- image      (bölüm yoksa tüm gövde image sayılır)
@@ -31,9 +33,10 @@ pub struct Param {
     pub kind: ParamKind,
     /// Float: [değer, 0, 0, 0] · Color: [r, g, b, 1] (0..1)
     pub default: [f32; 4],
-    /// Arayüzde görünen ad (`param ad "Görünen ad": ...`); yoksa GLSL adı.
+    /// Arayüzde görünen ad (`param ad "Görünen ad" "Türkçe ad": ...`); yoksa GLSL adı.
     pub label: Option<String>,
-    /// Seçenekli parametre: değer seçeneğin sırası (Float, 0..n-1).
+    pub label_tr: Option<String>,
+    /// Seçenekli parametre: değer seçeneğin sırası (Float, 0..n-1). Öğe `english/türkçe` olabilir.
     pub choices: Vec<String>,
     /// Aç/kapa: değer 0 ya da 1 (Float).
     pub toggle: bool,
@@ -61,6 +64,8 @@ pub struct Usage {
 #[derive(Clone, Debug)]
 pub struct Duvar {
     pub name: String,
+    /// `// ad.tr:` ile verilen Türkçe ad.
+    pub name_tr: Option<String>,
     pub author: String,
     pub fps: Option<u32>,
     pub scale: f32,
@@ -97,8 +102,8 @@ fn is_ident(s: &str) -> bool {
 /// Aç/kapa değeri: `açık`/`kapalı` (ya da `evet`/`hayır`).
 fn parse_switch(s: &str) -> Option<bool> {
     match s.trim().to_lowercase().as_str() {
-        "açık" | "acik" | "evet" => Some(true),
-        "kapalı" | "kapali" | "hayır" | "hayir" => Some(false),
+        "on" | "yes" | "açık" | "acik" | "evet" => Some(true),
+        "off" | "no" | "kapalı" | "kapali" | "hayır" | "hayir" => Some(false),
         _ => None,
     }
 }
@@ -107,15 +112,28 @@ fn parse_switch(s: &str) -> Option<bool> {
 fn parse_param(spec: &str, line: u32) -> Res<Param> {
     let err = |m: &str| format!("satır {line}: {m} → `// param ad: 1.0 [0, 2]` ya da `// param ad: #rrggbb`");
     let (head, rest) = spec.split_once(':').ok_or_else(|| err("parametrede ':' yok"))?;
-    // İsteğe bağlı görünen ad: `ad "Görünen ad"`.
-    let (name, label) = match head.split_once('"') {
-        Some((n, l)) => (n.trim(), Some(l.trim_end().trim_end_matches('"').trim().to_string())),
-        None => (head.trim(), None),
+    // İsteğe bağlı görünen adlar: `ad "Görünen ad" "Türkçe ad"`.
+    let (name, labels) = match head.split_once('"') {
+        Some((n, l)) => {
+            let labels: Vec<String> =
+                l.split('"').map(str::trim).filter(|x| !x.is_empty()).map(String::from).collect();
+            (n.trim(), labels)
+        }
+        None => (head.trim(), Vec::new()),
     };
+    let (label, label_tr) = (labels.first().cloned(), labels.get(1).cloned());
     if !is_ident(name) {
         return Err(err(&format!("'{name}' geçerli bir GLSL adı değil")).into());
     }
-    let base = |kind, default| Param { name: name.into(), kind, default, label: label.clone(), choices: Vec::new(), toggle: false };
+    let base = |kind, default| Param {
+        name: name.into(),
+        kind,
+        default,
+        label: label.clone(),
+        label_tr: label_tr.clone(),
+        choices: Vec::new(),
+        toggle: false,
+    };
     let rest = rest.trim();
     if let Some(c) = parse_color(rest) {
         return Ok(base(ParamKind::Color, c));
@@ -132,7 +150,7 @@ fn parse_param(spec: &str, line: u32) -> Res<Param> {
             let v = v.trim();
             let index = items
                 .iter()
-                .position(|x| x.eq_ignore_ascii_case(v))
+                .position(|x| x.split('/').any(|part| part.trim().eq_ignore_ascii_case(v)))
                 .or_else(|| v.parse::<usize>().ok().filter(|&i| i < items.len()))
                 .ok_or_else(|| err(&format!("'{v}' seçeneklerden biri değil")))?;
             let max = (items.len() - 1) as f32;
@@ -194,6 +212,7 @@ fn identifiers(code: &str) -> HashSet<&str> {
 pub fn parse(src: &str) -> Res<Duvar> {
     let mut d = Duvar {
         name: String::new(),
+        name_tr: None,
         author: String::new(),
         fps: None,
         scale: 1.0,
@@ -266,7 +285,8 @@ pub fn parse(src: &str) -> Res<Duvar> {
                         let v = v.trim();
                         is_meta = true;
                         match k.trim() {
-                            "ad" => d.name = v.into(),
+                            "ad" | "name" => d.name = v.into(),
+                            "ad.tr" | "name.tr" => d.name_tr = Some(v.into()),
                             "yazar" => d.author = v.into(),
                             "fps" => d.fps = Some(v.parse().map_err(|_| format!("satır {line}: fps sayı olmalı"))?),
                             "olcek" | "ölçek" => {

@@ -1,41 +1,41 @@
 # lyrebird
 
-Sesi sanal mikrofon kurmadan doğrudan gerçek mikrofonun sinyaline ekleyen soundboard motoru (Windows). Discord, oyunlar, OBS, tarayıcı: mikrofonu açan her uygulama duyar.
+A soundboard engine that adds sounds straight to your real microphone's signal, without installing a virtual microphone (Windows). Discord, games, OBS, the browser: anything that listens to the microphone hears it.
 
-Arayüzü [hive](../app)'te: motor bir kütüphane olarak onun sürecinde çalışır.
+Its interface is in [hive](../README.md): the engine runs as a library inside hive's process.
 
-## Nasıl çalışır
+## How it works
 
-Mikrofonun Windows ses zincirine bir efekt (APO, `apo/`) olarak takılır; motor DLL'i içinde taşır ve bağlanırken `Program Files\lyrebird` altına yazar (yönetici ister). Sesler Media Foundation ile çözülür ve `%ProgramData%\lyrebird\bus` ortak belleğine gerçek zamanın biraz önünde yazılır; audiodg.exe içindeki APO oradan okuyup mikrofon sinyaline karıştırır. Gerçek zamanlı yolda bellek ayırma ya da kilit yok.
+It plugs into the microphone's Windows audio chain as an effect (APO, `apo/`). The engine carries the DLL inside itself and writes it under `Program Files\lyrebird` when connecting (needs administrator). Sounds are decoded with Media Foundation and written slightly ahead of real time into the `%ProgramData%\lyrebird\bus` shared memory; the APO inside audiodg.exe reads them from there and mixes them into the microphone signal. No allocation or locks on the real-time path.
 
-Zincirdeki yeri:
+Where it sits in the chain:
 
-- Sürücünün akış efekti (SFX) yoksa: SFX'te tek başına, sürücünün tüm işlemesinden sonra. Raw akışlar SFX'i atladığı için uç nokta zincirinde (EFX) bir yedek örnek de durur.
-- Sürücünün SFX'i varsa: EFX zincirinin sonu.
-- Eski tip sürücülerde EFX yuvasını alır, oradaki sürücü efektini içinde çalıştırır.
+- If the driver has no stream effect (SFX): alone in the SFX slot, after all of the driver's processing. Raw streams skip SFX, so a fallback instance also sits in the endpoint chain (EFX).
+- If the driver has an SFX: at the end of the EFX chain.
+- On legacy drivers it takes the EFX slot and runs the driver's effect inside itself.
 
-Kaldırınca her şey kurulumdan önceki hâline döner. APO'nun logu `%ProgramData%\lyrebird\apo.log`, ses listesi `%APPDATA%\lyrebird\ayarlar.txt`.
+Installation is all-or-nothing, and removal puts everything back as it was before: the effect chains, the "disable enhancements" setting, `DisableProtectedAudioDG`, the COM and APO registrations, and the Program Files and ProgramData folders. The APO's log is `%ProgramData%\lyrebird\apo.log`, the sound list `%APPDATA%\lyrebird\ayarlar.txt`.
 
-| Modül | |
+| Module | |
 |---|---|
-| `bus` | uygulama ile APO arasındaki ortak bellek (APO'ya da derlenir) |
-| `player`, `decode` | sesleri çözüp ortak belleğe yazar |
-| `monitor` | aynı sesi kulaklığa verir |
-| `hotkey` | kısayol biçimi |
-| `install` | efekti mikrofonlara takar / çıkarır |
-| `probe` | her mikrofona test sesi gönderip geri geliyor mu ölçer |
+| `bus` | shared memory between the app and the APO (also compiled into the APO) |
+| `player`, `decode` | decode sounds and write them to the shared memory |
+| `monitor` | plays the same sound to your headphones |
+| `hotkey` | shortcut format |
+| `install` | plugs the effect into the microphones and removes it, and reports leftovers |
+| `probe` | sends a test sound to every microphone and measures whether it comes back |
 
-## Derleme
+## Build
 
-WSL'den Windows için çapraz derlenir (`x86_64-pc-windows-gnu`, mingw gerekir). DLL önce derlenmeli: motor onu içine gömer.
+Cross-compiled for Windows from WSL (`x86_64-pc-windows-gnu`, needs mingw). The DLL is built first: the engine embeds it.
 
 ```sh
 cargo build --release -p lyrebird-apo
 cargo build --release -p lyrebird
 ```
 
-hive'da `make build` ikisini sırayla yapar.
+`make build` at the root of the hive repository does both.
 
-## Lisans
+## License
 
 MIT

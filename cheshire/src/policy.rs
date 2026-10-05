@@ -19,6 +19,17 @@ pub enum Reason {
 }
 
 impl Reason {
+    /// hive'a giden, dilden bağımsız ad.
+    pub fn key(self) -> &'static str {
+        match self {
+            Reason::User => "user",
+            Reason::Locked => "locked",
+            Reason::DisplayOff => "display_off",
+            Reason::Fullscreen => "fullscreen",
+            Reason::Battery => "battery",
+        }
+    }
+
     pub fn label(self) -> &'static str {
         match self {
             Reason::User => "elle duraklatıldı",

@@ -110,17 +110,17 @@ impl Page {
     fn id(self) -> &'static str {
         match self {
             Page::Tool(i) => TOOLS[i].id,
-            Page::Store => "araclar",
-            Page::Settings => "ayarlar",
+            Page::Store => "tools",
+            Page::Settings => "settings",
         }
     }
 
     fn from_id(s: &str) -> Option<Page> {
         let s = s.trim();
-        if s.eq_ignore_ascii_case("araclar") {
+        if s.eq_ignore_ascii_case("tools") || s.eq_ignore_ascii_case("araclar") {
             return Some(Page::Store);
         }
-        if s.eq_ignore_ascii_case("ayarlar") {
+        if s.eq_ignore_ascii_case("settings") || s.eq_ignore_ascii_case("ayarlar") {
             return Some(Page::Settings);
         }
         TOOLS.iter().position(|t| t.id.eq_ignore_ascii_case(s)).map(Page::Tool)
@@ -129,8 +129,8 @@ impl Page {
     fn label(self) -> &'static str {
         match self {
             Page::Tool(i) => TOOLS[i].name,
-            Page::Store => "Araçlar",
-            Page::Settings => "Ayarlar",
+            Page::Store => t!("Tools", "Araçlar"),
+            Page::Settings => t!("Settings", "Ayarlar"),
         }
     }
 }
@@ -146,6 +146,8 @@ enum Hit {
     Remove(usize),
     Open(usize),
     Autostart,
+    /// Dil: `true` Türkçe.
+    Lang(bool),
     Quit,
     RemoveHive,
 }
@@ -218,7 +220,7 @@ fn set_autostart(on: bool) {
     unsafe {
         match util::installed_copy() {
             Some(exe) if on => {
-                let data = wide(&format!("\"{exe}\" --gizli"));
+                let data = wide(&format!("\"{exe}\" --hidden"));
                 let _ = RegSetKeyValueW(
                     HKEY_CURRENT_USER,
                     RUN_KEY,
@@ -266,7 +268,7 @@ impl App {
     }
 
     fn save(&self) {
-        Config { narrow: self.narrow_pref, tab: self.page.id().into() }.save();
+        Config { narrow: self.narrow_pref, tab: self.page.id().into(), turkish: crate::i18n::turkish() }.save();
     }
 
     fn visible(&self) -> bool {
@@ -379,11 +381,24 @@ impl App {
 
     fn confirm_remove(&self, i: usize) -> bool {
         let detail = match i {
-            tools::LYREBIRD => "Mikrofonların eski ayarlarına döner, ses hizmeti bir saniyeliğine yeniden başlar. Ses listen de silinir.",
-            tools::CHESHIRE => "Duvar kâğıdı Windows'unkine döner. Eklediğin duvar kâğıtları ve ayarları da silinir.",
-            _ => "Tünel kapanır; hizmet, ağ bağdaştırıcısı ve sunucu bağlantın silinir.",
+            tools::LYREBIRD => t!(
+                "Your microphones go back to their previous settings and the audio service restarts for a second. Your sound list is deleted too.",
+                "Mikrofonların eski ayarlarına döner, ses hizmeti bir saniyeliğine yeniden başlar. Ses listen de silinir."
+            ),
+            tools::CHESHIRE => t!(
+                "Your wallpaper goes back to the Windows one. Wallpapers you added and their settings are deleted too.",
+                "Duvar kâğıdı Windows'unkine döner. Eklediğin duvar kâğıtları ve ayarları da silinir."
+            ),
+            _ => t!(
+                "The tunnel closes; the service, network adapter and your server link are deleted.",
+                "Tünel kapanır; hizmet, ağ bağdaştırıcısı ve sunucu bağlantın silinir."
+            ),
         };
-        let text = wide(&format!("{} kaldırılsın mı?\n\n{detail}\n\nBilgisayarda hiçbir izi kalmaz.", TOOLS[i].name));
+        let name = TOOLS[i].name;
+        let text = wide(&t!(
+            format!("Remove {name}?\n\n{detail}\n\nNo trace of it is left on this computer."),
+            format!("{name} kaldırılsın mı?\n\n{detail}\n\nBilgisayarda hiçbir izi kalmaz.")
+        ));
         unsafe { MessageBoxW(Some(self.hwnd), PCWSTR(text.as_ptr()), w!("hive"), MB_YESNO | MB_ICONQUESTION) == IDYES }
     }
 
@@ -498,10 +513,10 @@ impl App {
             return (button_rect_right(g, c.r - 20.0, t, tools::busy_label(i, install), false), None);
         }
         if self.installed(i) {
-            let remove = button_rect_right(g, c.r - 20.0, t, "Kaldır", false);
-            (button_rect_right(g, remove.l - 8.0, t, "Aç", false), Some(remove))
+            let remove = button_rect_right(g, c.r - 20.0, t, t!("Remove", "Kaldır"), false);
+            (button_rect_right(g, remove.l - 8.0, t, t!("Open", "Aç"), false), Some(remove))
         } else {
-            (button_rect_right(g, c.r - 20.0, t, "Kur", true), None)
+            (button_rect_right(g, c.r - 20.0, t, t!("Install", "Kur"), true), None)
         }
     }
 
@@ -513,11 +528,19 @@ impl App {
         }
         let tools: Vec<usize> = (0..TOOLS.len()).filter(|&i| self.installed(i)).collect();
         let names: Vec<&str> = tools.iter().map(|&i| TOOLS[i].name).collect();
-        let list = if names.is_empty() { String::new() } else { format!(" ve kurulu araçlar ({})", names.join(", ")) };
-        let text = wide(&format!(
-            "hive{list} kaldırılsın mı?\n\nAraçların ayarları ve verileri de silinir; bilgisayarda hiçbir iz kalmaz. \
-             lyrebird ve rabbithole için yönetici izni istenir."
-        ));
+        let list = names.join(", ");
+        let text = wide(&match (crate::i18n::turkish(), names.is_empty()) {
+            (false, true) => "Remove hive?\n\nNo trace is left on this computer.".to_string(),
+            (false, false) => format!(
+                "Remove hive and the installed tools ({list})?\n\nTheir settings and data are deleted too; no trace is \
+                 left on this computer. lyrebird and rabbithole ask for administrator permission."
+            ),
+            (true, true) => "hive kaldırılsın mı?\n\nBilgisayarda hiçbir iz kalmaz.".to_string(),
+            (true, false) => format!(
+                "hive ve kurulu araçlar ({list}) kaldırılsın mı?\n\nAraçların ayarları ve verileri de silinir; \
+                 bilgisayarda hiçbir iz kalmaz. lyrebird ve rabbithole için yönetici izni istenir."
+            ),
+        });
         let yes = unsafe {
             MessageBoxW(Some(self.hwnd), PCWSTR(text.as_ptr()), w!("hive"), MB_YESNO | MB_ICONWARNING) == IDYES
         };
@@ -558,7 +581,8 @@ impl App {
             return;
         }
         self.removing_self = false;
-        let text = wide(&format!("hive kaldırılamadı, hiçbir şey yarım bırakılmadı:\n\n{}", errors.join("\n")));
+        let head = t!("hive could not be removed; nothing was left half done:", "hive kaldırılamadı, hiçbir şey yarım bırakılmadı:");
+        let text = wide(&format!("{head}\n\n{}", errors.join("\n")));
         unsafe {
             MessageBoxW(Some(self.hwnd), PCWSTR(text.as_ptr()), w!("hive"), MB_OK | MB_ICONERROR);
         }
@@ -571,13 +595,23 @@ impl App {
     }
 
     fn quit_rect(&self, w: f32) -> Rect {
-        let r = self.settings_row(2, w);
-        button_rect_right(&self.gfx, r.r, r.cy() - 17.0, "Çık", false)
+        let r = self.settings_row(3, w);
+        button_rect_right(&self.gfx, r.r, r.cy() - 17.0, t!("Quit", "Çık"), false)
     }
 
     fn remove_hive_rect(&self, w: f32) -> Rect {
-        let r = self.settings_row(3, w);
-        button_rect_right(&self.gfx, r.r, r.cy() - 17.0, "Kaldır", false)
+        let r = self.settings_row(4, w);
+        button_rect_right(&self.gfx, r.r, r.cy() - 17.0, t!("Remove", "Kaldır"), false)
+    }
+
+    /// Dil seçici: [English, Türkçe], satırın sağına yaslı.
+    fn lang_rects(&self, w: f32) -> [Rect; 2] {
+        let r = self.settings_row(1, w);
+        let g = &self.gfx;
+        let tr_w = g.measure("Türkçe", &g.f.button) + 26.0;
+        let en_w = g.measure("English", &g.f.button) + 26.0;
+        let tr = Rect::new(r.r - 3.0 - tr_w, r.cy() - 14.0, r.r - 3.0, r.cy() + 14.0);
+        [Rect::new(tr.l - en_w, tr.t, tr.l, tr.b), tr]
     }
 
     fn hit(&self, x: f32, y: f32) -> Hit {
@@ -611,6 +645,8 @@ impl App {
             Page::Settings => {
                 if self.settings_row(0, w).contains(x, y) {
                     Hit::Autostart
+                } else if let Some(k) = self.lang_rects(w).iter().position(|r| r.contains(x, y)) {
+                    Hit::Lang(k == 1)
                 } else if self.quit_rect(w).contains(x, y) {
                     Hit::Quit
                 } else if !self.removing_self && self.remove_hive_rect(w).contains(x, y) {
@@ -653,6 +689,14 @@ impl App {
                     self.autostart = autostart();
                     self.redraw();
                 }
+            }
+            Hit::Lang(tr) => {
+                crate::i18n::set_turkish(tr);
+                self.save();
+                // Başlat menüsü açıklamaları da seçili dilde olsun.
+                let installed: Vec<bool> = (0..TOOLS.len()).map(|i| self.installed(i)).collect();
+                crate::shell::sync_shortcuts(&installed);
+                self.redraw();
             }
             Hit::Quit => unsafe {
                 let _ = DestroyWindow(self.hwnd);
@@ -739,7 +783,14 @@ impl App {
 
     fn paint_store(&self, w: f32) {
         let g = &self.gfx;
-        self.page_title(w, "Araçlar", "Kurduğun araçlar kenar çubuğunda görünür; istediğin zaman kaldırabilirsin.");
+        self.page_title(
+            w,
+            t!("Tools", "Araçlar"),
+            t!(
+                "Tools you install show up in the sidebar; remove them any time.",
+                "Kurduğun araçlar kenar çubuğunda görünür; istediğin zaman kaldırabilirsin."
+            ),
+        );
         for (i, tool) in TOOLS.iter().enumerate() {
             let c = self.card(i, w);
             let installed = self.installed(i);
@@ -753,58 +804,84 @@ impl App {
             let name_w = g.measure(tool.name, &g.f.heading);
             g.text(tool.name, &g.f.heading, Rect::new(x, c.t + 16.0, text_r, c.t + 44.0), TEXT);
             if installed {
-                status(g, x + name_w + 14.0, c.t + 31.0, GREEN, "Kurulu", MUTED, text_r);
+                status(g, x + name_w + 14.0, c.t + 31.0, GREEN, t!("Installed", "Kurulu"), MUTED, text_r);
             }
-            g.text(tool.tagline, &g.f.text, Rect::new(x, c.t + 46.0, text_r, c.t + 66.0), MUTED);
+            g.text(tool.tagline(), &g.f.text, Rect::new(x, c.t + 46.0, text_r, c.t + 66.0), MUTED);
             match &self.errors[i] {
                 Some(e) => g.text(e, &g.f.small, Rect::new(x, c.t + 68.0, text_r, c.t + 88.0), RED),
-                None => g.text(tool.note, &g.f.small, Rect::new(x, c.t + 68.0, text_r, c.t + 88.0), FAINT),
+                None => g.text(tool.note(), &g.f.small, Rect::new(x, c.t + 68.0, text_r, c.t + 88.0), FAINT),
             }
 
             let accent = Color::rgb(tool.accent);
             match (self.busy[i], installed) {
                 (Some(install), _) => button(g, primary, tools::busy_label(i, install), None, None, false),
-                (None, true) => button(g, primary, "Aç", None, Some(accent), self.hover == Hit::Open(i)),
+                (None, true) => button(g, primary, t!("Open", "Aç"), None, Some(accent), self.hover == Hit::Open(i)),
                 (None, false) => {
-                    button(g, primary, "Kur", Some(ICON_DOWNLOAD), Some(accent), self.hover == Hit::Install(i))
+                    let label = t!("Install", "Kur");
+                    button(g, primary, label, Some(ICON_DOWNLOAD), Some(accent), self.hover == Hit::Install(i))
                 }
             }
             if let Some(r) = second {
-                button(g, r, "Kaldır", None, None, self.hover == Hit::Remove(i));
+                button(g, r, t!("Remove", "Kaldır"), None, None, self.hover == Hit::Remove(i));
             }
         }
     }
 
     fn paint_settings(&self, w: f32) {
         let g = &self.gfx;
-        self.page_title(w, "Ayarlar", "");
+        self.page_title(w, t!("Settings", "Ayarlar"), "");
         let dev = util::installed_copy().is_none();
         let r = self.settings_row(0, w);
         if self.hover == Hit::Autostart && !dev {
             g.fill(Rect::new(r.l - 12.0, r.t + 4.0, r.r + 12.0, r.b - 4.0), 8.0, HOVER.alpha(0.6));
         }
-        let sub = if dev {
-            "Geliştirme kopyasında kullanılamaz"
-        } else {
-            "Oturum açınca tepside sessizce başlar; cheshire'ın duvar kâğıdı da onunla gelir"
+        let sub = match dev {
+            true => t!("Not available in a development copy", "Geliştirme kopyasında kullanılamaz"),
+            false => t!(
+                "Starts quietly in the tray when you sign in; cheshire's wallpaper comes with it",
+                "Oturum açınca tepside sessizce başlar; cheshire'ın duvar kâğıdı da onunla gelir"
+            ),
         };
-        setting_row(g, r, "Windows ile başlat", sub, 120.0);
+        setting_row(g, r, t!("Start with Windows", "Windows ile başlat"), sub, 120.0);
         toggle(g, toggle_rect(r.r, r.cy()), self.autostart, TEXT, !dev);
 
         let r = self.settings_row(1, w);
-        setting_row(g, r, "Sürüm", "hive ve içindeki lyrebird ile cheshire motorları", 120.0);
-        g.text(VERSION, &g.f.small_right, Rect::new(r.r - 120.0, r.t, r.r, r.b), MUTED);
+        setting_row(g, r, t!("Language", "Dil"), "", 200.0);
+        let [en, tr] = self.lang_rects(w);
+        g.fill(Rect::new(en.l - 3.0, en.t - 3.0, tr.r + 3.0, tr.b + 3.0), 8.0, HOVER);
+        for (rect, label, on) in [(en, "English", !crate::i18n::turkish()), (tr, "Türkçe", crate::i18n::turkish())] {
+            let hovered = self.hover == Hit::Lang(label == "Türkçe");
+            if on {
+                g.fill(rect, 6.0, SEL);
+            } else if hovered {
+                g.fill(rect, 6.0, SEL.alpha(0.6));
+            }
+            g.text(label, &g.f.button, rect, if on || hovered { TEXT } else { MUTED });
+        }
 
         let r = self.settings_row(2, w);
-        setting_row(g, r, "Kapat", "hive ve araçların motorları tamamen kapanır", 120.0);
-        button(g, self.quit_rect(w), "Çık", None, None, self.hover == Hit::Quit);
+        let sub = t!("hive and the lyrebird and cheshire engines inside it", "hive ve içindeki lyrebird ile cheshire motorları");
+        setting_row(g, r, t!("Version", "Sürüm"), sub, 120.0);
+        g.text(VERSION, &g.f.small_right, Rect::new(r.r - 120.0, r.t, r.r, r.b), MUTED);
 
         let r = self.settings_row(3, w);
+        let sub = t!("hive and the tools' engines shut down completely", "hive ve araçların motorları tamamen kapanır");
+        setting_row(g, r, t!("Quit", "Kapat"), sub, 120.0);
+        button(g, self.quit_rect(w), t!("Quit", "Çık"), None, None, self.hover == Hit::Quit);
+
+        let r = self.settings_row(4, w);
+        let title = t!("Remove hive", "hive'ı kaldır");
         if self.removing_self {
-            setting_row(g, r, "hive'ı kaldır", "Kaldırılıyor… araçlar sırayla kaldırılıp denetleniyor", 120.0);
+            let sub = t!("Removing… each tool is removed and checked in turn", "Kaldırılıyor… araçlar sırayla kaldırılıp denetleniyor");
+            setting_row(g, r, title, sub, 120.0);
         } else {
-            setting_row(g, r, "hive'ı kaldır", "Kurulu araçlarla birlikte; bilgisayarda hiçbir iz kalmaz", 120.0);
-            button(g, self.remove_hive_rect(w), "Kaldır", None, None, self.hover == Hit::RemoveHive);
+            let sub = t!(
+                "Together with the installed tools; no trace is left on this computer",
+                "Kurulu araçlarla birlikte; bilgisayarda hiçbir iz kalmaz"
+            );
+            setting_row(g, r, title, sub, 120.0);
+            let label = t!("Remove", "Kaldır");
+            button(g, self.remove_hive_rect(w), label, None, None, self.hover == Hit::RemoveHive);
         }
     }
 

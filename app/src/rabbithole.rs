@@ -208,19 +208,19 @@ fn read_status() -> Status {
 /// Modu değiştirir ya da kapatır: çalışıyorsa önce durdurur, sonra istenen modla başlatır.
 fn switch(target: Option<Mode>) -> Result<String, String> {
     let svc = Service::open(SERVICE_QUERY_STATUS | SERVICE_START | SERVICE_STOP)
-        .ok_or("rabbithole hizmeti açılamadı")?;
-    let st = svc.status().ok_or("hizmet durumu okunamadı")?;
+        .ok_or(t!("could not open the rabbithole service", "rabbithole hizmeti açılamadı"))?;
+    let st = svc.status().ok_or(t!("could not read the service status", "hizmet durumu okunamadı"))?;
     if st.dwCurrentState != SERVICE_STOPPED {
         let mut ss = SERVICE_STATUS::default();
         unsafe {
             let _ = ControlService(svc.svc, SERVICE_CONTROL_STOP, &mut ss);
         }
         if !svc.wait(SERVICE_STOPPED, Duration::from_secs(15)) {
-            return Err("tünel 15 saniyede durmadı".into());
+            return Err(t!("the tunnel did not stop within 15 seconds", "tünel 15 saniyede durmadı").into());
         }
     }
-    let Some(mode) = target else { return Ok("kapatıldı".into()) };
-    unsafe { StartServiceW(svc.svc, Some(&[mode.arg()])) }.map_err(|e| format!("başlatılamadı: {}", e.message()))?;
+    let Some(mode) = target else { return Ok(t!("turned off", "kapatıldı").into()) };
+    unsafe { StartServiceW(svc.svc, Some(&[mode.arg()])) }.map_err(|e| format!("{} {}", t!("could not start:", "başlatılamadı:"), e.message()))?;
     Ok(String::new())
 }
 
@@ -233,7 +233,7 @@ fn command(args: &[&str]) -> Command {
 }
 
 pub fn run(args: &[&str]) -> Result<String, String> {
-    let out = command(args).output().map_err(|e| format!("rabbithole çalıştırılamadı: {e}"))?;
+    let out = command(args).output().map_err(|e| format!("{} {e}", t!("could not run rabbithole:", "rabbithole çalıştırılamadı:")))?;
     let err = String::from_utf8_lossy(&out.stderr);
     if out.status.success() {
         Ok(String::new())
@@ -369,11 +369,11 @@ impl Rabbithole {
 
     fn set_mode(&mut self, target: Option<Mode>) {
         if target == Some(Mode::Server) && self.st.host.is_none() {
-            self.message = Some(("Önce sunucundan aldığın bağlantıyı ekle".into(), true));
+            self.message = Some((t!("Add the link from your server first", "Önce sunucundan aldığın bağlantıyı ekle").into(), true));
             self.redraw();
             return;
         }
-        let label = if target.is_some() { "Bağlanıyor…" } else { "Kapatılıyor…" };
+        let label = if target.is_some() { t!("Connecting…", "Bağlanıyor…") } else { t!("Turning off…", "Kapatılıyor…") };
         self.spawn(label, move || switch(target));
     }
 
@@ -381,16 +381,24 @@ impl Rabbithole {
         let text = clipboard_text(self.hwnd).unwrap_or_default();
         let link = text.trim().to_string();
         if !link.starts_with("vless://") {
-            self.message = Some(("Panoda vless:// bağlantısı yok: önce sunucundan aldığın bağlantıyı kopyala".into(), true));
+            self.message = Some((
+                t!(
+                    "No vless:// link on the clipboard: copy the link from your server first",
+                    "Panoda vless:// bağlantısı yok: önce sunucundan aldığın bağlantıyı kopyala"
+                )
+                .into(),
+                true,
+            ));
             self.redraw();
             return;
         }
-        self.spawn("Sunucu deneniyor…", move || run(&["client", &link]).map(|_| "Sunucu bağlantısı eklendi".into()));
+        let added = t!("Server link added", "Sunucu bağlantısı eklendi");
+        self.spawn(t!("Trying the server…", "Sunucu deneniyor…"), move || run(&["client", &link]).map(|_| added.into()));
     }
 
     fn toggle_autostart(&mut self) {
         let arg = if self.st.autostart { "off" } else { "on" };
-        self.spawn("Ayarlanıyor…", move || run(&["autostart", arg]));
+        self.spawn(t!("Applying…", "Ayarlanıyor…"), move || run(&["autostart", arg]));
     }
 
     fn run_doctor(&mut self) {
@@ -421,7 +429,7 @@ impl Rabbithole {
                     }
                     let _ = child.wait();
                 }
-                Err(e) => d.lock().unwrap().lines.push(format!("rabbithole çalıştırılamadı: {e}")),
+                Err(e) => d.lock().unwrap().lines.push(format!("{} {e}", t!("could not run rabbithole:", "rabbithole çalıştırılamadı:"))),
             }
             d.lock().unwrap().running = false;
             post();
@@ -479,7 +487,7 @@ impl Rabbithole {
     }
 
     fn doctor_rect(&self, g: &Gfx) -> Rect {
-        let label = if self.doctor_open() { "Kapat" } else { "Ağı test et" };
+        let label = if self.doctor_open() { t!("Close", "Kapat") } else { t!("Test network", "Ağı test et") };
         button_rect_right(g, self.head_r, HEAD_CY - 17.0, label, !self.doctor_open())
     }
 
@@ -501,7 +509,7 @@ impl Rabbithole {
 
     fn link_rect(&self, g: &Gfx) -> Rect {
         let r = self.row(0);
-        let label = if self.st.host.is_some() { "Değiştir" } else { "Panodan ekle" };
+        let label = if self.st.host.is_some() { t!("Change", "Değiştir") } else { t!("Paste link", "Panodan ekle") };
         button_rect_right(g, r.r, r.cy() - 17.0, label, false)
     }
 
@@ -546,7 +554,7 @@ impl Rabbithole {
                 y += LINE_H;
             }
             if d.running {
-                g.text("Ağ test ediliyor, 10–20 saniye sürer…", &g.f.small, Rect::new(PAD, y + 6.0, self.w - PAD, y + 28.0), FAINT);
+                g.text(t!("Testing the network, takes 10–20 seconds…", "Ağ test ediliyor, 10–20 saniye sürer…"), &g.f.small, Rect::new(PAD, y + 6.0, self.w - PAD, y + 28.0), FAINT);
             }
         });
     }
@@ -556,9 +564,9 @@ impl Rabbithole {
         let accent_live = self.st.state == Some(State::On);
         let dr = self.doctor_rect(g);
         if self.doctor_open() {
-            button(g, dr, "Kapat", None, None, self.hover == Hit::Doctor);
+            button(g, dr, t!("Close", "Kapat"), None, None, self.hover == Hit::Doctor);
         } else {
-            button(g, dr, "Ağı test et", Some(ICON_REFRESH), None, self.hover == Hit::Doctor);
+            button(g, dr, t!("Test network", "Ağı test et"), Some(ICON_REFRESH), None, self.hover == Hit::Doctor);
         }
         if self.doctor_open() {
             self.paint_doctor(g);
@@ -582,12 +590,17 @@ impl Rabbithole {
             (Some(b), _, _) => (b.to_string(), String::new()),
             (_, Some(State::On), Some(Mode::Server)) => {
                 let lat = self.latency.lock().unwrap().map(|ms| format!(" · {ms} ms")).unwrap_or_default();
-                ("Açık · sunucu üzerinden".into(), format!("{}{lat}", self.st.host.clone().unwrap_or_default()))
+                (t!("On · through the server", "Açık · sunucu üzerinden").into(), format!("{}{lat}", self.st.host.clone().unwrap_or_default()))
             }
-            (_, Some(State::On), _) => ("Açık · DPI".into(), "Sunucusuz: DNS HTTPS üzerinden, el sıkışmaları bölünüyor".into()),
-            (_, Some(State::Starting), _) => ("Bağlanıyor…".into(), "Ağ ya da sunucu bekleniyor".into()),
-            (_, Some(State::Stopping), _) => ("Kapanıyor…".into(), String::new()),
-            _ => ("Kapalı".into(), "Bilgisayar normal bağlantısını kullanıyor".into()),
+            (_, Some(State::On), _) => (
+                t!("On · DPI", "Açık · DPI").into(),
+                t!("No server: DNS over HTTPS, handshakes split", "Sunucusuz: DNS HTTPS üzerinden, el sıkışmaları bölünüyor").into(),
+            ),
+            (_, Some(State::Starting), _) => {
+                (t!("Connecting…", "Bağlanıyor…").into(), t!("Waiting for the network or the server", "Ağ ya da sunucu bekleniyor").into())
+            }
+            (_, Some(State::Stopping), _) => (t!("Turning off…", "Kapanıyor…").into(), String::new()),
+            _ => (t!("Off", "Kapalı").into(), t!("The computer uses its normal connection", "Bilgisayar normal bağlantısını kullanıyor").into()),
         };
         text_center(g, &label, &g.f.heading, w / 2.0, cy + r + 14.0, cy + r + 44.0, TEXT);
         text_center(g, &sub, &g.f.small, w / 2.0, cy + r + 44.0, cy + r + 66.0, MUTED);
@@ -600,7 +613,7 @@ impl Rabbithole {
         };
         let all = Rect::new(self.mode_rect(0).l, self.mode_rect(0).t, self.mode_rect(2).r, self.mode_rect(0).b);
         g.fill(all, 8.0, HOVER);
-        for (k, name) in ["Sunucu", "DPI", "Kapalı"].iter().enumerate() {
+        for (k, name) in [t!("Server", "Sunucu"), "DPI", t!("Off", "Kapalı")].iter().enumerate() {
             let mr = self.mode_rect(k);
             let inner = Rect::new(mr.l + 3.0, mr.t + 3.0, mr.r - 3.0, mr.b - 3.0);
             let dim = k == 0 && self.st.host.is_none();
@@ -619,7 +632,7 @@ impl Rabbithole {
         }
 
         if let Some((m, err)) = self.message.as_ref().map(|(m, e)| (m.clone(), *e)).or_else(|| {
-            self.st.error.clone().filter(|_| self.busy.is_none()).map(|e| (format!("Son deneme başarısız: {e}"), true))
+            self.st.error.clone().filter(|_| self.busy.is_none()).map(|e| (format!("{} {e}", t!("Last attempt failed:", "Son deneme başarısız:")), true))
         }) {
             let t = self.mode_rect(0).b + 8.0;
             text_center(g, &m, &g.f.small, w / 2.0, t, t + 22.0, if err { RED } else { MUTED });
@@ -630,15 +643,16 @@ impl Rabbithole {
         let sub = match (&self.st.host, &self.st.name) {
             (Some(h), Some(n)) => format!("{n} · {h}"),
             (Some(h), None) => h.clone(),
-            _ => "Yok · sunucundan aldığın vless:// bağlantısını kopyalayıp buradan ekle".into(),
+            _ => t!("None · copy the vless:// link from your server and paste it here", "Yok · sunucundan aldığın vless:// bağlantısını kopyalayıp buradan ekle").into(),
         };
-        setting_row(g, r0, "Sunucu bağlantısı", &sub, 150.0);
+        setting_row(g, r0, t!("Server link", "Sunucu bağlantısı"), &sub, 150.0);
         let lr = self.link_rect(g);
-        let label = if self.st.host.is_some() { "Değiştir" } else { "Panodan ekle" };
+        let label = if self.st.host.is_some() { t!("Change", "Değiştir") } else { t!("Paste link", "Panodan ekle") };
         button(g, lr, label, None, None, self.hover == Hit::Link);
 
         let r1 = self.row(1);
-        setting_row(g, r1, "Windows ile başlat", "Açılışta kaldığı moda döner · yönetici izni ister", 120.0);
+        let sub = t!("Comes back in the mode it was left · needs administrator", "Açılışta kaldığı moda döner · yönetici izni ister");
+        setting_row(g, r1, t!("Start with Windows", "Windows ile başlat"), sub, 120.0);
         toggle(g, toggle_rect(r1.r, r1.cy()), self.st.autostart, ACCENT, true);
     }
 

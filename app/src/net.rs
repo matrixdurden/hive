@@ -27,7 +27,7 @@ impl Drop for Handle {
 
 /// HTTPS GET: (durum kodu, gövde).
 fn get(url: &str) -> Res<(u32, Vec<u8>)> {
-    let rest = url.strip_prefix("https://").ok_or("yalnızca https")?;
+    let rest = url.strip_prefix("https://").ok_or(t!("https only", "yalnızca https"))?;
     let (host, path) = rest.split_once('/').map_or((rest, "/".to_string()), |(h, p)| (h, format!("/{p}")));
     let agent = wide(concat!("hive/", env!("CARGO_PKG_VERSION")));
     let (host, path) = (wide(host), wide(&path));
@@ -71,7 +71,7 @@ fn get(url: &str) -> Res<(u32, Vec<u8>)> {
             }
             body.extend_from_slice(&buf[..n as usize]);
             if body.len() > MAX_SIZE {
-                return Err("yanıt çok büyük".into());
+                return Err(t!("response too large", "yanıt çok büyük").into());
             }
         }
         Ok((status, body))

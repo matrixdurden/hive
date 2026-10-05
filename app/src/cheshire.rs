@@ -122,7 +122,7 @@ fn write_engine() -> Result<(), String> {
         }
         std::thread::sleep(std::time::Duration::from_millis(250));
     }
-    Err(format!("cheshire.exe yazılamadı: {last}"))
+    Err(format!("{} {last}", t!("could not write cheshire.exe:", "cheshire.exe yazılamadı:")))
 }
 
 /// Ayrı cheshire'ın kendi kayıtları (Windows ile başlama, Programlar listesi): artık hive yönetiyor.
@@ -155,7 +155,7 @@ pub fn leftovers() -> Vec<String> {
         }
     }
     if engine_window().is_some() {
-        left.push("çalışan cheshire motoru".into());
+        left.push(t!("running cheshire engine", "çalışan cheshire motoru").into());
     }
     left
 }
@@ -179,7 +179,7 @@ pub fn uninstall() -> Result<(), String> {
     let _ = std::fs::remove_dir_all(legacy_dir());
     // Explorer dosya simgelerini ve "birlikte aç" listesini unutsun.
     unsafe { SHChangeNotify(SHCNE_ASSOCCHANGED, SHCNF_IDLIST, None, None) };
-    std::fs::remove_dir_all(app_dir()).map_err(|e| format!("{} silinemedi: {e}", app_dir().display()))
+    std::fs::remove_dir_all(app_dir()).map_err(|e| format!("{} {}: {e}", t!("could not delete", "silinemedi:"), app_dir().display()))
 }
 
 
@@ -205,6 +205,7 @@ fn hex_color(s: &str) -> Option<Color> {
 #[derive(Clone, Debug)]
 enum Kind {
     Slider { min: f32, max: f32, value: f32, default: f32 },
+    /// Seçenekler `english/türkçe` biçiminde ham gelir; çizerken seçili dildeki alınır.
     Choice { options: Vec<String>, value: usize, default: usize },
     Toggle { value: bool, default: bool },
     Color { value: String, default: String },
@@ -213,7 +214,8 @@ enum Kind {
 #[derive(Clone, Debug)]
 struct Param {
     index: usize,
-    label: String,
+    /// [İngilizce, Türkçe]
+    label: [String; 2],
     kind: Kind,
 }
 
@@ -247,8 +249,30 @@ struct State {
     fps: u32,
     selected: String,
     error: String,
-    walls: Vec<(String, String)>,
+    /// (dosya, ad, Türkçe ad)
+    walls: Vec<(String, String, String)>,
     params: Vec<Param>,
+    /// Duraklama sebebi (dilden bağımsız ad) ve duvar kâğıdının kendi sınırıyla kare hızı.
+    reason: String,
+    fps_eff: u32,
+    engine: bool,
+}
+
+/// Seçili dildeki ad: Türkçesi yoksa İngilizcesi.
+fn pick<'a>(en: &'a str, tr: &'a str) -> &'a str {
+    if crate::i18n::turkish() && !tr.is_empty() { tr } else { en }
+}
+
+/// `english/türkçe` seçeneğinden seçili dildeki, ilk harfi büyük.
+fn choice_label(raw: &str) -> String {
+    let mut parts = raw.splitn(2, '/');
+    let en = parts.next().unwrap_or("").trim();
+    let tr = parts.next().unwrap_or("").trim();
+    title_case(pick(en, tr))
+}
+
+fn choice_labels(options: &[String]) -> Vec<String> {
+    options.iter().map(|o| choice_label(o)).collect()
 }
 
 /// İlk harfi büyük (Türkçe i → İ).
@@ -273,12 +297,16 @@ fn parse_state(text: &str) -> State {
             "fps" => s.fps = v.parse().unwrap_or(60),
             "secili" => s.selected = v.into(),
             "hata" => s.error = v.into(),
+            "neden" => s.reason = v.into(),
+            "fps_etkin" => s.fps_eff = v.parse().unwrap_or(0),
+            "motor" => s.engine = v == "1",
             "duvar" => {
-                if let Some((f, n)) = v.split_once('|') {
-                    s.walls.push((f.into(), n.into()));
+                let mut f = v.splitn(3, '|');
+                if let (Some(file), Some(name)) = (f.next(), f.next()) {
+                    s.walls.push((file.into(), name.into(), f.next().unwrap_or("").into()));
                 }
             }
-            // param=sıra|ad|tür|min|max|değer|varsayılan|görünen ad|seçenekler (; ile)
+            // param=sıra|ad|tür|min|max|değer|varsayılan|görünen ad|seçenekler (; ile)|Türkçe ad
             "param" => {
                 let f: Vec<&str> = v.split('|').collect();
                 if f.len() < 6 {
@@ -291,14 +319,16 @@ fn parse_state(text: &str) -> State {
                     "renk" => Kind::Color { value: f[5].into(), default: f.get(6).unwrap_or(&f[5]).to_string() },
                     "anahtar" => Kind::Toggle { value: value >= 0.5, default: default >= 0.5 },
                     "secim" => Kind::Choice {
-                        options: f.get(8).unwrap_or(&"").split(';').map(title_case).collect(),
+                        options: f.get(8).unwrap_or(&"").split(';').map(String::from).collect(),
                         value: value.round().max(0.0) as usize,
                         default: default.round().max(0.0) as usize,
                     },
                     _ => Kind::Slider { min: num(3), max: num(4), value, default },
                 };
                 let label = f.get(7).filter(|l| !l.is_empty()).unwrap_or(&f[1]);
-                s.params.push(Param { index: f[0].parse().unwrap_or(0), label: title_case(label), kind });
+                let label_tr = f.get(9).copied().unwrap_or("");
+                let label = [title_case(label), title_case(label_tr)];
+                s.params.push(Param { index: f[0].parse().unwrap_or(0), label, kind });
             }
             _ => {}
         }
@@ -431,8 +461,8 @@ impl Cheshire {
             .st
             .walls
             .iter()
-            .filter(|(f, _)| !self.thumbs.contains_key(f))
-            .filter_map(|(f, _)| Self::thumb_path(f).map(|p| (f.clone(), p)))
+            .filter(|(f, _, _)| !self.thumbs.contains_key(f))
+            .filter_map(|(f, _, _)| Self::thumb_path(f).map(|p| (f.clone(), p)))
             .collect();
         if missing.is_empty() || std::mem::replace(&mut *self.generating.lock().unwrap(), true) {
             return;
@@ -540,7 +570,7 @@ impl Cheshire {
         }
         let panel1 = Rect::new(PAD, p1_t, w - PAD, y + 8.0);
         let reset = (!self.st.params.iter().all(Param::is_default))
-            .then(|| button_rect_right(g, panel1.r - 16.0, p1_t + 12.0, "Varsayılana dön", false));
+            .then(|| button_rect_right(g, panel1.r - 16.0, p1_t + 12.0, t!("Reset to defaults", "Varsayılana dön"), false));
 
         // Motor paneli.
         y = panel1.b + GAP;
@@ -610,7 +640,7 @@ impl Cheshire {
                     let (a, b) = Self::slider_track(r);
                     if x >= a - 10.0 && x <= b + 10.0 { Hit::Slider(n) } else { Hit::None }
                 }
-                Kind::Choice { options, .. } => Self::segments(g, r, options)
+                Kind::Choice { options, .. } => Self::segments(g, r, &choice_labels(options))
                     .iter()
                     .position(|s| s.contains(x, y))
                     .map_or(Hit::None, |j| Hit::Choice(n, j)),
@@ -675,13 +705,36 @@ impl Cheshire {
         g.text(sub, &g.f.small, Rect::new(t.l, t.b - 2.0, t.r, t.b + 16.0), MUTED);
     }
 
+    /// Başlıktaki durum, seçili dilde (motor yalnızca ham bilgiyi bildirir).
+    fn status_text(&self) -> String {
+        let st = &self.st;
+        if self.starting {
+            return t!("starting…", "açılıyor…").into();
+        }
+        if !st.reason.is_empty() {
+            let why = match st.reason.as_str() {
+                "user" => t!("by you", "elle"),
+                "locked" => t!("screen locked", "ekran kilitli"),
+                "display_off" => t!("screen off", "ekran kapalı"),
+                "fullscreen" => t!("desktop hidden", "masaüstü görünmüyor"),
+                _ => t!("on battery", "pilde"),
+            };
+            return format!("{} ({why})", t!("paused", "duraklatıldı"));
+        }
+        if !st.engine {
+            return t!("no working wallpaper", "geçerli duvar kâğıdı yok").into();
+        }
+        let name = st.walls.iter().find(|w| w.0 == st.selected).map_or("", |w| pick(&w.1, &w.2));
+        format!("{name} · {} FPS", st.fps_eff)
+    }
+
     pub fn paint(&self, g: &Gfx) {
         let w = self.w;
         let st = &self.st;
-        let paused = !st.paused.is_empty();
+        let paused = !st.reason.is_empty();
 
         // Başlık: durum ve düğmeler.
-        let status_text = if self.starting { "açılıyor…".to_string() } else { st.status.clone() };
+        let status_text = self.status_text();
         let dot = if paused { MUTED } else { GREEN };
         status(g, self.head_x + 16.0, HEAD_CY, dot, &status_text, MUTED, self.pause_rect().l - 8.0);
         let pause_icon = if st.user_paused { ICON_PLAY } else { ICON_PAUSE };
@@ -692,10 +745,11 @@ impl Cheshire {
         let l = self.layout_all(g);
         g.clip(Rect::new(0.0, HEADER, w, self.h), || {
             let top = HEADER + 16.0 - self.scroll;
-            g.text("Duvar kâğıtları", &g.f.strong, Rect::new(PAD, top, w - PAD, top + 24.0), TEXT);
+            g.text(t!("Wallpapers", "Duvar kâğıtları"), &g.f.strong, Rect::new(PAD, top, w - PAD, top + 24.0), TEXT);
 
             // Galeri.
-            for (i, ((file, name), c)) in st.walls.iter().zip(&l.cards).enumerate() {
+            for (i, ((file, en, tr), c)) in st.walls.iter().zip(&l.cards).enumerate() {
+                let name = pick(en, tr);
                 if c.b < HEADER || c.t > self.h {
                     continue;
                 }
@@ -705,7 +759,7 @@ impl Cheshire {
                 g.fill(img, 8.0, HOVER);
                 match self.thumbs.get(file) {
                     Some(&id) => g.clip(img, || g.image(id, img, if hovered || selected { 1.0 } else { 0.8 })),
-                    None => g.text("önizleme hazırlanıyor…", &g.f.small_center, img, FAINT),
+                    None => g.text(t!("preparing preview…", "önizleme hazırlanıyor…"), &g.f.small_center, img, FAINT),
                 }
                 if selected {
                     g.stroke(Rect::new(img.l - 3.0, img.t - 3.0, img.r + 3.0, img.b + 3.0), 10.0, ACCENT, 2.0);
@@ -717,19 +771,19 @@ impl Cheshire {
             }
             if st.walls.is_empty() {
                 let t = top + 32.0;
-                let msg = "Duvar kâğıdı yok · bir .cheshire dosyasını buraya sürükle";
+                let msg = t!("No wallpapers · drop a .cheshire file here", "Duvar kâğıdı yok · bir .cheshire dosyasını buraya sürükle");
                 g.text(msg, &g.f.small, Rect::new(PAD, t, w - PAD, t + 24.0), FAINT);
             }
 
             // Seçili duvar kâğıdının paneli.
-            let name = st.walls.iter().find(|(f, _)| *f == st.selected).map_or("Duvar kâğıdı", |(_, n)| n.as_str());
-            Self::panel(g, l.panel1, name, "Bu duvar kâğıdının ayarları");
+            let name = st.walls.iter().find(|w| w.0 == st.selected).map_or(t!("Wallpaper", "Duvar kâğıdı"), |w| pick(&w.1, &w.2));
+            Self::panel(g, l.panel1, name, t!("Settings for this wallpaper", "Bu duvar kâğıdının ayarları"));
             if let Some(r) = l.reset {
-                button(g, r, "Varsayılana dön", None, None, self.hover == Hit::Reset);
+                button(g, r, t!("Reset to defaults", "Varsayılana dön"), None, None, self.hover == Hit::Reset);
             }
             if st.params.is_empty() {
                 let t = l.panel1.t + PANEL_HEAD;
-                let msg = "Bu duvar kâğıdının ayarı yok.";
+                let msg = t!("This wallpaper has no settings.", "Bu duvar kâğıdının ayarı yok.");
                 g.text(msg, &g.f.small, Rect::new(PAD + 20.0, t, w - PAD - 20.0, t + ROW), FAINT);
             }
             for (k, &(n, r)) in l.rows.iter().enumerate() {
@@ -737,7 +791,7 @@ impl Cheshire {
                 if k > 0 {
                     g.fill(Rect::new(r.l, r.t, r.r, r.t + 1.0), 0.0, HOVER);
                 }
-                g.text(&p.label, &g.f.text, Rect::new(r.l, r.t, r.l + LABEL_W - 16.0, r.b), TEXT);
+                g.text(pick(&p.label[0], &p.label[1]), &g.f.text, Rect::new(r.l, r.t, r.l + LABEL_W - 16.0, r.b), TEXT);
                 match &p.kind {
                     Kind::Slider { min, max, value, .. } => {
                         let (a, b) = Self::slider_track(r);
@@ -747,7 +801,7 @@ impl Cheshire {
                         g.text(&format!("{value:.2}"), &g.f.small_right, Rect::new(b + 8.0, r.t, r.r, r.b), MUTED);
                     }
                     Kind::Choice { options, value, .. } => {
-                        self.paint_segments(g, r, options, *value, |j| self.hover == Hit::Choice(n, j));
+                        self.paint_segments(g, r, &choice_labels(options), *value, |j| self.hover == Hit::Choice(n, j));
                     }
                     Kind::Toggle { value, .. } => toggle(g, toggle_rect(r.r, r.cy()), *value, ACCENT, true),
                     Kind::Color { value, default } => {
@@ -766,14 +820,14 @@ impl Cheshire {
             }
 
             // Motor paneli.
-            Self::panel(g, l.panel2, "Motor", "Bütün duvar kâğıtları için");
+            Self::panel(g, l.panel2, t!("Engine", "Motor"), t!("For every wallpaper", "Bütün duvar kâğıtları için"));
             let r = l.fps_row;
-            g.text("Kare hızı", &g.f.text, Rect::new(r.l, r.t, r.l + LABEL_W, r.b), TEXT);
+            g.text(t!("Frame rate", "Kare hızı"), &g.f.text, Rect::new(r.l, r.t, r.l + LABEL_W, r.b), TEXT);
             let sel = FPS.iter().position(|&f| f == st.fps).unwrap_or(usize::MAX);
             self.paint_segments(g, r, &Self::fps_labels(), sel, |k| self.hover == Hit::Fps(k));
             let r = l.battery_row;
             g.fill(Rect::new(r.l, r.t, r.r, r.t + 1.0), 0.0, HOVER);
-            g.text("Pildeyken duraklat", &g.f.text, Rect::new(r.l, r.t, r.l + LABEL_W, r.b), TEXT);
+            g.text(t!("Pause on battery", "Pildeyken duraklat"), &g.f.text, Rect::new(r.l, r.t, r.l + LABEL_W, r.b), TEXT);
             toggle(g, toggle_rect(r.r, r.cy()), st.battery, ACCENT, true);
 
             if !st.error.is_empty() {
@@ -838,7 +892,7 @@ impl ToolPage for Cheshire {
             Hit::Folder => self.cmd("klasor"),
             Hit::Add => self.modal = Some(Modal::AddFiles),
             Hit::Wall(i) => {
-                if let Some((file, _)) = self.st.walls.get(i) {
+                if let Some((file, _, _)) = self.st.walls.get(i) {
                     self.st.selected = file.clone();
                     self.cmd(&format!("duvar {file}"));
                     self.redraw();
@@ -895,9 +949,9 @@ impl ToolPage for Cheshire {
 
     fn tip(&self) -> Option<(Rect, String)> {
         let (r, t) = match self.hover {
-            Hit::Pause => (self.pause_rect(), if self.st.user_paused { "Devam et" } else { "Duraklat" }),
-            Hit::Folder => (self.folder_rect(), "Duvar kâğıdı klasörü"),
-            Hit::Add => (self.add_rect(), "Duvar kâğıdı ekle"),
+            Hit::Pause => (self.pause_rect(), if self.st.user_paused { t!("Resume", "Devam et") } else { t!("Pause", "Duraklat") }),
+            Hit::Folder => (self.folder_rect(), t!("Wallpaper folder", "Duvar kâğıdı klasörü")),
+            Hit::Add => (self.add_rect(), t!("Add wallpapers", "Duvar kâğıdı ekle")),
             _ => return None,
         };
         Some((r, t.into()))
@@ -923,8 +977,8 @@ fn add_dialog(hwnd: HWND) -> Res<Vec<PathBuf>> {
     unsafe {
         let dlg: IFileOpenDialog = CoCreateInstance(&FileOpenDialog, None, CLSCTX_INPROC_SERVER)?;
         dlg.SetOptions(dlg.GetOptions()? | FOS_ALLOWMULTISELECT | FOS_FILEMUSTEXIST | FOS_FORCEFILESYSTEM)?;
-        dlg.SetTitle(w!("Duvar kâğıdı ekle"))?;
-        dlg.SetFileTypes(&[COMDLG_FILTERSPEC { pszName: w!("cheshire duvar kâğıdı"), pszSpec: w!("*.cheshire") }])?;
+        dlg.SetTitle(t!(w!("Add wallpapers"), w!("Duvar kâğıdı ekle")))?;
+        dlg.SetFileTypes(&[COMDLG_FILTERSPEC { pszName: t!(w!("cheshire wallpaper"), w!("cheshire duvar kâğıdı")), pszSpec: w!("*.cheshire") }])?;
         if dlg.Show(Some(hwnd)).is_err() {
             return Ok(Vec::new());
         }

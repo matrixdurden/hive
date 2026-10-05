@@ -1,73 +1,77 @@
 <p align="center">
-  <img src="docs/banner.png" alt="hive: Windows araçların tek yerde" width="100%">
+  <img src="docs/banner.png" alt="hive: your Windows tools in one place" width="100%">
 </p>
 
 <p align="center">
-  <a href="https://github.com/matrixdurden/hive/releases/latest"><img src="https://img.shields.io/github/v/release/matrixdurden/hive?style=flat-square&label=sürüm&color=fbbf24&labelColor=16161a" alt="Son sürüm"></a>
-  <img src="https://img.shields.io/badge/Windows-10%20%C2%B7%2011-f472b6?style=flat-square&labelColor=16161a" alt="Windows 10 ve 11">
+  <a href="https://github.com/matrixdurden/hive/releases/latest"><img src="https://img.shields.io/github/v/release/matrixdurden/hive?style=flat-square&label=release&color=fbbf24&labelColor=16161a" alt="Latest release"></a>
+  <img src="https://img.shields.io/badge/Windows-10%20%C2%B7%2011-f472b6?style=flat-square&labelColor=16161a" alt="Windows 10 and 11">
   <img src="https://img.shields.io/badge/Rust-2024-a78bfa?style=flat-square&labelColor=16161a" alt="Rust 2024">
-  <a href="LICENSE"><img src="https://img.shields.io/badge/lisans-MIT-e8e8ea?style=flat-square&labelColor=16161a" alt="Lisans: MIT"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-e8e8ea?style=flat-square&labelColor=16161a" alt="License: MIT"></a>
 </p>
+
+<p align="center"><b>English</b> · <a href="README.tr.md">Türkçe</a></p>
 
 <br>
 
-## Kurulum
+## Install
 
-PowerShell'e yapıştır:
+Paste into PowerShell:
 
 ```powershell
 irm https://github.com/matrixdurden/hive/raw/main/install.ps1 | iex
 ```
 
-Yönetici izni gerekmez. Aynı komut hive'ı günceller.
+No administrator needed. The same command updates hive.
 
-## Araçlar
+## Tools
 
-hive bir başlatıcı: araçları **Araçlar** sayfasından eklenti gibi kurarsın, kurduğun her araç kenar çubuğunda ve Başlat menüsünde kendi adıyla görünür. "lyrebird" diye aratınca hive o araçta açılır.
+hive is a launcher: install tools from its **Tools** page like plugins. Every tool you install shows up in the sidebar and in the Start menu under its own name; search for "lyrebird" and hive opens on it.
 
 | | | |
 |:---:|---|---|
-| <img src="app/assets/araclar/lyrebird-64.png" width="40"> | **lyrebird** | Sesi doğrudan mikrofona veren soundboard. Sanal mikrofon kurmaz; Discord, oyunlar, OBS, mikrofonu dinleyen her uygulama duyar. |
-| <img src="app/assets/araclar/cheshire-64.png" width="40"> | **cheshire** | Masaüstü ikonlarının arkasında GPU ile çizilen canlı duvar kâğıtları. Tam ekranda ve pilde kendiliğinden durur. |
-| <img src="app/assets/araclar/rabbithole-64.png" width="40"> | **rabbithole** | Bütün bilgisayarı ağ engellerinin ötesine geçiren tünel: kendi sunucun üzerinden ya da sunucusuz DPI modunda. [Ayrı depo](https://github.com/matrixdurden/rabbithole). |
+| <img src="app/assets/araclar/lyrebird-64.png" width="40"> | **lyrebird** | A soundboard that plays straight into your microphone. No virtual microphone: Discord, games, OBS, anything that listens to the mic hears it. |
+| <img src="app/assets/araclar/cheshire-64.png" width="40"> | **cheshire** | Live wallpapers drawn by your GPU behind the desktop icons. Pauses on its own in fullscreen and on battery. |
+| <img src="app/assets/araclar/rabbithole-64.png" width="40"> | **rabbithole** | Tunnels your whole computer past network blocks: through your own server, or serverless in DPI mode. [Separate repository](https://github.com/matrixdurden/rabbithole). |
 
 <table>
   <tr>
-    <td width="50%"><img src="docs/araclar.png" alt="Araçlar sayfası"></td>
-    <td width="50%"><img src="docs/cheshire.png" alt="cheshire sayfası"></td>
+    <td width="50%"><img src="docs/tools.png" alt="Tools page"></td>
+    <td width="50%"><img src="docs/cheshire.png" alt="cheshire page"></td>
   </tr>
   <tr>
-    <td align="center"><sub>Araçlar: kur, aç, kaldır</sub></td>
-    <td align="center"><sub>cheshire: duvar kâğıtları ve ayarları</sub></td>
+    <td align="center"><sub>Tools: install, open, remove</sub></td>
+    <td align="center"><sub>cheshire: wallpapers and their settings</sub></td>
   </tr>
 </table>
 
-## İz bırakmaz
+hive speaks English and Turkish; it follows the Windows display language and can be switched in Settings.
 
-Bir aracı kaldırınca kurulurken yaptığı her şey geri alınır: dosyalar, kayıt defteri, mikrofon ayarları, hizmetler, PATH, kısayollar. Kaldırmanın sonunda hive bunları tek tek denetler; bir şey kalmışsa kaldırma başarılı sayılmaz ve neyin kaldığını söyler.
+## No traces
 
-hive'ı kaldırmak (Ayarlar'dan ya da Windows'un **Uygulamalar** listesinden) önce kurulu bütün araçları aynı şekilde kaldırır, sonra kendini.
+Removing a tool undoes everything it did when it was installed: files, registry, microphone settings, services, PATH, shortcuts. At the end hive checks for each of them; if anything is left, the removal does not count as done and hive tells you what remains.
+
+Removing hive (from its Settings or from Windows' **Apps** list) first removes every installed tool the same way, then itself.
 
 ```powershell
-hive --kalinti    # kurulu olmayan araçlardan kalan iz var mı
+hive --leftovers    # is anything left from tools that are not installed?
 ```
 
-## Derleme
+## Build
 
-WSL'den Windows için çapraz derlenir (`x86_64-pc-windows-gnu`, mingw gerekir):
+Cross-compiled for Windows from WSL (`x86_64-pc-windows-gnu`, needs mingw):
 
 ```sh
 make build      # target/x86_64-pc-windows-gnu/release/hive.exe
-make install    # %LOCALAPPDATA%\Programs\hive altına kur ve başlat
-make release    # app/Cargo.toml'daki sürümle GitHub'da yayın
+make install    # install under %LOCALAPPDATA%\Programs\hive and start it
+make release    # GitHub release with the version in app/Cargo.toml
 ```
 
-| Klasör | |
+| Folder | |
 |---|---|
-| [`app/`](app) | hive.exe: pencere, araç sayfaları, kurulum ve kaldırma |
-| [`lyrebird/`](lyrebird) | lyrebird motoru ve mikrofon efekti (`apo/`) |
-| [`cheshire/`](cheshire) | cheshire motoru ve [`.cheshire` formatı](cheshire/README.md#cheshire-formatı) |
+| [`app/`](app) | hive.exe: window, tool pages, install and removal |
+| [`lyrebird/`](lyrebird) | lyrebird engine and its microphone effect (`apo/`) |
+| [`cheshire/`](cheshire) | cheshire engine and the [`.cheshire` format](cheshire/README.md#the-cheshire-format) |
 
-## Lisans
+## License
 
 MIT

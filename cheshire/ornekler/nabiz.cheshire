@@ -1,9 +1,10 @@
 // @cheshire
-// ad: Nabız
+// ad: Pulse
+// ad.tr: Nabız
 // yazar: Claude
 // fps: 60
-// param renk "Renk": #ff6ec7
-// param hassasiyet "Hassasiyet": 1.0 [0.3, 3]
+// param renk "Color" "Renk": #ff6ec7
+// param hassasiyet "Sensitivity" "Hassasiyet": 1.0 [0.3, 3]
 //
 // Çalan müziğe tepki veren halka. Frekanslar halkanın etrafına simetrik dizilir
 // (üstte bas, altta tiz); bas vuruşları merkezi parlatır, alt kenarda dalga biçimi akar.

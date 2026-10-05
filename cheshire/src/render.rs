@@ -436,7 +436,12 @@ pub fn presets(p: &Param) -> Vec<(String, [f32; 4])> {
         return vec![("kapalı".into(), [0.0; 4]), ("açık".into(), [1.0, 0.0, 0.0, 0.0])];
     }
     if !p.choices.is_empty() {
-        return p.choices.iter().enumerate().map(|(i, c)| (c.clone(), [i as f32, 0.0, 0.0, 0.0])).collect();
+        return p
+            .choices
+            .iter()
+            .enumerate()
+            .map(|(i, c)| (c.split('/').next().unwrap_or(c).trim().to_string(), [i as f32, 0.0, 0.0, 0.0]))
+            .collect();
     }
     let (kind, default) = (&p.kind, p.default);
     match kind {

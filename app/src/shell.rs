@@ -74,7 +74,7 @@ pub fn tool_leftovers(i: usize) -> Vec<String> {
 pub fn sync_shortcuts(installed: &[bool]) {
     let (Some(exe), Some(dir)) = (util::installed_copy(), programs_dir()) else { return };
     let _ = std::fs::remove_file(dir.join("matrixtools.lnk")); // eski adı
-    if let Err(e) = create(&dir.join("hive.lnk"), &exe, "", None, "matrixdurden'in Windows araçları") {
+    if let Err(e) = create(&dir.join("hive.lnk"), &exe, "", None, t!("Your Windows tools in one place", "Windows araçların tek yerde")) {
         log!("Başlat menüsü kısayolu yazılamadı: {e}");
         return;
     }
@@ -91,7 +91,7 @@ pub fn sync_shortcuts(installed: &[bool]) {
         if write_ico(png, size, &ico).is_err() {
             continue;
         }
-        if let Err(e) = create(&link, &exe, &format!("--sekme {}", tool.id), Some(&ico), tool.tagline) {
+        if let Err(e) = create(&link, &exe, &format!("--tab {}", tool.id), Some(&ico), tool.tagline()) {
             log!("{} kısayolu yazılamadı: {e}", tool.name);
         }
     }
@@ -128,7 +128,7 @@ pub fn register_app() {
         set_str(key, w!("Publisher"), "matrixdurden");
         set_str(key, w!("DisplayIcon"), &format!("\"{exe}\",0"));
         set_str(key, w!("InstallLocation"), &util::data_dir().display().to_string());
-        set_str(key, w!("UninstallString"), &format!("\"{exe}\" --kaldir"));
+        set_str(key, w!("UninstallString"), &format!("\"{exe}\" --uninstall"));
         set_dword(key, w!("EstimatedSize"), size_kb);
         set_dword(key, w!("NoModify"), 1);
         set_dword(key, w!("NoRepair"), 1);
