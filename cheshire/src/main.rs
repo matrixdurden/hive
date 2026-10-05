@@ -9,6 +9,7 @@ mod desktop;
 mod format;
 mod gpu;
 mod headless;
+mod hub;
 mod log;
 mod png;
 mod policy;
@@ -41,7 +42,8 @@ kullanım:
         [--zaman 5] [--fare 0.5,0.5] [--basili] [--boyut 1280x720] [--param ad=deger]...
   cheshire --agac                                 masaüstü pencere ağacını logla
   cheshire --kur                                  bu exe'yi kur (geliştirme kopyası için)
-  cheshire --kaldir                               kaldır: kayıtlar, kısayol ve kurulum klasörü";
+  cheshire --kaldir                               kaldır: kayıtlar, kısayol ve kurulum klasörü
+  cheshire --hub <pencere>                        hive modu: tepsi simgesi yok, komutlar hive'dan";
 
 fn flag<'a>(args: &'a [String], name: &str) -> Option<&'a str> {
     args.iter().position(|a| a == name).and_then(|i| args.get(i + 1)).map(String::as_str)
@@ -133,6 +135,8 @@ struct Launch<'a> {
     installed: bool,
     updated: bool,
     after: Option<u32>,
+    /// hive penceresi (`--hub`).
+    hub: Option<isize>,
 }
 
 fn launch_args(args: &[String]) -> Launch<'_> {
@@ -143,6 +147,7 @@ fn launch_args(args: &[String]) -> Launch<'_> {
             "--kuruldu" => l.installed = true,
             "--guncellendi" => l.updated = true,
             "--sonra" => l.after = it.next().and_then(|p| p.parse().ok()),
+            "--hub" => l.hub = it.next().and_then(|p| p.parse().ok()),
             a if !a.starts_with("--") && l.file.is_none() => l.file = Some(a),
             _ => {}
         }
@@ -152,8 +157,8 @@ fn launch_args(args: &[String]) -> Launch<'_> {
 
 fn desktop(args: &[String]) -> Res<()> {
     let launch = launch_args(args);
-    // İndirilen exe: kendini kur, kurulu kopyayı başlat, çık.
-    if !shell::installed_copy() && !shell::dev_copy() {
+    // İndirilen exe: kendini kur, kurulu kopyayı başlat, çık. hive kendi kurar.
+    if launch.hub.is_none() && !shell::installed_copy() && !shell::dev_copy() {
         return setup::install(launch.file);
     }
     if shell::installed_copy() {
@@ -168,7 +173,13 @@ fn desktop(args: &[String]) -> Res<()> {
         if let Some(name) = &installed {
             tray::send_to_running(name);
         }
+        if let Some(h) = launch.hub {
+            tray::send_command(&format!("hub {h}"));
+        }
         return Ok(());
+    }
+    if let Some(h) = launch.hub {
+        hub::set(h);
     }
     if let Some(name) = installed {
         let mut cfg = config::Config::load();
@@ -193,16 +204,17 @@ fn main() {
     if let Some(pid) = launch_args(&args).after {
         setup::wait_for(pid);
     }
-    log::init();
     if args.get(1).is_some_and(|a| a.starts_with("--") || a == "-h") {
         // GUI alt sisteminde stdout yoksa çağıran konsola bağlan (cmd/PowerShell).
         unsafe {
             let _ = AttachConsole(ATTACH_PARENT_PROCESS);
         }
     }
+    // Araç komutları (önizleme vb.) çalışan motorun logunu sıfırlamasın.
     if let Some(code) = tool(&args) {
         std::process::exit(code);
     }
+    log::init();
     if let Err(e) = desktop(&args) {
         log!("hata: {e}");
         util::error_box(&format!("cheshire başlatılamadı:\n\n{e}"));

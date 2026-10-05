@@ -151,7 +151,7 @@ pub fn validate(path: &Path) -> Res<bool> {
         .filter_map(|(n, b)| b.as_ref().map(|_| *n))
         .collect();
     let u = &d.usage;
-    let used: Vec<&str> = [(u.time, "zaman"), (u.mouse, "fare"), (u.audio, "ses"), (u.clock, "saat"), (u.battery, "pil")]
+    let used: Vec<&str> = [(u.time, "zaman"), (u.mouse, "fare"), (u.audio, "ses"), (u.clock, "saat"), (u.battery, "pil"), (u.feedback, "geri besleme")]
         .iter()
         .filter_map(|(on, n)| on.then_some(*n))
         .collect();
@@ -295,7 +295,7 @@ pub fn preview(path: &Path, out: &Path, opts: &PreviewOptions) -> Res<bool> {
     let tex = target(&gpu, opts.size);
     let view = tex.create_view(&Default::default());
     let last = (opts.time / STEP).round() as u32;
-    let first = if engine.duvar.has_buffers() { 0 } else { last };
+    let first = if engine.duvar.usage.feedback { 0 } else { last };
     for f in first..=last {
         let mut input = inputs(f, mouse);
         input.time = f as f32 * STEP;

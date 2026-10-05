@@ -2,8 +2,8 @@
 // ad: Nabız
 // yazar: Claude
 // fps: 60
-// param renk: #ff6ec7
-// param hassasiyet: 1.0 [0.3, 3]
+// param renk "Renk": #ff6ec7
+// param hassasiyet "Hassasiyet": 1.0 [0.3, 3]
 //
 // Çalan müziğe tepki veren halka. Frekanslar halkanın etrafına simetrik dizilir
 // (üstte bas, altta tiz); bas vuruşları merkezi parlatır, alt kenarda dalga biçimi akar.

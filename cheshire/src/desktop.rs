@@ -7,9 +7,15 @@
 //! İki düzen var:
 //! - Eski (Windows 10 / 11 23H2 ve öncesi): DefView üst seviye bir WorkerW'nin içine taşınır,
 //!   hemen arkasında ikinci bir üst seviye WorkerW oluşur → onun çocuğu oluruz.
-//! - Yeni (Windows 11 24H2+): DefView ve WorkerW, Progman'ın çocuklarıdır.
+//! - Yükseltilmiş (Windows 11 24H2+): Progman `WS_EX_NOREDIRECTIONBITMAP` ile yaratılır (GDI
+//!   içeriği yoktur), DefView onun katmanlı bir çocuğudur ve yalnızca ikonlarla metni çizer;
+//!   duvar kâğıdını DefView'ın altındaki `WorkerW` çocuğu çizer. Microsoft'un tavsiyesi (Lively'nin
+//!   alıntısıyla): kendi `WS_EX_LAYERED`, alfa 255 çocuk penceremizi Progman'a, DefView'ın altına
+//!   ve WorkerW'nin üstüne koymak. Explorer'ın WorkerW'sinin içine girmek, masaüstünün üstüne
+//!   çizdiği seçim dikdörtgeni gibi şeyleri örter. Çizim penceresi bu katmanlı tutucunun içinde
+//!   sıradan bir çocuktur (takas zinciri katmanlı pencereyi sevmez).
 
-use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, RECT, WPARAM};
+use windows::Win32::Foundation::{COLORREF, HWND, LPARAM, LRESULT, RECT, WPARAM};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::WindowsAndMessaging::*;
 use windows::core::{BOOL, PCWSTR, w};
@@ -21,9 +27,9 @@ use crate::util::Res;
 pub enum HostKind {
     /// Eski düzen: üst seviye WorkerW'nin çocuğu.
     Legacy,
-    /// 24H2+: Progman içindeki WorkerW'nin çocuğu.
+    /// 24H2+: Progman içindeki WorkerW'nin çocuğu (Explorer'ın duvar kâğıdı katmanı; `yerlesim = worker`).
     Worker,
-    /// 24H2+: Progman'ın çocuğu, z-sırasında DefView'ın hemen altında.
+    /// 24H2+: Progman'ın katmanlı çocuğu, z-sırasında DefView'ın hemen altında (varsayılan).
     Progman,
 }
 
@@ -37,6 +43,18 @@ pub struct WallpaperWindow {
     pub hwnd: HWND,
     pub width: u32,
     pub height: u32,
+    /// Yükseltilmiş masaüstünde çizim penceresini saran katmanlı tutucu.
+    holder: Option<HWND>,
+    raised: bool,
+}
+
+/// Yükseltilmiş masaüstü: Progman'ın GDI yüzeyi yok, DefView katmanlı.
+pub fn raised_desktop() -> bool {
+    unsafe {
+        FindWindowW(w!("Progman"), PCWSTR::null())
+            .map(|p| GetWindowLongPtrW(p, GWL_EXSTYLE) as u32 & WS_EX_NOREDIRECTIONBITMAP.0 != 0)
+            .unwrap_or(false)
+    }
 }
 
 unsafe fn find(parent: Option<HWND>, after: Option<HWND>, class: PCWSTR) -> Option<HWND> {
@@ -76,8 +94,8 @@ fn find_host(pref: &str) -> Res<Host> {
         let defview = find(Some(progman), None, w!("SHELLDLL_DefView"));
         let worker = find(Some(progman), None, w!("WorkerW"));
         match (pref, worker) {
-            ("progman", _) | (_, None) => Ok(Host { kind: HostKind::Progman, parent: progman, below: defview }),
-            (_, Some(worker)) => Ok(Host { kind: HostKind::Worker, parent: worker, below: None }),
+            ("worker", Some(worker)) => Ok(Host { kind: HostKind::Worker, parent: worker, below: None }),
+            _ => Ok(Host { kind: HostKind::Progman, parent: progman, below: defview }),
         }
     }
 }
@@ -123,27 +141,39 @@ impl WallpaperWindow {
             };
             RegisterClassW(&wc); // İkinci kez kayıt başarısız olur, sorun değil.
 
-            let hwnd = CreateWindowExW(
-                WS_EX_NOACTIVATE,
-                class,
-                w!("cheshire"),
-                WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS | WS_CLIPCHILDREN | WS_DISABLED,
-                0,
-                0,
-                width as i32,
-                height as i32,
-                Some(host.parent),
-                None,
-                Some(hinstance.into()),
-                None,
-            )?;
+            let style = WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS | WS_CLIPCHILDREN | WS_DISABLED;
+            let make = |ex: WINDOW_EX_STYLE, name: PCWSTR, parent: HWND| {
+                CreateWindowExW(ex, class, name, style, 0, 0, width as i32, height as i32, Some(parent), None, Some(hinstance.into()), None)
+            };
+
+            // Yükseltilmiş masaüstü: önce katmanlı, mat tutucu; çizim penceresi onun içinde.
+            let mut holder = None;
+            if host.kind == HostKind::Progman {
+                let h = make(WS_EX_NOACTIVATE | WS_EX_LAYERED, w!("cheshire-katman"), host.parent)?;
+                let layered = GetWindowLongPtrW(h, GWL_EXSTYLE) as u32 & WS_EX_LAYERED.0 != 0;
+                if layered && SetLayeredWindowAttributes(h, COLORREF(0), 255, LWA_ALPHA).is_ok() {
+                    holder = Some(h);
+                } else {
+                    // Manifest Windows 8+ demiyorsa Windows katmanlı çocuk pencere yapmaz.
+                    log!("katmanlı tutucu yapılamadı; çizim penceresi doğrudan Progman'a giriyor");
+                    let _ = DestroyWindow(h);
+                }
+            }
+
+            let parent = holder.unwrap_or(host.parent);
+            let hwnd = make(WS_EX_NOACTIVATE, w!("cheshire"), parent)?;
 
             if let Some(defview) = host.below {
                 // hWndInsertAfter = DefView → bizi ikon katmanının hemen altına koyar.
-                SetWindowPos(hwnd, Some(defview), 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE)?;
+                let top = holder.unwrap_or(hwnd);
+                SetWindowPos(top, Some(defview), 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE)?;
+                // Explorer'ın duvar kâğıdı katmanı en altta kalsın.
+                if let Some(worker) = find(Some(host.parent), None, w!("WorkerW")) {
+                    let _ = SetWindowPos(worker, Some(HWND_BOTTOM), 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+                }
             }
 
-            Ok(Self { hwnd, width, height })
+            Ok(Self { hwnd, width, height, holder, raised: raised_desktop() })
         }
     }
 
@@ -154,13 +184,16 @@ impl WallpaperWindow {
 
     /// Monitör düzeni değiştiyse yeni boyutu döndürür.
     pub fn refresh_size(&mut self) -> Option<(u32, u32)> {
-        let parent = unsafe { GetParent(self.hwnd).ok()? };
+        let outer = self.holder.unwrap_or(self.hwnd);
+        let parent = unsafe { GetParent(outer).ok()? };
         let (w, h) = client_size(parent);
         if (w, h) == (self.width, self.height) {
             return None;
         }
         unsafe {
-            let _ = SetWindowPos(self.hwnd, None, 0, 0, w as i32, h as i32, SWP_NOZORDER | SWP_NOACTIVATE);
+            for win in [Some(outer), self.holder.map(|_| self.hwnd)].into_iter().flatten() {
+                let _ = SetWindowPos(win, None, 0, 0, w as i32, h as i32, SWP_NOZORDER | SWP_NOACTIVATE);
+            }
         }
         (self.width, self.height) = (w, h);
         Some((w, h))
@@ -182,13 +215,23 @@ impl Drop for WallpaperWindow {
     fn drop(&mut self) {
         unsafe {
             let _ = DestroyWindow(self.hwnd);
+            if let Some(h) = self.holder {
+                let _ = DestroyWindow(h);
+            }
         }
-        restore_static_wallpaper();
+        if !self.raised {
+            restore_static_wallpaper();
+        }
     }
 }
 
 /// Mevcut sabit duvar kâğıdını yeniden uygulayarak Explorer'ı masaüstünü tazelemeye zorlar.
+/// Yükseltilmiş masaüstünde çağrılmaz: orada bu çağrı Explorer'ın WorkerW'sini yok edip yeniden
+/// yaratır ve çalışan başka bir kopyanın penceresini de götürür; duvar kâğıdını zaten WorkerW çizer.
 pub fn restore_static_wallpaper() {
+    if raised_desktop() {
+        return;
+    }
     let mut buf = [0u16; 1024];
     unsafe {
         let _ = SystemParametersInfoW(

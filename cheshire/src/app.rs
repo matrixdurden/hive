@@ -1,7 +1,7 @@
 //! Masaüstü motoru: tek iş parçacığı, tek bekleme noktası.
 //!
 //! Ne zaman çizileceği shader'ın kullandığı girdilere göre seçilir:
-//!   Sürekli  — iTime / iAudio / buffer var: fps sınırında
+//!   Sürekli  — iTime / iAudio / iChannel okuyan buffer var: fps sınırında
 //!   Fare     — yalnızca iMouse: imleç değişince
 //!   Saat     — yalnızca iDate / iLocalTime / iBattery: saniyede bir
 //!   Durağan  — hiçbiri: yalnızca boyut ya da parametre değişince
@@ -26,7 +26,7 @@ use crate::render::{self, Engine, Inputs};
 use crate::timer::{DirWatch, Waiter};
 use crate::tray::{self, Event, Item, Tray};
 use crate::util::{self, Res, wide};
-use crate::{log, shell, update};
+use crate::{hub, log, shell, update};
 
 /// İlk açılışta `duvarlar` klasörü boşsa kopyalanan örnekler.
 pub const BUNDLED: &[(&str, &str)] = &[
@@ -108,8 +108,8 @@ fn over_desktop(pt: POINT) -> bool {
 }
 
 fn mode_of(e: &Engine) -> Mode {
-    let (d, u) = (&e.duvar, &e.duvar.usage);
-    if u.time || u.audio || d.has_buffers() {
+    let u = &e.duvar.usage;
+    if u.time || u.audio || u.feedback {
         Mode::Continuous
     } else if u.mouse {
         Mode::Mouse
@@ -189,6 +189,10 @@ pub struct App {
     next_frame: Instant,
     dirty: bool,
     status: String,
+    /// Son yükleme hatası (hive'a bildirilir).
+    error: Option<String>,
+    /// En son yayımlanan durum: değişmediyse dosya yeniden yazılmaz.
+    published: String,
     quit: bool,
 }
 
@@ -196,11 +200,14 @@ impl App {
     pub fn new() -> Res<Self> {
         let cfg = Config::load();
         ensure_wallpapers();
-        shell::register();
+        // hive modunda kayıtlar ve güncelleme hive'da.
+        if !hub::active() {
+            shell::register();
+        }
         let tray = Tray::new()?;
         // Geliştirme kopyası güncellenmez: kurulu olmayan exe'nin üstüne yazmak anlamsız.
         update::ENABLED.store(cfg.auto_update, std::sync::atomic::Ordering::Relaxed);
-        if shell::installed_copy() {
+        if shell::installed_copy() && !hub::active() {
             update::spawn(tray.update_waker());
         }
         let window = WallpaperWindow::attach(&cfg.host)?;
@@ -227,6 +234,8 @@ impl App {
             next_frame: Instant::now(),
             dirty: true,
             status: String::new(),
+            error: None,
+            published: String::new(),
             quit: false,
             cfg,
         };
@@ -285,11 +294,13 @@ impl App {
                 self.stamp = modified(&path);
                 self.frame = 0;
                 self.dirty = true;
+                self.error = None;
                 Ok(())
             }
             Err(e) => {
                 log!("{file} yüklenemedi:\n{e}");
                 self.tray.notify(&format!("{file} yüklenemedi"), &first_line(&e));
+                self.error = Some(format!("{file}: {}", first_line(&e)));
                 // Bozuk dosyayı da izle: düzeltip kaydedince kendiliğinden yüklensin.
                 if self.cfg.wallpaper == file {
                     self.stamp = modified(&path);
@@ -349,6 +360,7 @@ impl App {
                         self.cfg.save();
                     }
                 }
+                Event::Command(cmd) => self.command(&cmd),
                 Event::ExplorerRestarted => {
                     log!("Explorer yeniden başladı");
                     self.tray.add();
@@ -397,7 +409,7 @@ impl App {
                 .enumerate()
                 .map(|(i, p)| {
                     let current = e.param(i);
-                    let presets = render::presets(&p.kind, p.default)
+                    let presets = render::presets(&p)
                         .into_iter()
                         .enumerate()
                         .map(|(j, (label, v))| Item::Action {
@@ -406,7 +418,7 @@ impl App {
                             checked: v.iter().zip(current).all(|(a, b)| (a - b).abs() < 1e-3),
                         })
                         .collect();
-                    Item::Submenu { label: p.name.clone(), items: presets }
+                    Item::Submenu { label: p.label.clone().unwrap_or_else(|| p.name.clone()), items: presets }
                 })
                 .collect();
             items.push(Item::Submenu { label: "Ayarlar".into(), items: params });
@@ -456,9 +468,16 @@ impl App {
     }
 
     fn pick_param(&mut self, i: usize, j: usize) {
+        let Some(e) = &self.engine else { return };
+        let Some(p) = e.duvar.params.get(i).cloned() else { return };
+        let Some((_, v)) = render::presets(&p).into_iter().nth(j) else { return };
+        self.set_param(i, v);
+    }
+
+    /// Parametreyi uygular ve bu duvar kâğıdı için kaydeder.
+    fn set_param(&mut self, i: usize, v: [f32; 4]) {
         let Some(e) = &mut self.engine else { return };
         let Some(p) = e.duvar.params.get(i).cloned() else { return };
-        let Some((_, v)) = render::presets(&p.kind, p.default).into_iter().nth(j) else { return };
         e.set_param(&self.gpu, i, v);
         let text = match p.kind {
             ParamKind::Float { .. } => format!("{}", v[0]),
@@ -466,6 +485,108 @@ impl App {
         };
         let file = self.cfg.wallpaper.clone();
         self.cfg.set_param(&file, &p.name, text);
+    }
+
+    /// hive'dan gelen komut (bkz. hub.rs).
+    fn command(&mut self, line: &str) {
+        let (cmd, arg) = line.trim().split_once(' ').unwrap_or((line.trim(), ""));
+        let arg = arg.trim();
+        let on = arg == "1";
+        match cmd {
+            "hub" => {
+                if let Ok(h) = arg.parse::<isize>() {
+                    hub::set(h);
+                    self.tray.hide();
+                    self.published.clear();
+                    log!("hive'a bağlandı");
+                }
+            }
+            "duvar" => {
+                self.catalog = catalog();
+                let _ = self.load(arg);
+            }
+            "param" => {
+                let Some((i, v)) = arg.split_once(' ') else { return };
+                let (Ok(i), Some(e)) = (i.parse::<usize>(), &self.engine) else { return };
+                let Some(p) = e.duvar.params.get(i) else { return };
+                let v = v.trim();
+                let value = match p.kind {
+                    ParamKind::Float { .. } => v.parse().ok().map(|x| [x, 0.0, 0.0, 0.0]),
+                    ParamKind::Color => format::parse_color(v),
+                };
+                if let Some(value) = value {
+                    self.set_param(i, value);
+                }
+            }
+            "fps" => {
+                if let Ok(n) = arg.parse::<u32>() {
+                    self.cfg.fps = n.clamp(1, 240);
+                }
+            }
+            "duraklat" => self.policy.user_paused = on,
+            "pilde" => self.cfg.pause_on_battery = on,
+            "klasor" => {
+                let dir = wide(&util::wallpapers_dir().to_string_lossy());
+                unsafe {
+                    ShellExecuteW(None, w!("open"), PCWSTR(dir.as_ptr()), None, None, SW_SHOWNORMAL);
+                }
+            }
+            "cik" => self.quit = true,
+            _ => log!("bilinmeyen komut: {line}"),
+        }
+        self.dirty = true;
+        self.cfg.save();
+    }
+
+    /// hive'a durum: satır başına `anahtar=değer`. Değişmediyse yazılmaz.
+    fn publish(&mut self, paused: Option<Reason>) {
+        if !hub::active() {
+            return;
+        }
+        let mut s = format!(
+            "surum={}\ndurum={}\nduraklama={}\nkullanici_duraklatti={}\npilde={}\nfps={}\nsecili={}\nhata={}\n",
+            env!("CARGO_PKG_VERSION"),
+            self.status,
+            paused.map_or("", |r| r.label()),
+            self.policy.user_paused as u8,
+            self.cfg.pause_on_battery as u8,
+            self.cfg.fps,
+            self.cfg.wallpaper,
+            self.error.as_deref().unwrap_or(""),
+        );
+        for e in &self.catalog {
+            s.push_str(&format!("duvar={}|{}\n", e.file, e.name));
+        }
+        if let Some(e) = &self.engine {
+            for (i, p) in e.duvar.params.iter().enumerate() {
+                let v = e.param(i);
+                // param=sıra|ad|tür|min|max|değer|varsayılan|görünen ad|seçenekler (; ile)
+                let label = p.label.as_deref().unwrap_or(&p.name);
+                let line = match p.kind {
+                    ParamKind::Float { min, max } => {
+                        let kind = if p.toggle { "anahtar" } else if p.choices.is_empty() { "sayi" } else { "secim" };
+                        format!(
+                            "param={i}|{}|{kind}|{min}|{max}|{}|{}|{label}|{}\n",
+                            p.name,
+                            v[0],
+                            p.default[0],
+                            p.choices.join(";")
+                        )
+                    }
+                    ParamKind::Color => format!(
+                        "param={i}|{}|renk|||{}|{}|{label}|\n",
+                        p.name,
+                        format::color_hex(v),
+                        format::color_hex(p.default)
+                    ),
+                };
+                s.push_str(&line);
+            }
+        }
+        if s != self.published {
+            hub::publish(&s);
+            self.published = s;
+        }
     }
 
     fn render(&mut self) {
@@ -545,8 +666,14 @@ impl App {
                 self.rescan();
             }
 
+            // hive kapandıysa (çöktüyse) motor da kapanır.
+            if !hub::alive() {
+                log!("hive kapandı, çıkılıyor");
+                break;
+            }
             let paused = self.policy.reason(self.cfg.pause_on_battery);
             self.set_status(paused);
+            self.publish(paused);
             self.sync_audio(paused.is_none());
 
             // Ne kadar uyuyacağımız: None = bir olay gelene kadar.
@@ -594,6 +721,11 @@ impl App {
             if let Some(t) = self.rescan_at {
                 let left = t.saturating_duration_since(Instant::now());
                 delay = Some(delay.map_or(left, |d| d.min(left)));
+            }
+            // hive modunda duraklatılmışken de arada uyanıp onun yaşadığına bak.
+            if hub::active() {
+                let tick = Duration::from_secs(2);
+                delay = Some(delay.map_or(tick, |d| d.min(tick)));
             }
 
             if waiter.wait(delay, self.watch.as_ref()) {

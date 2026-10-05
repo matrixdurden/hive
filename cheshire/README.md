@@ -22,16 +22,18 @@ Masaüstü ikonlarının arkasında Shadertoy lehçesinde GLSL shader'lar çizer
 
 <table>
   <tr>
-    <td width="50%"><img src="assets/akis.jpg" alt="Akış duvar kâğıdı"></td>
-    <td width="50%"><img src="assets/nabiz.jpg" alt="Nabız duvar kâğıdı"></td>
+    <td width="33%"><img src="assets/akis.jpg" alt="Akış duvar kâğıdı"></td>
+    <td width="33%"><img src="assets/nabiz.jpg" alt="Nabız duvar kâğıdı"></td>
+    <td width="33%"><img src="assets/domore.jpg" alt="Do more duvar kâğıdı"></td>
   </tr>
   <tr>
     <td align="center"><b>Akış</b><br><sub>Kıvrılan bir alanda akan renkli lifler. Fare lifleri dışa iter.</sub></td>
     <td align="center"><b>Nabız</b><br><sub>Çalan müziğe tepki veren halka.</sub></td>
+    <td align="center"><b>Do more</b><br><sub>Kağıt kesimi katmanlar üstünde saat ve slogan, 5 renk teması. Yazı gömülü Montserrat konturlarıyla.</sub></td>
   </tr>
 </table>
 
-<p align="center"><sub>İkisi de <a href="ornekler"><code>ornekler/</code></a> içinde. Görseller <code>cheshire --onizleme</code> ile üretildi.</sub></p>
+<p align="center"><sub>Hepsi <a href="ornekler"><code>ornekler/</code></a> içinde. Görseller <code>cheshire --onizleme</code> ile üretildi.</sub></p>
 
 ## Kullanım
 

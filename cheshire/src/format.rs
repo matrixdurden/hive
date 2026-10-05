@@ -5,6 +5,9 @@
 //! // ad: Akış
 //! // fps: 30
 //! // param hiz: 1.0 [0.1, 3]
+//! // param tema "Tema": gece [kömür, çam, gece]     (seçenek: değer sıra numarası, 0..)
+//! // param saat24 "24 saat": açık                   (aç/kapa: 1 ya da 0)
+//! // param renk "Renk": #4fc3f7
 //! //--- ortak      (isteğe bağlı, her geçişin başına eklenir)
 //! //--- buf A      (isteğe bağlı, A..D)
 //! //--- image      (bölüm yoksa tüm gövde image sayılır)
@@ -28,6 +31,12 @@ pub struct Param {
     pub kind: ParamKind,
     /// Float: [değer, 0, 0, 0] · Color: [r, g, b, 1] (0..1)
     pub default: [f32; 4],
+    /// Arayüzde görünen ad (`param ad "Görünen ad": ...`); yoksa GLSL adı.
+    pub label: Option<String>,
+    /// Seçenekli parametre: değer seçeneğin sırası (Float, 0..n-1).
+    pub choices: Vec<String>,
+    /// Aç/kapa: değer 0 ya da 1 (Float).
+    pub toggle: bool,
 }
 
 /// Dosyanın bir bölümü ve dosyadaki başlangıç satırı (1 tabanlı), hata satırlarını eşlemek için.
@@ -44,6 +53,8 @@ pub struct Usage {
     pub audio: bool,
     pub clock: bool,
     pub battery: bool,
+    /// Bir buffer `iChannel` okuyor: önceki kareye bağlı, her kare yeniden çizilmeli.
+    pub feedback: bool,
 }
 
 
@@ -61,12 +72,6 @@ pub struct Duvar {
     pub usage: Usage,
 }
 
-impl Duvar {
-    pub fn has_buffers(&self) -> bool {
-        self.buffers.iter().any(Option::is_some)
-    }
-
-}
 
 pub fn parse_color(s: &str) -> Option<[f32; 4]> {
     let hex = s.strip_prefix('#')?;
@@ -89,17 +94,53 @@ fn is_ident(s: &str) -> bool {
         && chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
 }
 
-/// `hiz: 1.0 [0.1, 3]` ya da `renk: #4fc3f7`
+/// Aç/kapa değeri: `açık`/`kapalı` (ya da `evet`/`hayır`).
+fn parse_switch(s: &str) -> Option<bool> {
+    match s.trim().to_lowercase().as_str() {
+        "açık" | "acik" | "evet" => Some(true),
+        "kapalı" | "kapali" | "hayır" | "hayir" => Some(false),
+        _ => None,
+    }
+}
+
+/// `hiz: 1.0 [0.1, 3]`, `tema "Tema": gece [kömür, gece]`, `saat24: açık` ya da `renk: #4fc3f7`
 fn parse_param(spec: &str, line: u32) -> Res<Param> {
     let err = |m: &str| format!("satır {line}: {m} → `// param ad: 1.0 [0, 2]` ya da `// param ad: #rrggbb`");
-    let (name, rest) = spec.split_once(':').ok_or_else(|| err("parametrede ':' yok"))?;
-    let name = name.trim();
+    let (head, rest) = spec.split_once(':').ok_or_else(|| err("parametrede ':' yok"))?;
+    // İsteğe bağlı görünen ad: `ad "Görünen ad"`.
+    let (name, label) = match head.split_once('"') {
+        Some((n, l)) => (n.trim(), Some(l.trim_end().trim_end_matches('"').trim().to_string())),
+        None => (head.trim(), None),
+    };
     if !is_ident(name) {
         return Err(err(&format!("'{name}' geçerli bir GLSL adı değil")).into());
     }
+    let base = |kind, default| Param { name: name.into(), kind, default, label: label.clone(), choices: Vec::new(), toggle: false };
     let rest = rest.trim();
     if let Some(c) = parse_color(rest) {
-        return Ok(Param { name: name.into(), kind: ParamKind::Color, default: c });
+        return Ok(base(ParamKind::Color, c));
+    }
+    if let Some(on) = parse_switch(rest) {
+        let v = if on { 1.0 } else { 0.0 };
+        return Ok(Param { toggle: true, ..base(ParamKind::Float { min: 0.0, max: 1.0 }, [v, 0.0, 0.0, 0.0]) });
+    }
+    // Seçenek listesi: aralıkta sayı olmayan öğeler var.
+    if let Some((v, r)) = rest.split_once('[') {
+        let items: Vec<String> =
+            r.trim_end_matches(']').split(',').map(|x| x.trim().to_string()).filter(|x| !x.is_empty()).collect();
+        if items.len() >= 2 && items.iter().any(|x| x.parse::<f32>().is_err()) {
+            let v = v.trim();
+            let index = items
+                .iter()
+                .position(|x| x.eq_ignore_ascii_case(v))
+                .or_else(|| v.parse::<usize>().ok().filter(|&i| i < items.len()))
+                .ok_or_else(|| err(&format!("'{v}' seçeneklerden biri değil")))?;
+            let max = (items.len() - 1) as f32;
+            return Ok(Param {
+                choices: items,
+                ..base(ParamKind::Float { min: 0.0, max }, [index as f32, 0.0, 0.0, 0.0])
+            });
+        }
     }
     let (value, range) = match rest.split_once('[') {
         Some((v, r)) => (v.trim(), Some(r.trim_end_matches(']'))),
@@ -115,7 +156,7 @@ fn parse_param(spec: &str, line: u32) -> Res<Param> {
         }
         None => (value.min(0.0), value.abs().max(1.0) * 2.0),
     };
-    Ok(Param { name: name.into(), kind: ParamKind::Float { min, max }, default: [value, 0.0, 0.0, 0.0] })
+    Ok(base(ParamKind::Float { min, max }, [value, 0.0, 0.0, 0.0]))
 }
 
 /// Yorumlar ve dizgeler dışındaki tanımlayıcılar.
@@ -268,12 +309,18 @@ pub fn parse(src: &str) -> Res<Duvar> {
     }
     let ids = identifiers(&all);
     let any = |names: &[&str]| names.iter().any(|n| ids.contains(n));
+    let mut bufs = d.common.code.clone();
+    for b in d.buffers.iter().flatten() {
+        bufs.push_str(&b.code);
+    }
+    let buf_ids = identifiers(&bufs);
     d.usage = Usage {
         time: any(&["iTime", "iTimeDelta", "iFrame", "iFrameRate"]),
         mouse: any(&["iMouse"]),
         audio: any(&["iAudio"]),
         clock: any(&["iDate", "iLocalTime"]),
         battery: any(&["iBattery"]),
+        feedback: ["iChannel0", "iChannel1", "iChannel2", "iChannel3"].iter().any(|n| buf_ids.contains(n)),
     };
     Ok(d)
 }

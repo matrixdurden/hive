@@ -14,7 +14,8 @@ pub struct Config {
     pub auto_update: bool,
     /// `true` ise harici GPU (NVIDIA) tercih edilir. Varsayılan: pil dostu iGPU.
     pub high_performance_gpu: bool,
-    /// Masaüstüne yerleşme yöntemi: `auto`, `worker` ya da `progman` (yalnızca 24H2+ için).
+    /// Masaüstüne yerleşme yöntemi (yalnızca 24H2+ için): `auto`/`progman` DefView'ın altına katmanlı
+    /// pencere, `worker` Explorer'ın WorkerW'sinin içi.
     pub host: String,
     /// (dosya, parametre, değer) — tepsi menüsünden seçilen parametre değerleri.
     pub params: Vec<(String, String, String)>,

@@ -8,7 +8,7 @@
 use bytemuck::{Pod, Zeroable};
 
 use crate::compile::{self, Diag, PassKind};
-use crate::format::{Duvar, MAX_PARAMS, ParamKind};
+use crate::format::{Duvar, MAX_PARAMS, Param, ParamKind};
 use crate::gpu::Gpu;
 
 const BUFFER_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba16Float;
@@ -431,7 +431,14 @@ impl Engine {
 }
 
 /// Tepsi menüsündeki hazır değerler.
-pub fn presets(kind: &ParamKind, default: [f32; 4]) -> Vec<(String, [f32; 4])> {
+pub fn presets(p: &Param) -> Vec<(String, [f32; 4])> {
+    if p.toggle {
+        return vec![("kapalı".into(), [0.0; 4]), ("açık".into(), [1.0, 0.0, 0.0, 0.0])];
+    }
+    if !p.choices.is_empty() {
+        return p.choices.iter().enumerate().map(|(i, c)| (c.clone(), [i as f32, 0.0, 0.0, 0.0])).collect();
+    }
+    let (kind, default) = (&p.kind, p.default);
     match kind {
         ParamKind::Float { min, max } => (0..5)
             .map(|i| {

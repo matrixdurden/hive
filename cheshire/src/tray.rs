@@ -43,6 +43,8 @@ pub enum Event {
     UpdateReady,
     /// Kurulum ya da kaldırma çalışan kopyayı kapatıyor.
     Quit,
+    /// hive'dan gelen komut (bkz. hub.rs).
+    Command(String),
 }
 
 thread_local! {
@@ -98,6 +100,9 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
             if cds.dwData == COPYDATA_INSTALL && !cds.lpData.is_null() {
                 let units = unsafe { std::slice::from_raw_parts(cds.lpData as *const u16, cds.cbData as usize / 2) };
                 push(Event::Install(String::from_utf16_lossy(units)));
+            } else if cds.dwData == crate::hub::COPYDATA_COMMAND && !cds.lpData.is_null() {
+                let bytes = unsafe { std::slice::from_raw_parts(cds.lpData as *const u8, cds.cbData as usize) };
+                push(Event::Command(String::from_utf8_lossy(bytes).into_owned()));
             }
             return LRESULT(1);
         }
@@ -117,6 +122,20 @@ pub fn send_to_running(file_name: &str) -> bool {
     }
 }
 
+/// Çalışan motora hive komutu iletir (bkz. hub.rs).
+pub fn send_command(line: &str) -> bool {
+    unsafe {
+        let Ok(hwnd) = FindWindowW(CLASS, PCWSTR::null()) else { return false };
+        let data = line.as_bytes();
+        let cds = COPYDATASTRUCT {
+            dwData: crate::hub::COPYDATA_COMMAND,
+            cbData: data.len() as u32,
+            lpData: data.as_ptr() as *mut _,
+        };
+        SendMessageW(hwnd, WM_COPYDATA, None, Some(LPARAM(&cds as *const _ as isize))).0 != 0
+    }
+}
+
 pub enum Item {
     Label(String),
     Separator,
@@ -127,6 +146,8 @@ pub enum Item {
 pub struct Tray {
     pub hwnd: HWND,
     icon: HICON,
+    /// hive modunda simge gösterilmez; gizli pencere yine sistem yayınlarını dinler.
+    visible: std::cell::Cell<bool>,
 }
 
 impl Tray {
@@ -162,7 +183,7 @@ impl Tray {
                 let _ = RegisterPowerSettingNotification(HANDLE(hwnd.0), guid, DEVICE_NOTIFY_WINDOW_HANDLE);
             }
 
-            let tray = Self { hwnd, icon: load_icon(hinstance.into())? };
+            let tray = Self { hwnd, icon: load_icon(hinstance.into())?, visible: (!crate::hub::active()).into() };
             tray.add();
             Ok(tray)
         }
@@ -179,6 +200,9 @@ impl Tray {
 
     /// Explorer yeniden başladığında da çağrılır.
     pub fn add(&self) {
+        if !self.visible.get() {
+            return;
+        }
         let mut d = self.data();
         d.uFlags = NIF_ICON | NIF_MESSAGE | NIF_TIP;
         d.uCallbackMessage = WM_TRAY;
@@ -189,7 +213,19 @@ impl Tray {
         }
     }
 
+    /// Simgeyi kaldırır (çalışan motor hive'a bağlanınca).
+    pub fn hide(&self) {
+        if self.visible.replace(false) {
+            unsafe {
+                let _ = Shell_NotifyIconW(NIM_DELETE, &self.data());
+            }
+        }
+    }
+
     pub fn set_tooltip(&self, text: &str) {
+        if !self.visible.get() {
+            return;
+        }
         let mut d = self.data();
         d.uFlags = NIF_TIP;
         copy_into(&mut d.szTip, text);
@@ -209,6 +245,9 @@ impl Tray {
     }
 
     fn balloon(&self, title: &str, text: &str, icon: NOTIFY_ICON_INFOTIP_FLAGS) {
+        if !self.visible.get() {
+            return;
+        }
         let mut d = self.data();
         d.uFlags = NIF_INFO;
         d.dwInfoFlags = icon;

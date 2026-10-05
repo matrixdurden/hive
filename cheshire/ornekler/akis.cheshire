@@ -2,9 +2,9 @@
 // ad: Akış
 // yazar: Claude
 // fps: 60
-// param hiz: 1.0 [0.2, 3]
-// param iz: 0.9 [0.8, 0.97]
-// param yogunluk: 1.0 [0.3, 3]
+// param hiz "Hız": 1.0 [0.2, 3]
+// param iz "İz uzunluğu": 0.9 [0.8, 0.97]
+// param yogunluk "Yoğunluk": 1.0 [0.3, 3]
 //
 // Zamanla kıvrılan bir gürültü alanında akan renkli lifler.
 // Teknik: IBFV (image-based flow visualization, van Wijk 2002). Buf A her karede önceki
