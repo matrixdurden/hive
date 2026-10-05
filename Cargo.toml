@@ -1,0 +1,14 @@
+# hive: matrixdurden'in Windows araçları. Tek workspace, tek derleme çıktısı (target/).
+#   app/            hive.exe: pencere, araç sayfaları, kurulum; lyrebird motoru ve cheshire.exe içinde
+#   lyrebird/       lyrebird motoru (kütüphane) ve mikrofon efekti (apo/, DLL)
+#   cheshire/       cheshire motoru (ayrı süreç: cheshire.exe --hub)
+[workspace]
+members = ["app", "lyrebird", "lyrebird/apo", "cheshire"]
+resolver = "3"
+
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+strip = true

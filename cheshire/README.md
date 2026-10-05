@@ -7,7 +7,7 @@
   <img src="https://img.shields.io/badge/GPU-wgpu%20%C2%B7%20DX12-f472b6?style=flat-square&labelColor=1c1219" alt="GPU: wgpu, DX12">
   <img src="https://img.shields.io/badge/shader-GLSL%20(Shadertoy)-f472b6?style=flat-square&labelColor=1c1219" alt="Shader: GLSL, Shadertoy lehçesi">
   <img src="https://img.shields.io/badge/Rust-2024-f472b6?style=flat-square&labelColor=1c1219" alt="Rust 2024">
-  <a href="LICENSE"><img src="https://img.shields.io/badge/lisans-MIT-f472b6?style=flat-square&labelColor=1c1219" alt="Lisans: MIT"></a>
+  <a href="../LICENSE"><img src="https://img.shields.io/badge/lisans-MIT-f472b6?style=flat-square&labelColor=1c1219" alt="Lisans: MIT"></a>
 </p>
 
 <p align="center">
@@ -37,13 +37,11 @@ Masaüstü ikonlarının arkasında Shadertoy lehçesinde GLSL shader'lar çizer
 
 ## Kullanım
 
-1. [Son sürümden](https://github.com/matrixdurden/cheshire/releases/latest) `cheshire.exe`'yi indir ve çalıştır. Kendini kurar, Windows ile başlar. Yönetici izni gerekmez. İndirdiğin dosyayı sonra silebilirsin.
-2. Duvar kâğıdını ve ayarlarını sistem tepsisindeki simgeden seç.
-3. Bir `.cheshire` dosyasına çift tıkla: eklenir ve uygulanır.
+cheshire [hive](../README.md)'ın parçası: hive'ı kur, **Araçlar** sayfasından cheshire'ı ekle. Duvar kâğıdını ve ayarlarını hive'daki cheshire sayfasından seçersin; bir `.cheshire` dosyasını pencereye sürüklemek onu ekler ve uygular. Motor (`cheshire.exe --hub`) hive'ın içinde gelir, ayrı bir süreç olarak çalışır.
 
-Yeni sürümler kendiliğinden gelir (tepsi menüsünden "Otomatik güncelle" ile kapatılabilir). Kaldırmak için: Ayarlar → Uygulamalar → cheshire.
+Her şey tek klasörde durur: `%LOCALAPPDATA%\Programs\cheshire` (exe, `cheshire.ini`, `duvarlar\`, log). hive'dan kaldırınca klasör, önizlemeler ve kayıtlar silinir, duvar kâğıdı Windows'unkine döner.
 
-Her şey tek klasörde durur: `%LOCALAPPDATA%\Programs\cheshire` (exe, `cheshire.ini`, `duvarlar\`, log). Bunun dışında yalnızca Başlat menüsü kısayolu ve kullanıcıya ait kayıt defteri girdileri var (Windows ile başlat, `.cheshire` ilişkilendirmesi, kaldırma kaydı). Kaldırınca hepsi silinir.
+Komut satırı araçları:
 
 ```sh
 cheshire --dogrula dosya.cheshire               # derle, 120 kare çiz, GPU süresini raporla
@@ -75,19 +73,4 @@ Metadata yorum satırlarında, gövde Shadertoy'daki gibi `mainImage`:
 
 ## Derleme
 
-WSL'den Windows için çapraz derlenir (`x86_64-pc-windows-gnu`, mingw gerekir):
-
-```sh
-make build     # target/x86_64-pc-windows-gnu/release/cheshire.exe
-make install   # bu derlemeyi Windows'a kur ve başlat
-make release   # Cargo.toml'daki sürümle GitHub'da yayın aç
-```
-
-Yayın akışı: `Cargo.toml`'da `version`'ı artır, commit'le, push'la, `make release`. Kurulu kopyalar yeni sürümü bir gün içinde indirir, SHA-256'sını doğrular ve kendini yeniler.
-
-<br>
-
-<p align="center">
-  <img src="assets/icon.svg" width="44" alt=""><br>
-  <sub>MIT lisansı ile.</sub>
-</p>
+hive'ın deposunun kökünden: `make build` motoru da derler ve hive.exe'nin içine gömer (`target/x86_64-pc-windows-gnu/release/cheshire.exe`).
