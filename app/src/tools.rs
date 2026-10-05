@@ -4,6 +4,7 @@
 //! - lyrebird: motoru hive'ın içinde; kurmak mikrofon efektini bağlamaktır (yönetici).
 //! - cheshire: motoru hive'ın içinde gömülü; kurmak exe'yi yazmaktır.
 //! - rabbithole: GitHub'daki son sürüm indirilir, SHA-256'sı doğrulanır, kendi kurulumu çalışır.
+//! - dormouse: motoru hive'ın içinde; kurmak mevcut güç ayarlarını yedekleyip uygulamaların GPU tercihini yazmaktır.
 
 use std::os::windows::process::CommandExt;
 use std::process::{Command, Stdio};
@@ -16,11 +17,13 @@ use windows::Win32::System::Threading::{OpenProcess, PROCESS_TERMINATE, Terminat
 use windows::Win32::UI::WindowsAndMessaging::{FindWindowW, GetWindowThreadProcessId};
 use windows::core::{PCWSTR, w};
 
-use crate::{cheshire, log, lyrebird, net, rabbithole, shell, util};
+use crate::{cheshire, dormouse, log, lyrebird, net, rabbithole, shell, util};
 
 pub const LYREBIRD: usize = 0;
 pub const CHESHIRE: usize = 1;
 pub const RABBITHOLE: usize = 2;
+pub const DORMOUSE: usize = 3;
+pub const COUNT: usize = 4;
 
 pub struct Tool {
     pub id: &'static str,
@@ -57,7 +60,7 @@ macro_rules! icons {
     };
 }
 
-pub static TOOLS: [Tool; 3] = [
+pub static TOOLS: [Tool; COUNT] = [
     Tool {
         id: "lyrebird",
         name: "lyrebird",
@@ -82,6 +85,14 @@ pub static TOOLS: [Tool; 3] = [
         note: ["Downloaded from GitHub (~40 MB) · needs admin", "GitHub'dan indirilir (~40 MB) · yönetici izni ister"],
         icons: icons!("rabbithole"),
     },
+    Tool {
+        id: "dormouse",
+        name: "dormouse",
+        accent: 0x34d399,
+        tagline: ["Three gears for your laptop's battery", "Dizüstünün pili için üç vites"],
+        note: ["Comes with hive · laptops only", "hive ile birlikte gelir · yalnızca dizüstü"],
+        icons: icons!("dormouse"),
+    },
 ];
 
 /// Araç bu bilgisayarda kurulu mu.
@@ -89,6 +100,7 @@ pub fn installed(i: usize) -> bool {
     match i {
         LYREBIRD => lyrebird::installed(),
         CHESHIRE => cheshire::installed(),
+        DORMOUSE => dormouse::installed(),
         _ => rabbithole::installed(),
     }
 }
@@ -107,6 +119,7 @@ pub fn run(i: usize, install: bool) -> Result<(), String> {
     match (i, install) {
         (LYREBIRD, true) => lyrebird_setup(true),
         (CHESHIRE, true) => cheshire::install(),
+        (DORMOUSE, true) => dormouse::install(),
         (_, true) => rabbithole_install(),
         (_, false) => uninstall(i),
     }
@@ -124,6 +137,7 @@ fn uninstall(i: usize) -> Result<(), String> {
             }
         }
         CHESHIRE => cheshire::uninstall()?,
+        DORMOUSE => dormouse::uninstall()?,
         _ => {
             rabbithole::run(&["remove"])?;
             // Program Files'taki exe kendini silemez: rabbithole arkasında birkaç saniye içinde
@@ -160,6 +174,7 @@ pub fn leftovers(i: usize) -> Vec<String> {
             l
         }
         CHESHIRE => cheshire::leftovers(),
+        DORMOUSE => dormouse::leftovers(),
         _ => {
             let mut l: Vec<String> =
                 [rabbithole::install_dir(), rabbithole::data_dir()].into_iter().filter_map(exists).collect();

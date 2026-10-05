@@ -42,6 +42,22 @@ impl Tray {
         d
     }
 
+    /// Bildirim balonu (araçların uyarıları: dormouse'un vites değişimi, RTX bekçisi).
+    pub fn notify(&self, title: &str, text: &str) {
+        let mut d = self.data();
+        d.uFlags = NIF_INFO;
+        d.dwInfoFlags = NIIF_INFO;
+        for (dst, src) in d.szInfoTitle.iter_mut().zip(title.encode_utf16().take(63).chain(Some(0))) {
+            *dst = src;
+        }
+        for (dst, src) in d.szInfo.iter_mut().zip(text.encode_utf16().take(255).chain(Some(0))) {
+            *dst = src;
+        }
+        unsafe {
+            let _ = Shell_NotifyIconW(NIM_MODIFY, &d);
+        }
+    }
+
     /// Explorer yeniden başlayınca da çağrılır.
     pub fn add(&self) {
         unsafe {

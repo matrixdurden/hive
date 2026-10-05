@@ -8,6 +8,7 @@ mod i18n;
 mod app;
 mod cheshire;
 mod config;
+mod dormouse;
 mod gfx;
 mod log;
 mod lyrebird;
@@ -33,6 +34,7 @@ use windows::core::w;
 //   hive --uninstall      hive'ı ve kurulu araçları iz bırakmadan kaldır
 //   hive --leftovers      kurulu olmayan araçlardan kalan iz var mı, listele
 //   hive --lyrebird-test  her mikrofona test sesi gönder, geri geliyor mu ölç
+//   hive --dormouse-test  dormouse'un okuduğu pil, ekran ve ekran kartı bilgilerini yazdır
 
 /// Bayrak İngilizce ya da Türkçe adıyla verilmiş mi.
 fn flag(args: &[String], en: &str, tr: &str) -> bool {
@@ -83,6 +85,14 @@ fn main() {
                 }
             }
             std::process::exit(if clean { 0 } else { 1 });
+        }
+        Some("--dormouse-test" | "--dormouse-dene") => {
+            unsafe {
+                let _ = AttachConsole(ATTACH_PARENT_PROCESS);
+                let _ = windows::Win32::System::Com::CoInitializeEx(None, windows::Win32::System::Com::COINIT_APARTMENTTHREADED);
+            }
+            print!("{}", dormouse::probe());
+            std::process::exit(0);
         }
         Some("--lyrebird-test" | "--lyrebird-dene") => {
             unsafe {

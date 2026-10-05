@@ -29,6 +29,7 @@ use windows::core::{BOOL, PCWSTR, w};
 
 use crate::cheshire::{self, Cheshire};
 use crate::config::Config;
+use crate::dormouse::{self, Dormouse};
 use crate::gfx::{Color, Gfx, ImageId, Rect};
 use crate::log;
 use crate::lyrebird::{self, Lyrebird};
@@ -163,14 +164,17 @@ struct App {
     logo: ImageId,
     page: Page,
     narrow_pref: bool,
+    /// Araçlar sayfasının kaydırması (kartlar küçük pencereye sığmayınca).
+    store_scroll: f32,
     autostart: bool,
     lyrebird: Option<Lyrebird>,
     rabbit: Option<Rabbithole>,
     cheshire: Option<Cheshire>,
+    dormouse: Option<Dormouse>,
     /// Süren kurulum (`true`) ya da kaldırma (`false`), araç başına.
-    busy: [Option<bool>; 3],
+    busy: [Option<bool>; tools::COUNT],
     /// Son kurulum / kaldırma hatası, araç kartında görünür.
-    errors: [Option<String>; 3],
+    errors: [Option<String>; tools::COUNT],
     results: Arc<Mutex<Vec<SetupResult>>>,
     /// hive kendini kaldırıyor; bitince süreç kapanır, klasör arkasından silinir.
     removing_self: bool,
@@ -242,11 +246,13 @@ fn page_mut<'a>(
     lyrebird: &'a mut Option<Lyrebird>,
     rabbit: &'a mut Option<Rabbithole>,
     cheshire: &'a mut Option<Cheshire>,
+    dormouse: &'a mut Option<Dormouse>,
     i: usize,
 ) -> Option<&'a mut dyn ToolPage> {
     match i {
         tools::LYREBIRD => lyrebird.as_mut().map(|l| l as &mut dyn ToolPage),
         tools::CHESHIRE => cheshire.as_mut().map(|c| c as &mut dyn ToolPage),
+        tools::DORMOUSE => dormouse.as_mut().map(|d| d as &mut dyn ToolPage),
         tools::RABBITHOLE => rabbit.as_mut().map(|r| r as &mut dyn ToolPage),
         _ => None,
     }
@@ -283,6 +289,7 @@ impl App {
         match i {
             tools::LYREBIRD => self.lyrebird.is_some(),
             tools::CHESHIRE => self.cheshire.is_some(),
+            tools::DORMOUSE => self.dormouse.is_some(),
             _ => self.rabbit.is_some(),
         }
     }
@@ -292,6 +299,7 @@ impl App {
             tools::LYREBIRD => self.lyrebird.as_ref().map(|l| l as &dyn ToolPage),
             tools::CHESHIRE => self.cheshire.as_ref().map(|c| c as &dyn ToolPage),
             tools::RABBITHOLE => self.rabbit.as_ref().map(|r| r as &dyn ToolPage),
+            tools::DORMOUSE => self.dormouse.as_ref().map(|d| d as &dyn ToolPage),
             _ => None,
         }
     }
@@ -334,6 +342,9 @@ impl App {
         if let Some(r) = self.rabbit.as_mut() {
             r.set_visible(on && page == Page::Tool(tools::RABBITHOLE));
         }
+        if let Some(d) = self.dormouse.as_mut() {
+            d.set_visible(on && page == Page::Tool(tools::DORMOUSE));
+        }
     }
 
     fn select(&mut self, page: Page) {
@@ -368,6 +379,8 @@ impl App {
                 (tools::LYREBIRD, false) => self.lyrebird = None,
                 (tools::CHESHIRE, true) => self.cheshire = Some(Cheshire::start(hwnd)),
                 (tools::CHESHIRE, false) => self.cheshire = None,
+                (tools::DORMOUSE, true) => self.dormouse = Some(Dormouse::start(hwnd)),
+                (tools::DORMOUSE, false) => self.dormouse = None,
                 (_, true) => self.rabbit = Some(Rabbithole::start(hwnd)),
                 (_, false) => self.rabbit = None,
             }
@@ -388,6 +401,10 @@ impl App {
             tools::CHESHIRE => t!(
                 "Your wallpaper goes back to the Windows one. Wallpapers you added and their settings are deleted too.",
                 "Duvar kâğıdı Windows'unkine döner. Eklediğin duvar kâğıtları ve ayarları da silinir."
+            ),
+            tools::DORMOUSE => t!(
+                "Screen, power and lid settings go back to what they were; the GPU preferences it wrote and its measurements are deleted.",
+                "Ekran, güç ve kapak ayarları eski haline döner; yazdığı GPU tercihleri ve ölçümleri silinir."
             ),
             _ => t!(
                 "The tunnel closes; the service, network adapter and your server link are deleted.",
@@ -412,6 +429,7 @@ impl App {
             match i {
                 tools::LYREBIRD => self.lyrebird = None,
                 tools::CHESHIRE => self.cheshire = None,
+                tools::DORMOUSE => self.dormouse = None,
                 _ => self.rabbit = None,
             }
             self.page = self.valid(self.page);
@@ -453,6 +471,13 @@ impl App {
         }
     }
 
+    /// dormouse'un bekleyen bildirimi varsa tepsiden balon olarak gösterir.
+    fn dormouse_notice(&mut self) {
+        if let Some((title, text)) = self.dormouse.as_mut().and_then(|d| d.take_notice()) {
+            self.tray.notify(&title, &text);
+        }
+    }
+
     // --- Yerleşim ---
 
     fn narrow(&self, w: f32) -> bool {
@@ -491,7 +516,7 @@ impl App {
         if let Some(i) = self.tool_live() {
             let hx = self.head_x(i);
             let hr = w - sw - CAPTIONS - 12.0;
-            if let Some(p) = page_mut(&mut self.lyrebird, &mut self.rabbit, &mut self.cheshire, i) {
+            if let Some(p) = page_mut(&mut self.lyrebird, &mut self.rabbit, &mut self.cheshire, &mut self.dormouse, i) {
                 p.layout(w - sw, h, hx, hr);
             }
         }
@@ -500,8 +525,13 @@ impl App {
 
     fn card(&self, i: usize, w: f32) -> Rect {
         let (l, r) = (self.side_w(w) + PAGE_PAD, w - PAGE_PAD);
-        let t = HEADER + 52.0 + i as f32 * (CARD_H + 12.0);
+        let t = HEADER + 52.0 + i as f32 * (CARD_H + 12.0) - self.store_scroll;
         Rect::new(l, t, r, t + CARD_H)
+    }
+
+    fn store_max_scroll(&self) -> f32 {
+        let (_, h) = self.size();
+        (HEADER + 52.0 + TOOLS.len() as f32 * (CARD_H + 12.0) + 12.0 - h).max(0.0)
     }
 
     /// Kartın düğmeleri: (ana, ikinci). Kurulu: Aç + Kaldır, değil: Kur, sürüyor: durum yazısı.
@@ -551,6 +581,7 @@ impl App {
         self.lyrebird = None;
         self.cheshire = None;
         self.rabbit = None;
+        self.dormouse = None;
         self.page = Page::Settings;
         self.removing_self = true;
         self.redraw();
@@ -628,6 +659,9 @@ impl App {
         }
         match self.page {
             Page::Store => {
+                if y < HEADER + 40.0 {
+                    return Hit::None;
+                }
                 for i in 0..TOOLS.len() {
                     if self.busy[i].is_some() {
                         continue;
@@ -781,7 +815,7 @@ impl App {
         g.text(sub, &g.f.small, Rect::new(x0, HEADER + 14.0, w - PAGE_PAD, HEADER + 36.0), MUTED);
     }
 
-    fn paint_store(&self, w: f32) {
+    fn paint_store(&self, w: f32, h: f32) {
         let g = &self.gfx;
         self.page_title(
             w,
@@ -791,6 +825,7 @@ impl App {
                 "Kurduğun araçlar kenar çubuğunda görünür; istediğin zaman kaldırabilirsin."
             ),
         );
+        g.clip(Rect::new(self.side_w(w), HEADER + 40.0, w, h), || {
         for (i, tool) in TOOLS.iter().enumerate() {
             let c = self.card(i, w);
             let installed = self.installed(i);
@@ -825,6 +860,7 @@ impl App {
                 button(g, r, t!("Remove", "Kaldır"), None, None, self.hover == Hit::Remove(i));
             }
         }
+        });
     }
 
     fn paint_settings(&self, w: f32) {
@@ -899,7 +935,7 @@ impl App {
         match (self.page, self.tool_live()) {
             (_, Some(i)) => g.clip(Rect::new(sw, 0.0, w, h), || self.paint_live(i, sw, w)),
             (Page::Settings, _) => self.paint_settings(w),
-            _ => self.paint_store(w),
+            _ => self.paint_store(w, h),
         }
 
         // Dar kenar çubuğunda üstüne gelinen öğenin adı.
@@ -1111,6 +1147,7 @@ impl App {
             }
             WM_SIZE => {
                 self.hover = Hit::None;
+                self.store_scroll = self.store_scroll.min(self.store_max_scroll());
                 self.sync_visible();
                 self.redraw();
             }
@@ -1133,7 +1170,7 @@ impl App {
                 let hit = self.hit(mx, my);
                 if hit != self.hover {
                     if self.hover == Hit::Content
-                        && let Some(p) = live.and_then(|i| page_mut(&mut self.lyrebird, &mut self.rabbit, &mut self.cheshire, i))
+                        && let Some(p) = live.and_then(|i| page_mut(&mut self.lyrebird, &mut self.rabbit, &mut self.cheshire, &mut self.dormouse, i))
                     {
                         p.mouse_leave();
                     }
@@ -1151,13 +1188,13 @@ impl App {
                 }
                 // Kaydırıcı sürüklenirken imleç kenar çubuğuna kaysa da sayfa izlemeli.
                 if (hit == Hit::Content || self.pressed == Hit::Content)
-                    && let Some(p) = live.and_then(|i| page_mut(&mut self.lyrebird, &mut self.rabbit, &mut self.cheshire, i))
+                    && let Some(p) = live.and_then(|i| page_mut(&mut self.lyrebird, &mut self.rabbit, &mut self.cheshire, &mut self.dormouse, i))
                 {
                     p.mouse_move(&self.gfx, mx - sw, my);
                 }
             }
             WM_MOUSELEAVE => {
-                if let Some(p) = live.and_then(|i| page_mut(&mut self.lyrebird, &mut self.rabbit, &mut self.cheshire, i)) {
+                if let Some(p) = live.and_then(|i| page_mut(&mut self.lyrebird, &mut self.rabbit, &mut self.cheshire, &mut self.dormouse, i)) {
                     p.mouse_leave();
                 }
                 self.hover = Hit::None;
@@ -1169,7 +1206,7 @@ impl App {
                 self.pressed = self.hit(mx, my);
                 unsafe { SetCapture(self.hwnd) };
                 if self.pressed == Hit::Content
-                    && let Some(p) = live.and_then(|i| page_mut(&mut self.lyrebird, &mut self.rabbit, &mut self.cheshire, i))
+                    && let Some(p) = live.and_then(|i| page_mut(&mut self.lyrebird, &mut self.rabbit, &mut self.cheshire, &mut self.dormouse, i))
                 {
                     p.mouse_down(&self.gfx, mx - sw, my);
                 }
@@ -1182,7 +1219,7 @@ impl App {
                 let sw = self.layout_tool(w, h);
                 let pressed = std::mem::replace(&mut self.pressed, Hit::None);
                 if pressed == Hit::Content {
-                    if let Some(p) = live.and_then(|i| page_mut(&mut self.lyrebird, &mut self.rabbit, &mut self.cheshire, i)) {
+                    if let Some(p) = live.and_then(|i| page_mut(&mut self.lyrebird, &mut self.rabbit, &mut self.cheshire, &mut self.dormouse, i)) {
                         p.mouse_up(&self.gfx, mx - sw, my);
                     }
                 } else if self.hit(mx, my) == pressed {
@@ -1199,14 +1236,18 @@ impl App {
                 let (w, h) = self.size();
                 let sw = self.layout_tool(w, h);
                 if x >= sw
-                    && let Some(p) = live.and_then(|i| page_mut(&mut self.lyrebird, &mut self.rabbit, &mut self.cheshire, i))
+                    && let Some(p) = live.and_then(|i| page_mut(&mut self.lyrebird, &mut self.rabbit, &mut self.cheshire, &mut self.dormouse, i))
                 {
                     p.wheel(&self.gfx, x - sw, y, delta);
+                } else if x >= sw && live.is_none() && self.page == Page::Store {
+                    self.store_scroll = (self.store_scroll - delta * 60.0).clamp(0.0, self.store_max_scroll());
+                    self.hover = self.hit(x, y);
+                    self.redraw();
                 }
             }
             WM_KEYDOWN | WM_SYSKEYDOWN => {
                 let vk = VIRTUAL_KEY(wp.0 as u16);
-                if let Some(p) = live.and_then(|i| page_mut(&mut self.lyrebird, &mut self.rabbit, &mut self.cheshire, i))
+                if let Some(p) = live.and_then(|i| page_mut(&mut self.lyrebird, &mut self.rabbit, &mut self.cheshire, &mut self.dormouse, i))
                     && p.key(vk.0)
                 {
                     return Some(LRESULT(0));
@@ -1246,6 +1287,12 @@ impl App {
                         r.timer(wp.0);
                     }
                 }
+                dormouse::TIMER_TICK | dormouse::TIMER_UI => {
+                    if let Some(d) = self.dormouse.as_mut() {
+                        d.timer(wp.0);
+                    }
+                    self.dormouse_notice();
+                }
                 _ => return None,
             },
             lyrebird::WM_PLAYER => {
@@ -1282,6 +1329,15 @@ impl App {
                 if let Some(r) = self.rabbit.as_mut() {
                     r.doctor_line();
                 }
+            }
+            WM_POWERBROADCAST => {
+                if wp.0 as u32 == PBT_POWERSETTINGCHANGE
+                    && let Some(d) = self.dormouse.as_mut()
+                {
+                    d.power_broadcast(lp);
+                    self.dormouse_notice();
+                }
+                return Some(LRESULT(1));
             }
             WM_TOOL_SETUP => self.setup_done(),
             WM_SELF_DONE => self.self_remove_done(),
@@ -1465,11 +1521,13 @@ pub fn run(hidden: bool, tab: Option<String>) -> Res<()> {
             logo,
             page: Page::Store,
             narrow_pref: cfg.narrow,
+            store_scroll: 0.0,
             autostart: autostart(),
             lyrebird: None,
             rabbit: None,
             cheshire: None,
-            busy: [None; 3],
+            dormouse: None,
+            busy: [None; tools::COUNT],
             errors: Default::default(),
             results: Arc::default(),
             removing_self: false,
@@ -1489,7 +1547,7 @@ pub fn run(hidden: bool, tab: Option<String>) -> Res<()> {
         let first = (0..TOOLS.len()).find(|&i| app.installed(i)).map_or(Page::Store, Page::Tool);
         let page = tab.as_deref().and_then(Page::from_id).or_else(|| Page::from_id(&cfg.tab)).unwrap_or(first);
         app.page = app.valid(page);
-        log!("başladı: sekme {}, kurulu {:?}", app.page.id(), (0..3).map(|i| app.installed(i)).collect::<Vec<_>>());
+        log!("başladı: sekme {}, kurulu {:?}", app.page.id(), (0..tools::COUNT).map(|i| app.installed(i)).collect::<Vec<_>>());
         APP.with(|a| *a.borrow_mut() = Some(app));
         // Çerçeveyi yeniden hesaplat: artık WM_NCCALCSIZE'ı biz karşılıyoruz.
         CUSTOM_FRAME.store(true, Ordering::Relaxed);
