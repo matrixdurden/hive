@@ -17,6 +17,7 @@ use windows::Win32::Graphics::Gdi::InvalidateRect;
 use windows::Win32::System::Com::{CLSCTX_INPROC_SERVER, CoCreateInstance, CoTaskMemFree};
 use windows::Win32::System::DataExchange::COPYDATASTRUCT;
 use windows::Win32::System::Registry::{HKEY_CURRENT_USER, RegDeleteKeyValueW, RegDeleteTreeW};
+use windows::Win32::System::Threading::{OpenProcess, PROCESS_SYNCHRONIZE, PROCESS_TERMINATE, TerminateProcess, WaitForSingleObject};
 use windows::Win32::UI::Shell::Common::COMDLG_FILTERSPEC;
 use windows::Win32::UI::Shell::*;
 use windows::Win32::UI::WindowsAndMessaging::*;
@@ -109,16 +110,32 @@ fn engine_window() -> Option<HWND> {
 
 /// Çalışan motora kapan der (duvar kâğıdını Windows'unkine geri koyar) ve kapanmasını bekler.
 fn stop_engine() {
-    if let Some(h) = engine_window() {
-        unsafe {
-            let _ = PostMessageW(Some(h), WM_CLOSE, WPARAM(0), LPARAM(0));
+    let Some(h) = engine_window() else { return };
+    unsafe {
+        // Pencere kapanınca süreç duvar kâğıdını geri yükleyip birkaç saniye daha yaşayabilir;
+        // o sürede exe kilitli kalır ve yeni motor tek-kopya kilidine takılır. Sürecin kendisi beklenir.
+        let mut pid = 0u32;
+        GetWindowThreadProcessId(h, Some(&mut pid));
+        let process = OpenProcess(PROCESS_SYNCHRONIZE | PROCESS_TERMINATE, false, pid).ok();
+        let _ = PostMessageW(Some(h), WM_CLOSE, WPARAM(0), LPARAM(0));
+        match process {
+            Some(p) => {
+                if WaitForSingleObject(p, 8000) == WAIT_TIMEOUT {
+                    log!("cheshire motoru kapanmadı, sonlandırılıyor");
+                    let _ = TerminateProcess(p, 1);
+                    WaitForSingleObject(p, 2000);
+                }
+                let _ = CloseHandle(p);
+            }
+            None => {
+                for _ in 0..60 {
+                    if engine_window().is_none() {
+                        return;
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(100));
+                }
+            }
         }
-    }
-    for _ in 0..60 {
-        if engine_window().is_none() {
-            return;
-        }
-        std::thread::sleep(std::time::Duration::from_millis(100));
     }
 }
 
@@ -129,10 +146,17 @@ fn write_engine() -> Result<(), String> {
     }
     std::fs::create_dir_all(app_dir()).map_err(|e| e.to_string())?;
     let mut last = String::new();
-    for _ in 0..20 {
+    for i in 0..20 {
         match std::fs::write(exe(), ENGINE) {
             Ok(()) => return Ok(()),
             Err(e) => last = e.to_string(),
+        }
+        // Penceresi kapanan motor süreci birkaç saniye daha yaşayabilir. Çalışan exe silinemez
+        // ama yeniden adlandırılabilir: kenara çekilir, motor açılınca `.eski`yi kendisi siler.
+        if i == 3 {
+            let old = app_dir().join("cheshire.exe.eski");
+            let _ = std::fs::remove_file(&old);
+            let _ = std::fs::rename(exe(), &old);
         }
         std::thread::sleep(std::time::Duration::from_millis(250));
     }

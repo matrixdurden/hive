@@ -6,10 +6,11 @@
 // param yirmidort "24-hour clock" "24 saat": on
 // param tane "Film grain" "Film tanesi": 1.0 [0, 2]
 // param soz "Slogan" "Söz": DO MORE. [DO MORE., KEEP GOING., STAY HUNGRY., SHIP IT., DREAM BIG., BE BOLD., NO EXCUSES., GO FURTHER.]
+// param dongu "Change slogan" "Sözü değiştir": off [off/kapalı, 10 min/10 dk, hourly/saatlik, daily/günlük]
 //
 // Kağıt kesimi gibi üst üste binen katmanlar: solda iç içe yuvarlak dikdörtgenler, sağda
 // yarım daireli bir pist. Her katman bir alttakine gölge düşürür. Ortada saat ve altında
-// slogan (8 hazır söz, `soz`). 5 hazır tema: kömür, çam, gece, kahve, kor.
+// slogan (8 hazır söz, `soz`; `dongu` açıksa seçilenden başlayıp sırayla değişir). 5 hazır tema: kömür, çam, gece, kahve, kor.
 // Yazı gerçek font: Montserrat'ın (SIL OFL 1.1) glif konturları kuadratik Bézier parçaları
 // olarak gömülü. buf A bu veriyi her karede bir dokuya yazar (FXC sabit dizili döngüleri
 // açmaya kalkıp çöküyor; dokudan okumak onu döngü olarak bırakır). image her piksel için en
@@ -7622,6 +7623,14 @@ vec3 scene(vec2 uv, float aspect) {
     // ---------- Slogan ----------
     float track = 0.02 * hs, space = 0.34 * hs;
     int s = int(soz + 0.5);
+    // Sözü değiştir: seçilen sözden başlayıp sırayla ilerler. Gün de eklenir; yoksa her gün
+    // aynı saatte aynı söz gelirdi (24 saat ve 144 on dakika 8'e tam bölünür).
+    int dn = int(dongu + 0.5);
+    int day = int(iDate.x) * 372 + int(iDate.y) * 31 + int(iDate.z);
+    if (dn == 1) s += int(iDate.w / 600.0) + day * 3;
+    else if (dn == 2) s += int(iDate.w / 3600.0) + day * 5;
+    else if (dn == 3) s += day;
+    s = s % 8;
     x = x0;
     for (int k = 0; k < 16; k++) {
         if (uv.y > yText + hs + margin) break;
