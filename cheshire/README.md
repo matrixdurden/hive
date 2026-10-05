@@ -26,12 +26,12 @@ Draws GLSL shaders in the Shadertoy dialect behind the desktop icons. Pauses whe
   </tr>
   <tr>
     <td width="33%"><img src="assets/pus.jpg" alt="Haze wallpaper"></td>
-    <td width="33%"><img src="assets/kum.jpg" alt="Dune wallpaper"></td>
+    <td width="33%"><img src="assets/kum.jpg" alt="Horizon wallpaper"></td>
     <td width="33%"><img src="assets/deco.jpg" alt="Deco wallpaper"></td>
   </tr>
   <tr>
     <td align="center"><b>Haze</b><br><sub>Soft glowing clouds drifting into each other, in warm earthy palettes with film grain.</sub></td>
-    <td align="center"><b>Dune</b><br><sub>Layered dunes under a sky that follows your clock: dawn, noon, dusk and a starry night.</sub></td>
+    <td align="center"><b>Horizon</b><br><sub>Dunes, a coast, mountains or a city under a sky that follows your clock and your real weather.</sub></td>
     <td align="center"><b>Deco</b><br><sub>An Art Deco sunburst with gold rays and arches; a slow shimmer sweeps across.</sub></td>
   </tr>
 </table>
@@ -76,8 +76,11 @@ Labels are optional: without them the GLSL name is shown. hive shows the Turkish
 | `iTime`, `iResolution`, `iMouse` | as on Shadertoy |
 | `iChannel0..3` | the buffers (`buf A`..`buf D`) |
 | `iAudio` | audio data for reacting to music |
+| `iWeather` | the weather where you are: cloud, rain, snow, fog (0..1 each; rain is 1 in a thunderstorm) |
 
 Examples in [`ornekler/`](ornekler).
+
+A wallpaper that reads `iWeather` makes the engine look up your approximate location from your IP ([geojs.io](https://www.geojs.io)) and the current weather ([Open-Meteo](https://open-meteo.com)), every 30 minutes and only while it is running. To skip the IP lookup, put `konum = 41.01, 28.97` (latitude, longitude) in `cheshire.ini`. Previews use clear weather unless you pass `--hava cloud,rain,snow,fog`.
 
 ## Build
 

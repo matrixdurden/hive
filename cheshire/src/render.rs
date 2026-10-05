@@ -29,6 +29,7 @@ struct Globals {
     channel_resolution: [[f32; 4]; 4],
     frame_rate: f32,
     _pad: [f32; 3],
+    weather: [f32; 4],
 }
 
 /// Bir kare için dış dünyadan gelen girdiler. Fare, çıktı pikselinde ve sol alt orijinlidir.
@@ -42,6 +43,8 @@ pub struct Inputs {
     pub date: [f32; 4],
     pub battery: f32,
     pub local_time: f32,
+    /// (bulut, yağmur, kar, sis), bkz. `weather`.
+    pub weather: [f32; 4],
 }
 
 const SUPPORT_WGSL: &str = r#"
@@ -402,6 +405,7 @@ impl Engine {
             channel_resolution,
             frame_rate: input.frame_rate,
             _pad: [0.0; 3],
+            weather: input.weather,
         };
         gpu.queue.write_buffer(&self.globals, 0, bytemuck::bytes_of(&g));
 

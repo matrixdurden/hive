@@ -21,6 +21,7 @@ layout(set = 0, binding = 0, std140) uniform DuvarGlobals {
     float iLocalTime;
     vec3 iChannelResolution[4];
     float iFrameRate;
+    vec4 iWeather;
 };
 layout(set = 0, binding = 1, std140) uniform DuvarParams { vec4 duvar_p[16]; };
 layout(set = 0, binding = 2) uniform sampler duvar_smp;

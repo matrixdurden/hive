@@ -1,17 +1,39 @@
 // @cheshire
-// ad: Dune
-// ad.tr: Kum
+// ad: Horizon
+// ad.tr: Ufuk
 // yazar: Claude
-// fps: 20
+// fps: 30
+// param yer "Place" "Yer": dune [dune/çöl, coast/sahil, peaks/dağ, city/şehir]
+// param hava "Weather" "Hava": live [live/canlı, clear/açık, clouds/bulutlu, rain/yağmur, snow/kar, fog/sis, storm/fırtına]
 // param saat "Follow the clock" "Saati izle": on
 // param an "Time of day" "Günün saati": 0.75 [0, 1]
 // param hiz "Drift" "Kayma": 1.0 [0, 3]
 // param tane "Film grain" "Film tanesi": 1.0 [0, 2]
 //
-// Katman katman kum tepeleri; gökyüzü ve ışık bilgisayarın saatini izler: gece lacivert ve
-// yıldızlı, şafak şeftali, öğle açık kum, akşam terrakota. Güneş soldan doğar, sağdan batar; gece
-// ay çıkar. Uzaktaki tepeler gökyüzüne karışır (hava perspektifi), yakındakiler daha koyu ve
-// yavaşça kayar. `saat` kapalıyken `an` kullanılır (0 gece yarısı, 0.5 öğle).
+// Dört manzara (çöl, sahil, dağ, şehir); gökyüzü bilgisayarın saatini, hava da bulunduğun yerin
+// gerçek havasını izler (iWeather: bulut, yağmur, kar, sis). Gece lacivert ve yıldızlı, şafak
+// şeftali, öğle açık, akşam terrakota; güneş soldan doğar, sağdan batar, gece ay çıkar. Bulutlar
+// gökyüzünü kapatır ve ışığı griye çeker; yağmur, kar, sis ve fırtınada şimşek. Uzaktaki katmanlar
+// gökyüzüne karışır. `saat` kapalıyken `an` kullanılır (0 gece yarısı, 0.5 öğle), `hava` canlı
+// değilken seçilen hava gösterilir.
+
+struct Scene {
+    vec2 uv;
+    float px;
+    float aspect;
+    float t;
+    vec3 lite;  // ortam ışığının rengi
+    vec3 hor;
+    vec3 zen;
+    vec3 fogc;
+    float day;
+    float night;
+    vec4 w;     // bulut, yağmur, kar, sis
+    float oc;   // kapalılık
+    vec2 sun;
+    vec2 moon;
+    float clear; // gök ne kadar açık (güneş, ay, yansımalar)
+};
 
 float hash12(vec2 p) {
     vec3 p3 = fract(vec3(p.xyx) * 0.1031);
@@ -19,32 +41,90 @@ float hash12(vec2 p) {
     return fract((p3.x + p3.y) * p3.z);
 }
 
-// Dört anahtar an: 0 gece, 1 şafak, 2 öğle, 3 akşam. ufuk, tepe ve kum rengi.
-void key(int k, out vec3 hor, out vec3 zen, out vec3 sand) {
+float hash11(float p) {
+    p = fract(p * 0.1031);
+    p *= p + 33.33;
+    p *= p + p;
+    return fract(p);
+}
+
+float noise(vec2 p) {
+    vec2 i = floor(p);
+    vec2 f = fract(p);
+    f = f * f * (3.0 - 2.0 * f);
+    float a = hash12(i);
+    float b = hash12(i + vec2(1.0, 0.0));
+    float c = hash12(i + vec2(0.0, 1.0));
+    float d = hash12(i + vec2(1.0, 1.0));
+    return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
+}
+
+float fbm(vec2 p) {
+    float s = 0.0;
+    float a = 0.5;
+    for (int i = 0; i < 4; i++) {
+        s += a * noise(p);
+        p = p * 2.03 + 17.1;
+        a *= 0.5;
+    }
+    return s;
+}
+
+vec3 grey(vec3 c) {
+    return vec3(dot(c, vec3(0.3, 0.55, 0.15)));
+}
+
+// Dört anahtar an: 0 gece, 1 şafak, 2 öğle, 3 akşam. ufuk, tepe ve ortam ışığı.
+void key(int k, out vec3 hor, out vec3 zen, out vec3 lite) {
     if (k == 0) {
-        hor = vec3(0.10, 0.12, 0.22); zen = vec3(0.02, 0.03, 0.08); sand = vec3(0.30, 0.32, 0.46);
+        hor = vec3(0.10, 0.12, 0.22); zen = vec3(0.02, 0.03, 0.08); lite = vec3(0.36, 0.44, 0.78);
     } else if (k == 1) {
-        hor = vec3(0.98, 0.66, 0.48); zen = vec3(0.32, 0.38, 0.62); sand = vec3(0.72, 0.46, 0.38);
+        hor = vec3(0.98, 0.66, 0.48); zen = vec3(0.32, 0.38, 0.62); lite = vec3(0.86, 0.68, 0.64);
     } else if (k == 2) {
-        hor = vec3(0.90, 0.84, 0.72); zen = vec3(0.50, 0.66, 0.84); sand = vec3(0.86, 0.66, 0.46);
+        hor = vec3(0.90, 0.84, 0.72); zen = vec3(0.50, 0.66, 0.84); lite = vec3(1.00, 0.98, 0.94);
     } else {
-        hor = vec3(0.96, 0.52, 0.32); zen = vec3(0.28, 0.20, 0.38); sand = vec3(0.66, 0.34, 0.24);
+        hor = vec3(0.96, 0.52, 0.32); zen = vec3(0.28, 0.20, 0.38); lite = vec3(0.82, 0.52, 0.42);
     }
 }
 
-void sky(float p, out vec3 hor, out vec3 zen, out vec3 sand) {
+void sky(float p, out vec3 hor, out vec3 zen, out vec3 lite) {
     float x = fract(p) * 4.0;
     int k = int(floor(x));
     float f = smoothstep(0.0, 1.0, fract(x));
-    vec3 h0, z0, s0, h1, z1, s1;
-    key(k, h0, z0, s0);
-    key(k == 3 ? 0 : k + 1, h1, z1, s1);
+    vec3 h0, z0, l0, h1, z1, l1;
+    key(k, h0, z0, l0);
+    key(k == 3 ? 0 : k + 1, h1, z1, l1);
     hor = mix(h0, h1, f);
     zen = mix(z0, z1, f);
-    sand = mix(s0, s1, f);
+    lite = mix(l0, l1, f);
 }
 
-// Tepe silüeti: birkaç sinüsün toplamı, katmana göre farklı.
+vec4 weather() {
+    int h = int(hava + 0.5);
+    if (h == 0) return clamp(iWeather, 0.0, 1.0);
+    if (h == 1) return vec4(0.0);
+    if (h == 2) return vec4(0.75, 0.0, 0.0, 0.0);
+    if (h == 3) return vec4(0.9, 0.6, 0.0, 0.0);
+    if (h == 4) return vec4(0.9, 0.0, 0.6, 0.0);
+    if (h == 5) return vec4(0.5, 0.0, 0.0, 1.0);
+    return vec4(1.0, 1.0, 0.0, 0.0);
+}
+
+// Uzaklık (depth 0 yakın, 1 uzak): gökyüzüne karışır, sisle örtülür.
+vec3 ground(Scene s, vec3 c, float depth) {
+    c = mix(c, grey(c), s.oc * 0.45);
+    c = mix(c, s.hor, depth * 0.55 * (0.5 + 0.5 * s.day));
+    return mix(c, s.fogc, s.w.w * (0.25 + 0.65 * depth));
+}
+
+// Yüzeyin ışığı: renk × ortam ışığı, gece daha koyu; karda beyaza döner.
+vec3 lit(Scene s, vec3 albedo, float snow) {
+    albedo = mix(albedo, vec3(0.92, 0.94, 1.0), snow);
+    return albedo * s.lite * (0.55 + 0.45 * s.day);
+}
+
+// --- Çöl ---
+
 float ridge(float x, float i, float t) {
     float s = i * 1.7 + 0.3;
     return 0.6 * sin(x * (1.3 + i * 0.35) + s + t)
@@ -52,50 +132,269 @@ float ridge(float x, float i, float t) {
          + 0.1 * sin(x * (6.1 + i) + s * 2.1);
 }
 
+vec3 dune(Scene s, vec3 col) {
+    for (int k = 0; k < 4; k++) {
+        float i = float(k);
+        float base = -0.02 - i * 0.11;
+        float amp = 0.05 + i * 0.022;
+        float h = base + amp * ridge(s.uv.x * (1.0 + i * 0.25), i, s.t * (0.4 + i * 0.5));
+        float inside = smoothstep(s.px, -s.px, s.uv.y - h);
+        // Sırtta ince aydınlık, aşağı doğru gölge: kum gibi yumuşak bir hacim.
+        float shade = mix(0.78, 1.06, smoothstep(h - 0.14, h, s.uv.y));
+        float depth = 1.0 - i / 3.0;
+        vec3 layer = lit(s, vec3(0.86, 0.66, 0.46), s.w.z * 0.6) * shade * (0.50 + 0.35 * (1.0 - depth));
+        col = mix(col, ground(s, layer, depth), inside);
+    }
+    return col;
+}
+
+// --- Sahil ---
+
+vec3 coast(Scene s, vec3 col) {
+    vec2 uv = s.uv;
+    float hy = -0.06;
+    float hw = s.aspect * 0.5;
+
+    // Sağda uzak bir burun.
+    float cx = hw * 0.55;
+    float hh = hy + 0.085 * exp(-pow((uv.x - cx) / (0.22 * hw), 2.0)) * (0.8 + 0.2 * noise(vec2(uv.x * 14.0, 3.0)));
+    vec3 rock = lit(s, vec3(0.34, 0.40, 0.32), s.w.z * 0.5) * 0.7;
+    col = mix(col, ground(s, rock, 0.85), smoothstep(s.px, -s.px, uv.y - hh));
+
+    // Deniz: ufukta gökyüzünü yansıtır, yakında koyulaşır.
+    float dz = max(hy - uv.y, 0.0);
+    float z = 0.05 / (dz + 0.004);
+    vec3 refl = mix(s.hor, s.zen, 0.25) * 0.85;
+    vec3 deep = vec3(0.09, 0.28, 0.36) * s.lite * (0.45 + 0.55 * s.day);
+    vec3 sea = mix(refl, deep, smoothstep(0.0, 0.16, dz));
+    // Dalga çizgileri: perspektifte sıkışır, kıyıya doğru akar.
+    float wv = noise(vec2(uv.x * z * 1.2, z * 9.0 + iTime * 0.5));
+    sea *= 0.9 + 0.2 * wv;
+    sea += s.lite * 0.07 * smoothstep(0.6, 0.85, wv) * smoothstep(0.0, 0.02, dz);
+    // Güneş ya da ay yolu: suya düşen ışıltı sütunu.
+    bool sunUp = s.sun.y > hy;
+    vec2 src = sunUp ? s.sun : s.moon;
+    float vis = sunUp ? 1.0 : s.night * step(hy, s.moon.y);
+    vec3 srcCol = sunUp ? mix(vec3(1.0, 0.6, 0.35), vec3(1.0, 0.95, 0.82), s.day) : vec3(0.75, 0.8, 1.0);
+    float column = exp(-pow((uv.x - src.x) / (0.03 + dz * 0.45), 2.0));
+    float sparkle = smoothstep(0.55, 0.9, noise(vec2(uv.x * z * 30.0, z * 40.0 + iTime * 1.3)));
+    sea += srcCol * column * (0.12 + 0.9 * sparkle) * 0.55 * s.clear * vis;
+
+    // Kıyı: dalgalar yavaşça gelip gider, köpük çizgisi, ıslak kum.
+    float hb = -0.33 + 0.02 * sin(uv.x * 2.3 + 0.7) + 0.01 * sin(uv.x * 5.1);
+    float edge = hb + 0.012 * sin(iTime * 0.45) + 0.006 * sin(iTime * 0.9 + uv.x * 3.0);
+    vec3 sand = lit(s, vec3(0.86, 0.74, 0.56), s.w.z * 0.6);
+    sea = mix(sea, sand * 0.75, smoothstep(edge + 0.05, edge, uv.y) * 0.5); // sığ su
+    sea = ground(s, sea, smoothstep(0.2, 0.0, dz) * 0.8);
+    col = mix(col, sea, smoothstep(-s.px, s.px, hy - uv.y));
+
+    sand *= 1.0 - 0.3 * smoothstep(edge - 0.05, edge, uv.y);
+    sand = ground(s, sand, 0.0);
+    col = mix(col, sand, smoothstep(s.px, -s.px, uv.y - edge));
+    float foam = smoothstep(0.008, 0.0, abs(uv.y - edge)) * (0.4 + 0.6 * noise(vec2(uv.x * 25.0, iTime * 0.4)));
+    col += s.lite * foam * 0.35;
+    return col;
+}
+
+// --- Dağ ---
+
+// Sivri sırtlar: |2n-1| tepeleri keskinleştirir.
+float peakH(float x, float i) {
+    float s = 0.0;
+    float a = 0.5;
+    float f = 1.0;
+    for (int o = 0; o < 4; o++) {
+        float n = noise(vec2(x * f + i * 13.7, i * 7.1 + float(o) * 3.3));
+        s += a * (1.0 - abs(n * 2.0 - 1.0));
+        f *= 2.2;
+        a *= 0.45;
+    }
+    return s;
+}
+
+vec3 peaks(Scene s, vec3 col) {
+    // Önden arkaya: tamamen örten katmandan sonra arkadakiler hesaplanmaz.
+    vec3 acc = vec3(0.0);
+    float cover = 0.0;
+    for (int k = 3; k >= 0; k--) {
+        float i = float(k);
+        float base = 0.02 - i * 0.1;
+        float amp = 0.36 - i * 0.06;
+        if (s.uv.y > base + amp) continue;
+        float x = s.uv.x * (0.9 + i * 0.35) + i * 3.1 + s.t * i * 0.3;
+        float h = base + amp * peakH(x, i);
+        float inside = smoothstep(s.px, -s.px, s.uv.y - h);
+        if (inside <= 0.0) continue;
+        // Yamacın hangi yana baktığı: sırttan aşağı çapraz inen bir noktadaki eğim. Böylece
+        // aydınlık ve gölgeli yüzleri ayıran çizgiler tepelerden yamaç boyunca eğik iner.
+        float xs = x + (h - s.uv.y) / amp * 0.35;
+        float slope = (peakH(xs + 0.004, i) - peakH(xs, i)) / 0.004;
+        float side = clamp(slope * 0.6 * -sign(s.sun.x), -1.0, 1.0) * (0.3 + 0.7 * s.day) * s.clear;
+        float shade = (0.84 + 0.2 * side) * mix(0.85, 1.0, smoothstep(h - amp * 0.6, h, s.uv.y));
+        // Kar başlıkları: uzak sıradağlarda, karlı havada aşağı iner.
+        float line = base + amp * (0.5 - 0.25 * s.w.z) + 0.015 * noise(vec2(x * 25.0, i));
+        float cap = smoothstep(line - 0.008, line + 0.008, s.uv.y) * clamp(1.0 - i * 0.7 + s.w.z * 1.5, 0.0, 1.0);
+        vec3 alb = mix(vec3(0.38, 0.40, 0.46), vec3(0.20, 0.28, 0.21), i / 3.0);
+        alb = mix(alb, vec3(0.93, 0.95, 1.0), cap);
+        float depth = 1.0 - i / 3.0;
+        vec3 layer = lit(s, alb, s.w.z * 0.45) * shade * (0.55 + 0.35 * (1.0 - depth));
+        layer = ground(s, layer, depth);
+        acc += (1.0 - cover) * inside * layer;
+        cover += (1.0 - cover) * inside;
+        if (cover > 0.999) break;
+    }
+    return acc + (1.0 - cover) * col;
+}
+
+// --- Şehir ---
+
+vec3 city(Scene s, vec3 col) {
+    vec2 uv = s.uv;
+    // Gece şehir ışıkları ufku turuncuya boyar.
+    col += vec3(0.22, 0.13, 0.06) * s.night * exp(-max(uv.y + 0.04, 0.0) * 7.0) * 0.6;
+    for (int k = 0; k < 3; k++) {
+        float i = float(k);
+        float cw = 0.045 + i * 0.03;
+        float base = -0.04 - i * 0.12;
+        float x = uv.x / cw + i * 17.0;
+        float cell = floor(x);
+        float lx = fract(x);
+        float r = hash12(vec2(cell, i * 11.0));
+        float tall = step(0.86, hash12(vec2(cell * 1.3, i + 5.0)));
+        float top = base + (0.05 + 0.10 * r + 0.12 * tall) * (1.0 - i * 0.2);
+        float gap = 0.06 + 0.12 * hash12(vec2(cell, i + 9.0));
+        float e = s.px / cw;
+        float inB = smoothstep(gap - e, gap + e, lx) * smoothstep(1.0 - gap * 0.3 + e, 1.0 - gap * 0.3 - e, lx);
+        float body = inB * smoothstep(s.px, -s.px, uv.y - top);
+        // Yüksek kulelerde anten.
+        float mast = tall * step(abs(lx - 0.5) * cw, s.px * 0.8) * step(uv.y, top + 0.03) * step(top, uv.y);
+        float street = smoothstep(s.px, -s.px, uv.y - base);
+        float inside = max(max(body, mast), street);
+
+        vec3 alb = mix(vec3(0.30, 0.33, 0.40), vec3(0.42, 0.40, 0.38), hash12(vec2(cell, i + 3.0)));
+        alb = mix(alb, vec3(0.24, 0.25, 0.28), street * (1.0 - body));
+        float depth = 1.0 - i / 2.0;
+        vec3 layer = lit(s, alb, 0.0) * (0.5 + 0.35 * (1.0 - depth));
+        // Pencereler: gündüz gökyüzünü yansıtır, gece bir kısmı yanar ve zamanla değişir.
+        float fx = (lx - gap) / (1.0 - gap * 1.3);
+        float wh = 0.008 + i * 0.004;
+        float wxi = floor(fx * 4.0);
+        float wxf = fract(fx * 4.0);
+        float wyi = floor((uv.y - base) / wh);
+        float wyf = fract((uv.y - base) / wh);
+        float win = body * step(0.25, wxf) * step(wxf, 0.75) * step(0.3, wyf) * step(wyf, 0.8)
+                  * step(uv.y, top - wh * 0.8);
+        layer = mix(layer, mix(s.hor, s.zen, 0.5) * 0.6, win * 0.35 * s.day);
+        layer = ground(s, layer, depth);
+        float id = hash12(vec2(cell, wyi * 3.1 + wxi));
+        float on = step(hash12(vec2(cell * 7.0 + wxi, wyi + i * 50.0 + floor(iTime / 40.0 + id * 7.0) * 13.0)), 0.05 + 0.4 * s.night);
+        vec3 wc = mix(vec3(1.0, 0.72, 0.40), vec3(0.75, 0.85, 1.0), step(0.8, id));
+        layer += wc * win * on * (0.15 + 0.85 * s.night) * (1.0 - 0.6 * s.w.w * depth) * (k == 0 ? 0.6 : 1.0);
+        col = mix(col, layer, inside);
+        // Anten ucunda yanıp sönen kırmızı ışık.
+        float d = length(vec2((lx - 0.5) * cw, uv.y - top - 0.03));
+        float blink = step(0.5, fract(iTime * 0.5 + r));
+        col += vec3(1.0, 0.15, 0.1) * tall * smoothstep(0.004, 0.0015, d) * blink * (0.3 + 0.7 * s.night);
+    }
+    return col;
+}
+
+// --- Yağış ---
+
+float rain(vec2 uv, float scale, float speed, float seed, float amount) {
+    vec2 p = uv * scale;
+    p.x += p.y * 0.15; // hafif eğik
+    float c = floor(p.x);
+    float y = fract(p.y * 0.08 + iTime * speed + hash11(c + seed));
+    float streak = smoothstep(0.0, 0.04, y) * smoothstep(0.22, 0.04, y);
+    float x = abs(fract(p.x) - 0.5);
+    return streak * smoothstep(0.07, 0.0, x) * step(hash11(c * 1.7 + seed), amount);
+}
+
+float snow(vec2 uv, float scale, float speed, float seed, float amount) {
+    vec2 p = uv * scale;
+    p.y += iTime * speed;
+    p.x += sin(p.y * 0.6 + seed) * 0.35; // savrulma
+    vec2 c = floor(p);
+    vec2 f = fract(p) - 0.5;
+    vec2 o = vec2(hash12(c + seed + 3.1), hash12(c + seed + 5.7)) - 0.5;
+    return step(hash12(c + seed), amount) * smoothstep(0.12, 0.04, length(f - o * 0.6));
+}
+
 void mainImage(out vec4 fragColor, in vec2 fragCoord) {
     vec2 uv = (fragCoord - 0.5 * iResolution.xy) / iResolution.y;
     float aspect = iResolution.x / iResolution.y;
-    float px = 1.0 / iResolution.y;
 
     float p = saat >= 0.5 ? iDate.w / 86400.0 : an;
-    vec3 hor, zen, sand;
-    sky(p, hor, zen, sand);
-    // Gündüz ışığı: gece 0, öğle 1.
+    vec3 hor, zen, lite;
+    sky(p, hor, zen, lite);
+    // Gündüz ışığı: gece 0, öğle 1. Yıldızlar ve ay ancak gerçekten kararınca çıkar.
     float day = smoothstep(-0.25, 0.35, sin((p - 0.25) * 6.2831853));
+    float night = pow(1.0 - smoothstep(0.0, 0.4, day), 2.0);
 
-    // Gökyüzü.
+    // Kapalı hava gökyüzünü ve ışığı griye çeker.
+    vec4 w = weather();
+    float oc = clamp(w.x * 0.7 + (w.y + w.z) * 0.6 + w.w * 0.4, 0.0, 0.95);
+    hor = mix(hor, grey(hor) * 0.85, oc);
+    zen = mix(zen, mix(grey(zen), grey(hor), 0.4) * 0.8, oc);
+    lite = mix(lite, grey(lite) * 0.8, oc * 0.8);
+    vec3 fogc = mix(grey(hor), lite, 0.15);
+
     vec3 col = mix(hor, zen, smoothstep(-0.05, 0.55, uv.y));
 
-    // Yıldızlar: yalnızca gece, hafifçe göz kırpar.
+    // Bulutlar: gökyüzüne yatırılmış bir düzlemde sürüklenir; ufka doğru sıkışır.
+    float cover = 0.0;
+    if (w.x > 0.01) {
+        float sy = max(uv.y + 0.3, 0.06);
+        float cn = fbm(vec2(uv.x / sy * 0.5 + iTime * 0.004 * hiz, 1.2 / sy));
+        float th = mix(0.78, 0.22, w.x);
+        cover = smoothstep(th, th + 0.22, cn) * smoothstep(-0.12, 0.05, uv.y);
+        vec3 cc = mix(grey(zen) * 0.7 + lite * 0.15 + hor * 0.05, lite * 0.9 + hor * 0.15, smoothstep(0.3, 0.9, cn));
+        col = mix(col, cc * (1.0 - 0.45 * oc), cover * 0.92);
+    }
+    col = mix(col, fogc, w.w * 0.5);
+    float clear = (1.0 - cover) * (1.0 - oc * 0.85);
+
     vec2 g = floor(fragCoord / 3.0);
     float star = step(0.9975, hash12(g)) * (0.6 + 0.4 * sin(iTime * 2.0 + hash12(g + 7.0) * 30.0));
-    // Gece: yıldızlar ve ay ancak gerçekten kararınca çıkar.
-    float night = pow(1.0 - smoothstep(0.0, 0.4, day), 2.0);
-    col += star * night * smoothstep(0.0, 0.3, uv.y) * 0.9;
+    col += star * night * clear * smoothstep(0.0, 0.3, uv.y) * 0.9;
 
     // Güneş (6'da solda doğar, 18'de sağda batar) ve gece karşısında ay.
     float a = (p - 0.25) * 6.2831853;
     vec2 sun = vec2(-cos(a) * 0.62 * aspect * 0.8, sin(a) * 0.42 - 0.08);
     vec2 moon = vec2(cos(a) * 0.62 * aspect * 0.8, -sin(a) * 0.42 - 0.08);
-    float ds = length(uv - sun), dm = length(uv - moon);
+    float ds = length(uv - sun);
+    float dm = length(uv - moon);
     vec3 sunCol = mix(vec3(1.0, 0.62, 0.38), vec3(1.0, 0.95, 0.82), day);
-    col += sunCol * (smoothstep(0.055, 0.050, ds) * 0.9 + 0.18 * exp(-ds * 6.0)) * step(-0.12, sun.y);
-    col += vec3(0.85, 0.88, 1.0) * smoothstep(0.035, 0.031, dm) * night * step(-0.12, moon.y);
+    col += sunCol * (smoothstep(0.055, 0.050, ds) * 0.9 * clear + 0.18 * exp(-ds * 6.0) * (1.0 - oc * 0.7)) * step(-0.12, sun.y);
+    col += vec3(0.85, 0.88, 1.0) * smoothstep(0.035, 0.031, dm) * night * clear * step(-0.12, moon.y);
 
-    // Tepeler: uzaktan yakına; uzaktakiler gökyüzüne karışır, yakındakiler koyulaşır ve kayar.
-    float t = iTime * 0.02 * hiz;
-    for (int k = 0; k < 4; k++) {
-        float i = float(k);
-        float base = -0.02 - i * 0.11;
-        float amp = 0.05 + i * 0.022;
-        float h = base + amp * ridge(uv.x * (1.0 + i * 0.25), i, t * (0.4 + i * 0.5));
-        float inside = smoothstep(px, -px, uv.y - h);
-        // Sırtta ince aydınlık, aşağı doğru gölge: kum gibi yumuşak bir hacim.
-        float shade = mix(0.78, 1.06, smoothstep(h - 0.14, h, uv.y));
-        float depth = 1.0 - i / 3.0;
-        vec3 layer = sand * (0.55 + 0.45 * day) * shade * (0.50 + 0.35 * (1.0 - depth));
-        layer = mix(layer, hor, depth * 0.55 * (0.5 + 0.5 * day));
-        col = mix(col, layer, inside);
+    Scene s = Scene(uv, 1.0 / iResolution.y, aspect, iTime * 0.02 * hiz, lite, hor, zen, fogc, day, night, w, oc, sun, moon, clear);
+    int place = int(yer + 0.5);
+    if (place == 0) {
+        col = dune(s, col);
+    } else if (place == 1) {
+        col = coast(s, col);
+    } else if (place == 2) {
+        col = peaks(s, col);
+    } else {
+        col = city(s, col);
+    }
+
+    // Yağmur ve kar ekranın önünde; fırtınada ara sıra şimşek.
+    vec3 drop = mix(lite, vec3(0.8), 0.4) * (0.35 + 0.4 * day);
+    if (w.y > 0.01) {
+        col += drop * 0.7 * (rain(uv, 70.0, 1.6, 1.0, w.y) + 0.6 * rain(uv, 130.0, 1.2, 7.0, w.y));
+        col *= 1.0 - 0.12 * w.y;
+    }
+    if (w.z > 0.01) {
+        col += vec3(0.9, 0.93, 1.0) * (0.45 + 0.4 * day) * (snow(uv, 28.0, 1.1, 1.0, w.z * 0.6) + 0.7 * snow(uv, 55.0, 0.7, 9.0, w.z * 0.5));
+    }
+    if (w.y > 0.95) {
+        float tt = iTime * 0.2;
+        float ph = fract(tt);
+        float flash = step(0.55, hash11(floor(tt))) * (exp(-ph * 90.0) + 0.6 * exp(-abs(ph - 0.03) * 120.0));
+        col += vec3(0.65, 0.7, 0.85) * flash * 0.45;
     }
 
     col *= 1.0 - 0.18 * dot(uv, uv);

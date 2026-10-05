@@ -3,7 +3,7 @@
 //! Ne zaman çizileceği shader'ın kullandığı girdilere göre seçilir:
 //!   Sürekli  — iTime / iAudio / iChannel okuyan buffer var: fps sınırında
 //!   Fare     — yalnızca iMouse: imleç değişince
-//!   Saat     — yalnızca iDate / iLocalTime / iBattery: saniyede bir
+//!   Saat     — yalnızca iDate / iLocalTime / iBattery / iWeather: saniyede bir
 //!   Durağan  — hiçbiri: yalnızca boyut ya da parametre değişince
 //! Duraklatılınca (tam ekran, kilit, pil...) süresiz beklenir; hiçbir zamanlayıcı kurulmaz.
 
@@ -118,7 +118,7 @@ fn mode_of(e: &Engine) -> Mode {
         Mode::Continuous
     } else if u.mouse {
         Mode::Mouse
-    } else if u.clock || u.battery {
+    } else if u.clock || u.battery || u.weather {
         Mode::Clock
     } else {
         Mode::Static
@@ -240,6 +240,7 @@ pub struct App {
 impl App {
     pub fn new() -> Res<Self> {
         let cfg = Config::load();
+        crate::weather::set_location(cfg.location.as_deref());
         ensure_wallpapers();
         // hive modunda kayıtlar ve güncelleme hive'da.
         if !hub::active() {
@@ -664,6 +665,7 @@ impl App {
             date,
             battery: util::battery_level(),
             local_time,
+            weather: crate::weather::current(),
         };
         let mut encoder = self.gpu.device.create_command_encoder(&Default::default());
         engine.render(&self.gpu, &mut encoder, &view, &input);
@@ -695,6 +697,7 @@ impl App {
             (false, true) => self.audio = None,
             _ => {}
         }
+        crate::weather::want(running && self.engine.as_ref().is_some_and(|e| e.duvar.usage.weather));
     }
 
     pub fn run(mut self) -> Res<()> {

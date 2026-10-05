@@ -161,7 +161,7 @@ impl Drop for Handle {
 }
 
 /// HTTPS GET; yönlendirmeleri (github.com → CDN) WinHTTP kendisi izler. Proxy ayarı sistemden gelir.
-fn get(url: &str, api: bool) -> Res<(u32, Vec<u8>)> {
+pub fn get(url: &str, api: bool) -> Res<(u32, Vec<u8>)> {
     let rest = url.strip_prefix("https://").ok_or("yalnızca https")?;
     let (host, path) = rest.split_once('/').map_or((rest, "/".to_string()), |(h, p)| (h, format!("/{p}")));
     let agent = wide(concat!("cheshire/", env!("CARGO_PKG_VERSION")));

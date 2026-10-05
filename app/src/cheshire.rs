@@ -7,7 +7,7 @@
 
 use std::collections::HashMap;
 use std::os::windows::process::CommandExt;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::{Arc, Mutex};
 use std::time::{Instant, UNIX_EPOCH};
@@ -81,6 +81,18 @@ fn wallpapers_dir() -> PathBuf {
 
 fn thumbs_dir() -> PathBuf {
     util::data_dir().join("onizleme")
+}
+
+/// Aynı duvar kâğıdının eski sürümlerine ait küçük resimleri siler.
+fn remove_old_thumbs(file: &str, keep: &Path) {
+    let prefix = format!("{file}-");
+    for e in std::fs::read_dir(thumbs_dir()).into_iter().flatten().flatten() {
+        let p = e.path();
+        let name = e.file_name().to_string_lossy().into_owned();
+        if p != keep && name.starts_with(&prefix) && name.ends_with(".png") {
+            let _ = std::fs::remove_file(p);
+        }
+    }
 }
 
 pub fn installed() -> bool {
@@ -363,7 +375,8 @@ pub struct Cheshire {
     st: State,
     /// Motor açılıyor: ilk durum gelene kadar.
     starting: bool,
-    thumbs: HashMap<String, ImageId>,
+    /// Yüklü küçük resimler: dosya → (PNG yolu, resim). Yol dosyanın değişme zamanını taşır.
+    thumbs: HashMap<String, (PathBuf, ImageId)>,
     /// Üretilen küçük resimler: (dosya, PNG yolu); WM_THUMB'da yüklenir.
     ready: Arc<Mutex<Vec<(String, PathBuf)>>>,
     generating: Arc<Mutex<bool>>,
@@ -457,14 +470,14 @@ impl Cheshire {
         Some(thumbs_dir().join(format!("{file}-{secs}.png")))
     }
 
-    /// Eksik küçük resimleri sırayla üretir (her biri ayrı bir `--onizleme` süreci).
+    /// Eksik ya da eskimiş küçük resimleri sırayla üretir (her biri ayrı bir `--onizleme` süreci).
     fn make_thumbs(&mut self) {
         let missing: Vec<(String, PathBuf)> = self
             .st
             .walls
             .iter()
-            .filter(|(f, _, _)| !self.thumbs.contains_key(f))
             .filter_map(|(f, _, _)| Self::thumb_path(f).map(|p| (f.clone(), p)))
+            .filter(|(f, p)| self.thumbs.get(f).is_none_or(|(old, _)| old != p))
             .collect();
         if missing.is_empty() || std::mem::replace(&mut *self.generating.lock().unwrap(), true) {
             return;
@@ -500,9 +513,11 @@ impl Cheshire {
     pub fn load_thumbs(&mut self, g: &mut Gfx) {
         let ready = std::mem::take(&mut *self.ready.lock().unwrap());
         for (file, path) in ready {
-            match g.load_image_file(&path) {
+            let reuse = self.thumbs.get(&file).map(|&(_, id)| id);
+            match g.load_image_file(&path, reuse) {
                 Ok(id) => {
-                    self.thumbs.insert(file, id);
+                    remove_old_thumbs(&file, &path);
+                    self.thumbs.insert(file, (path, id));
                 }
                 Err(e) => log!("önizleme yüklenemedi: {e}"),
             }
@@ -776,8 +791,8 @@ impl Cheshire {
                 let hovered = self.hover == Hit::Wall(i);
                 let img = Rect::new(c.l, c.t, c.r, c.b - 34.0);
                 g.fill(img, 8.0, HOVER);
-                match self.thumbs.get(file) {
-                    Some(&id) => g.clip(img, || g.image(id, img, if hovered || selected { 1.0 } else { 0.8 })),
+                match self.thumbs.get(file).map(|&(_, id)| id) {
+                    Some(id) => g.clip(img, || g.image(id, img, if hovered || selected { 1.0 } else { 0.8 })),
                     None => g.text(t!("preparing preview…", "önizleme hazırlanıyor…"), &g.f.small_center, img, FAINT),
                 }
                 if selected {

@@ -19,6 +19,8 @@ pub struct Config {
     pub host: String,
     /// (dosya, parametre, değer) — tepsi menüsünden seçilen parametre değerleri.
     pub params: Vec<(String, String, String)>,
+    /// Hava durumu için elle konum (`enlem, boylam`); yoksa IP'den bulunur.
+    pub location: Option<String>,
 }
 
 impl Default for Config {
@@ -31,6 +33,7 @@ impl Default for Config {
             high_performance_gpu: false,
             host: "auto".into(),
             params: Vec::new(),
+            location: None,
         }
     }
 }
@@ -53,6 +56,7 @@ impl Config {
                 "otomatik_guncelle" => cfg.auto_update = v == "evet",
                 "guclu_gpu" => cfg.high_performance_gpu = v == "evet",
                 "yerlesim" => cfg.host = v.to_string(),
+                "konum" => cfg.location = (!v.is_empty()).then(|| v.to_string()),
                 _ => {
                     // param.<dosya>.<ad> — parametre adları GLSL tanımlayıcısıdır, nokta içermez.
                     if let Some((file, name)) = k.strip_prefix("param.").and_then(|r| r.rsplit_once('.')) {
@@ -76,6 +80,9 @@ impl Config {
             yn(self.high_performance_gpu),
             self.host,
         );
+        if let Some(l) = &self.location {
+            text.push_str(&format!("konum = {l}\n"));
+        }
         for (file, name, value) in &self.params {
             text.push_str(&format!("param.{file}.{name} = {value}\n"));
         }

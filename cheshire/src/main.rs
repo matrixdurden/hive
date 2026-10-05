@@ -20,6 +20,7 @@ mod timer;
 mod tray;
 mod update;
 mod util;
+mod weather;
 
 use std::path::{Path, PathBuf};
 
@@ -40,6 +41,7 @@ kullanım:
   cheshire --dogrula dosya.cheshire               derle, 120 kare çiz, GPU süresini raporla
   cheshire --onizleme dosya.cheshire cikti.png    PNG üret
         [--zaman 5] [--fare 0.5,0.5] [--basili] [--boyut 1280x720] [--param ad=deger]...
+        [--hava bulut,yagmur,kar,sis]
   cheshire --agac                                 masaüstü pencere ağacını logla
   cheshire --kur                                  bu exe'yi kur (geliştirme kopyası için)
   cheshire --kaldir                               kaldır: kayıtlar, kısayol ve kurulum klasörü
@@ -77,7 +79,13 @@ fn preview_options(args: &[String]) -> Result<headless::PreviewOptions, String> 
             params.push((k.to_string(), v.to_string()));
         }
     }
-    Ok(headless::PreviewOptions { time, mouse, pressed: args.iter().any(|a| a == "--basili"), size, params })
+    let mut weather = [0.0f32; 4];
+    if let Some(h) = flag(args, "--hava") {
+        for (w, v) in weather.iter_mut().zip(h.split(',')) {
+            *w = v.trim().parse().map_err(|_| "--hava bulut,yağmur,kar,sis (0..1) olmalı")?;
+        }
+    }
+    Ok(headless::PreviewOptions { time, mouse, pressed: args.iter().any(|a| a == "--basili"), size, params, weather })
 }
 
 /// Araç komutları: `Some(çıkış kodu)`; masaüstü modu için `None`.

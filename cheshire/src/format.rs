@@ -56,6 +56,7 @@ pub struct Usage {
     pub audio: bool,
     pub clock: bool,
     pub battery: bool,
+    pub weather: bool,
     /// Bir buffer `iChannel` okuyor: önceki kareye bağlı, her kare yeniden çizilmeli.
     pub feedback: bool,
 }
@@ -340,6 +341,7 @@ pub fn parse(src: &str) -> Res<Duvar> {
         audio: any(&["iAudio"]),
         clock: any(&["iDate", "iLocalTime"]),
         battery: any(&["iBattery"]),
+        weather: any(&["iWeather"]),
         feedback: ["iChannel0", "iChannel1", "iChannel2", "iChannel3"].iter().any(|n| buf_ids.contains(n)),
     };
     Ok(d)

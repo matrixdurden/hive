@@ -20,6 +20,8 @@ pub struct PreviewOptions {
     pub pressed: bool,
     pub size: (u32, u32),
     pub params: Vec<(String, String)>,
+    /// `iWeather`; önizleme ağa çıkmaz, varsayılan açık hava.
+    pub weather: [f32; 4],
 }
 
 fn load(path: &Path) -> Result<Duvar, String> {
@@ -57,6 +59,7 @@ fn inputs(frame: u32, mouse: [f32; 4]) -> Inputs {
         date,
         battery: util::battery_level(),
         local_time,
+        weather: [0.0; 4],
     }
 }
 
@@ -151,7 +154,7 @@ pub fn validate(path: &Path) -> Res<bool> {
         .filter_map(|(n, b)| b.as_ref().map(|_| *n))
         .collect();
     let u = &d.usage;
-    let used: Vec<&str> = [(u.time, "zaman"), (u.mouse, "fare"), (u.audio, "ses"), (u.clock, "saat"), (u.battery, "pil"), (u.feedback, "geri besleme")]
+    let used: Vec<&str> = [(u.time, "zaman"), (u.mouse, "fare"), (u.audio, "ses"), (u.clock, "saat"), (u.battery, "pil"), (u.weather, "hava"), (u.feedback, "geri besleme")]
         .iter()
         .filter_map(|(on, n)| on.then_some(*n))
         .collect();
@@ -299,6 +302,7 @@ pub fn preview(path: &Path, out: &Path, opts: &PreviewOptions) -> Res<bool> {
     for f in first..=last {
         let mut input = inputs(f, mouse);
         input.time = f as f32 * STEP;
+        input.weather = opts.weather;
         if engine.duvar.usage.audio {
             engine.set_audio(&gpu, &synthetic_audio(input.time));
         }

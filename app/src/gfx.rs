@@ -202,8 +202,9 @@ impl Gfx {
         Ok(ImageId(self.images.len() - 1))
     }
 
-    /// Diskteki resmi (önizleme PNG'si) yükler.
-    pub fn load_image_file(&mut self, path: &std::path::Path) -> Res<ImageId> {
+    /// Diskteki resmi (önizleme PNG'si) yükler. `reuse` verilirse o resmin yerine geçer: eskisi
+    /// bırakılır, dosyası da kilitten kurtulur.
+    pub fn load_image_file(&mut self, path: &std::path::Path, reuse: Option<ImageId>) -> Res<ImageId> {
         let p = crate::util::wide(&path.display().to_string());
         let conv = unsafe {
             let decoder = self.wic.CreateDecoderFromFilename(
@@ -224,7 +225,12 @@ impl Gfx {
             )?;
             conv
         };
-        self.images.push(Image { sizes: vec![(u32::MAX, conv)], cache: RefCell::new(vec![None]) });
+        let img = Image { sizes: vec![(u32::MAX, conv)], cache: RefCell::new(vec![None]) };
+        if let Some(id) = reuse {
+            self.images[id.0] = img;
+            return Ok(id);
+        }
+        self.images.push(img);
         Ok(ImageId(self.images.len() - 1))
     }
 
