@@ -18,6 +18,8 @@ use crate::util::{Res, wide};
 
 const WM_TRAY: u32 = WM_APP + 1;
 const WM_UPDATE_READY: u32 = WM_APP + 2;
+/// Arka plandaki shader derlemesi bitti.
+const WM_COMPILED: u32 = WM_APP + 3;
 const WTS_SESSION_LOCK: usize = 0x7;
 const WTS_SESSION_UNLOCK: usize = 0x8;
 const PBT_POWERSETTINGCHANGE: usize = 0x8013;
@@ -41,6 +43,8 @@ pub enum Event {
     Install(String),
     /// Yeni sürüm indirildi ve doğrulandı.
     UpdateReady,
+    /// Bir duvar kâğıdının derlemesi bitti (sonuç App'in kuyruğunda).
+    Compiled,
     /// Kurulum ya da kaldırma çalışan kopyayı kapatıyor.
     Quit,
     /// hive'dan gelen komut (bkz. hub.rs).
@@ -80,6 +84,7 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
         }
         WM_DISPLAYCHANGE => push(Event::DisplayChanged),
         WM_UPDATE_READY => push(Event::UpdateReady),
+        WM_COMPILED => push(Event::Compiled),
         WM_CLOSE => push(Event::Quit),
         WM_WTSSESSION_CHANGE => match wp.0 {
             WTS_SESSION_LOCK => push(Event::SessionLocked(true)),
@@ -263,6 +268,14 @@ impl Tray {
         let raw = self.hwnd.0 as usize;
         move || unsafe {
             let _ = PostMessageW(Some(HWND(raw as *mut _)), WM_UPDATE_READY, WPARAM(0), LPARAM(0));
+        }
+    }
+
+    /// Derleme iş parçacığından: "derleme bitti" mesajı atar.
+    pub fn compile_waker(&self) -> impl Fn() + Send + 'static {
+        let raw = self.hwnd.0 as usize;
+        move || unsafe {
+            let _ = PostMessageW(Some(HWND(raw as *mut _)), WM_COMPILED, WPARAM(0), LPARAM(0));
         }
     }
 

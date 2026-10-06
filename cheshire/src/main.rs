@@ -186,6 +186,9 @@ fn desktop(args: &[String]) -> Res<()> {
         }
         return Ok(());
     }
+    // Log ancak tek kopya olduğumuz kesinleşince açılır: dosya iletmek için açılan ikinci kopya
+    // çalışan motorun logunu sıfırlamasın.
+    log::init();
     if let Some(h) = launch.hub {
         hub::set(h);
     }
@@ -222,7 +225,6 @@ fn main() {
     if let Some(code) = tool(&args) {
         std::process::exit(code);
     }
-    log::init();
     if let Err(e) = desktop(&args) {
         log!("hata: {e}");
         util::error_box(&format!("cheshire başlatılamadı:\n\n{e}"));

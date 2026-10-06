@@ -8,6 +8,7 @@
 //! Duraklatılınca (tam ekran, kilit, pil...) süresiz beklenir; hiçbir zamanlayıcı kurulmaz.
 
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime};
 
 use windows::Win32::Foundation::POINT;
@@ -207,6 +208,14 @@ pub fn ensure_wallpapers() {
     }
 }
 
+/// Arka planda biten bir derleme. `gen` eski sonuçları ayıklar: kullanıcı derleme sürerken başka
+/// bir duvar kâğıdı seçtiyse ilk sonuç atılır.
+struct Compiled {
+    seq: u64,
+    file: String,
+    result: Result<Engine, String>,
+}
+
 pub struct App {
     cfg: Config,
     policy: Policy,
@@ -234,6 +243,16 @@ pub struct App {
     error: Option<String>,
     /// En son yayımlanan durum: değişmediyse dosya yeniden yazılmaz.
     published: String,
+    /// Yer denetimi en çok saniyede bir.
+    placed_at: Instant,
+    /// Süren derleme (dosya) ve sıra numarası; sonuç `compiled`e düşer, WM_COMPILED ile haber gelir.
+    compiling: Option<String>,
+    load_gen: u64,
+    compiled: Arc<Mutex<Option<Compiled>>>,
+    /// Açılışta kayıtlı seçim bozuksa sırayla denenecekler.
+    fallback: Vec<String>,
+    /// Pencere ilk kareden sonra gösterildi.
+    shown: bool,
     quit: bool,
 }
 
@@ -278,19 +297,19 @@ impl App {
             status: String::new(),
             error: None,
             published: String::new(),
+            placed_at: Instant::now(),
+            compiling: None,
+            load_gen: 0,
+            compiled: Arc::default(),
+            fallback: Vec::new(),
+            shown: false,
             quit: false,
             cfg,
         };
         let file = app.cfg.wallpaper.clone();
-        if app.load(&file).is_err() {
-            // Kayıtlı seçim bozuksa listedeki ilk çalışanı dene.
-            let files: Vec<String> = app.catalog.iter().map(|e| e.file.clone()).collect();
-            for f in files {
-                if app.load(&f).is_ok() {
-                    break;
-                }
-            }
-        }
+        // Kayıtlı seçim bozuksa listedekiler sırayla denenir (derleme bitince, `finish_load`).
+        app.fallback = app.catalog.iter().map(|e| e.file.clone()).filter(|f| *f != file).rev().collect();
+        app.load(&file);
         Ok(app)
     }
 
@@ -308,21 +327,48 @@ impl App {
         self.cfg.fps.min(own).max(1)
     }
 
-    /// Dosyayı derleyip uygular. Hata olursa önceki duvar kâğıdı çalışmaya devam eder.
-    fn load(&mut self, file: &str) -> Result<(), ()> {
+    /// Dosyayı okur, ayrıştırır ve derlemeyi arka plana atar; bitince `finish_load`. Derleme
+    /// büyük shader'larda saniyeler sürer (Do more: ~20 s): o sırada önceki duvar kâğıdı çalışmaya
+    /// devam eder, hive'ın arayüzü ve masaüstü donmaz.
+    fn load(&mut self, file: &str) {
         let path = util::wallpapers_dir().join(file);
-        let result = std::fs::read_to_string(&path)
+        let parsed = std::fs::read_to_string(&path)
             .map_err(|e| format!("okunamadı: {e}"))
-            .and_then(|src| format::parse(&src).map_err(|e| e.to_string()))
-            .and_then(|duvar| {
-                let size = (self.window.width, self.window.height);
-                Engine::new(&self.gpu, duvar, self.target.config.format, size)
-                    .map_err(|diags| diags.iter().map(|d| d.to_string()).collect::<Vec<_>>().join("\n"))
-            });
-        match result {
+            .and_then(|src| format::parse(&src).map_err(|e| e.to_string()));
+        let duvar = match parsed {
+            Ok(d) => d,
+            Err(e) => {
+                self.load_failed(file, &path, &e);
+                return;
+            }
+        };
+        self.load_gen += 1;
+        self.compiling = Some(file.to_string());
+        log!("derleniyor: {file}");
+        let (seq, gpu, format, size) = (self.load_gen, self.gpu.clone(), self.target.config.format, (self.window.width, self.window.height));
+        let (slot, wake, file) = (self.compiled.clone(), self.tray.compile_waker(), file.to_string());
+        std::thread::spawn(move || {
+            let result = Engine::new(&gpu, duvar, format, size)
+                .map_err(|diags| diags.iter().map(|d| d.to_string()).collect::<Vec<_>>().join("\n"));
+            *slot.lock().unwrap() = Some(Compiled { seq, file, result });
+            wake();
+        });
+    }
+
+    /// WM_COMPILED: arka plandaki derleme bitti. Hata olursa önceki duvar kâğıdı kalır.
+    fn finish_load(&mut self) {
+        let Some(c) = self.compiled.lock().unwrap().take() else { return };
+        if c.seq != self.load_gen {
+            log!("eski derleme atıldı: {}", c.file);
+            return;
+        }
+        self.compiling = None;
+        let file = c.file;
+        let path = util::wallpapers_dir().join(&file);
+        match c.result {
             Ok(mut engine) => {
                 for (i, p) in engine.duvar.params.clone().iter().enumerate() {
-                    let saved = self.cfg.param(file, &p.name).and_then(|v| match p.kind {
+                    let saved = self.cfg.param(&file, &p.name).and_then(|v| match p.kind {
                         ParamKind::Float { .. } => v.parse().ok().map(|x| [x, 0.0, 0.0, 0.0]),
                         ParamKind::Color => format::parse_color(v),
                     });
@@ -330,25 +376,37 @@ impl App {
                         engine.set_param(&self.gpu, i, v);
                     }
                 }
+                // Derleme sürerken ekran değiştiyse.
+                let size = (self.window.width, self.window.height);
+                if engine.size() != size {
+                    engine.resize(&self.gpu, size);
+                }
                 log!("duvar kâğıdı: {file} ({:?})", mode_of(&engine));
                 self.engine = Some(engine);
-                self.cfg.wallpaper = file.to_string();
+                self.cfg.wallpaper = file;
+                self.cfg.save();
                 self.stamp = modified(&path);
                 self.frame = 0;
                 self.dirty = true;
                 self.error = None;
-                Ok(())
             }
-            Err(e) => {
-                log!("{file} yüklenemedi:\n{e}");
-                self.tray.notify(&format!("{file} yüklenemedi"), &first_line(&e));
-                self.error = Some(format!("{file}: {}", first_line(&e)));
-                // Bozuk dosyayı da izle: düzeltip kaydedince kendiliğinden yüklensin.
-                if self.cfg.wallpaper == file {
-                    self.stamp = modified(&path);
-                }
-                Err(())
-            }
+            Err(e) => self.load_failed(&file, &path, &e),
+        }
+    }
+
+    fn load_failed(&mut self, file: &str, path: &Path, e: &str) {
+        log!("{file} yüklenemedi:\n{e}");
+        self.tray.notify(&format!("{file} yüklenemedi"), &first_line(e));
+        self.error = Some(format!("{file}: {}", first_line(e)));
+        // Bozuk dosyayı da izle: düzeltip kaydedince kendiliğinden yüklensin.
+        if self.cfg.wallpaper == file {
+            self.stamp = modified(path);
+        }
+        // Açılışta hiçbir şey çalışmıyorsa listedeki bir sonrakini dene.
+        if self.engine.is_none()
+            && let Some(next) = self.fallback.pop()
+        {
+            self.load(&next);
         }
     }
 
@@ -360,7 +418,7 @@ impl App {
             log!("değişti, yeniden yükleniyor: {}", self.cfg.wallpaper);
             self.stamp = now;
             let file = self.cfg.wallpaper.clone();
-            let _ = self.load(&file);
+            self.load(&file);
         }
     }
 
@@ -370,8 +428,27 @@ impl App {
         // Önce eski yüzey, sonra eski pencere bırakılır.
         self.target = Target::new(&self.gpu, surface, window.width, window.height)?;
         self.window = window;
+        self.shown = false;
         self.resized();
         Ok(())
+    }
+
+    /// Pencere öldüyse yeniden yerleşir, z-sırası kaydıysa düzeltir (bkz. desktop::in_place).
+    fn ensure_placed(&mut self) {
+        if self.placed_at.elapsed() < Duration::from_secs(1) {
+            return;
+        }
+        self.placed_at = Instant::now();
+        if !self.window.alive() {
+            log!("duvar kâğıdı penceresi yok olmuş, yeniden yerleşiliyor");
+            if let Err(e) = self.reattach() {
+                log!("yeniden yerleşilemedi: {e}");
+            }
+        } else if !self.window.in_place() {
+            log!("yer kaymış (Explorer WorkerW'yi yeniledi), düzeltiliyor");
+            self.window.restack();
+            self.dirty = true;
+        }
     }
 
     fn resized(&mut self) {
@@ -398,10 +475,9 @@ impl App {
                 Event::ScreenOn(on) => self.policy.display_off = !on,
                 Event::Install(file) => {
                     self.catalog = catalog();
-                    if self.load(&file).is_ok() {
-                        self.cfg.save();
-                    }
+                    self.load(&file);
                 }
+                Event::Compiled => self.finish_load(),
                 Event::Command(cmd) => self.command(&cmd),
                 Event::ExplorerRestarted => {
                     log!("Explorer yeniden başladı");
@@ -499,7 +575,7 @@ impl App {
             c if (id::FPS..id::PAUSE).contains(&c) => self.cfg.fps = c - id::FPS,
             c if (id::WALLPAPER..id::FPS).contains(&c) => {
                 if let Some(file) = self.catalog.get((c - id::WALLPAPER) as usize).map(|e| e.file.clone()) {
-                    let _ = self.load(&file);
+                    self.load(&file);
                 }
             }
             c if c >= id::PARAM => self.pick_param(((c - id::PARAM) / 16) as usize, ((c - id::PARAM) % 16) as usize),
@@ -545,7 +621,7 @@ impl App {
             }
             "duvar" => {
                 self.catalog = catalog();
-                let _ = self.load(arg);
+                self.load(arg);
             }
             "param" => {
                 let Some((i, v)) = arg.split_once(' ') else { return };
@@ -673,12 +749,17 @@ impl App {
         self.gpu.queue.present(frame);
         self.frame = self.frame.wrapping_add(1);
         self.dirty = false;
+        if !self.shown {
+            self.window.show();
+            self.shown = true;
+        }
     }
 
     fn set_status(&mut self, paused: Option<Reason>) {
         let name = self.catalog.iter().find(|e| e.file == self.cfg.wallpaper).map_or("—", |e| e.name.as_str());
         let status = match (paused, &self.engine) {
             (Some(r), _) => format!("duraklatıldı ({})", r.label()),
+            (None, None) if self.compiling.is_some() => "derleniyor…".into(),
             (None, None) => "geçerli duvar kâğıdı yok".into(),
             (None, Some(_)) => format!("{name} · {} FPS", self.fps()),
         };
@@ -714,6 +795,7 @@ impl App {
                 self.rescan_at = None;
                 self.rescan();
             }
+            self.ensure_placed();
 
             // hive kapandıysa (çöktüyse) motor da kapanır.
             if !hub::alive() {
@@ -771,11 +853,9 @@ impl App {
                 let left = t.saturating_duration_since(Instant::now());
                 delay = Some(delay.map_or(left, |d| d.min(left)));
             }
-            // hive modunda duraklatılmışken de arada uyanıp onun yaşadığına bak.
-            if hub::active() {
-                let tick = Duration::from_secs(2);
-                delay = Some(delay.map_or(tick, |d| d.min(tick)));
-            }
+            // Arada uyan: hive yaşıyor mu, masaüstündeki yerimiz duruyor mu.
+            let tick = Duration::from_secs(2);
+            delay = Some(delay.map_or(tick, |d| d.min(tick)));
 
             if waiter.wait(delay, self.watch.as_ref()) {
                 if let Some(w) = &self.watch {

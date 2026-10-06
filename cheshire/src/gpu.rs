@@ -6,6 +6,8 @@ use windows::Win32::Foundation::HWND;
 use crate::log;
 use crate::util::Res;
 
+/// Kopyalanabilir: wgpu nesneleri paylaşımlı; derleme başka iş parçacığında aynı aygıtı kullanır.
+#[derive(Clone)]
 pub struct Gpu {
     pub instance: wgpu::Instance,
     pub adapter: wgpu::Adapter,

@@ -228,6 +228,27 @@ fn send(line: &str) -> bool {
     unsafe { SendMessageW(hwnd, WM_COPYDATA, None, Some(LPARAM(&cds as *const _ as isize))).0 != 0 }
 }
 
+/// `WM_COPYDATA` gönderilmek zorunda (veri çağrı süresince yaşamalı) ve gönderen, motor mesajı
+/// işleyene kadar bekler. Motor o sırada shader derliyorsa bu saniyeler sürer: hive'ın arayüzü
+/// donmasın diye komutlar tek bir arka plan iş parçacığından sırayla gider.
+fn send_async(line: String) {
+    use std::sync::mpsc::{Sender, channel};
+    use std::sync::{Mutex, OnceLock};
+    static QUEUE: OnceLock<Mutex<Sender<String>>> = OnceLock::new();
+    let q = QUEUE.get_or_init(|| {
+        let (tx, rx) = channel::<String>();
+        std::thread::spawn(move || {
+            for line in rx {
+                if !send(&line) {
+                    log!("cheshire'a iletilemedi: {line}");
+                }
+            }
+        });
+        Mutex::new(tx)
+    });
+    let _ = q.lock().unwrap().send(line);
+}
+
 /// Renk seçenekleri: önce duvar kâğıdının varsayılanı, sonra ondan farklı hazır renkler.
 fn colors(default: &str) -> Vec<String> {
     std::iter::once(default.to_string())
@@ -473,9 +494,7 @@ impl Cheshire {
     }
 
     fn cmd(&self, line: &str) {
-        if !send(line) {
-            log!("cheshire'a iletilemedi: {line}");
-        }
+        send_async(line.to_string());
     }
 
     /// Motor durum yayımladı.
@@ -778,6 +797,9 @@ impl Cheshire {
                 _ => t!("on battery", "pilde"),
             };
             return format!("{} ({why})", t!("paused", "duraklatıldı"));
+        }
+        if st.status.starts_with("derleniyor") {
+            return t!("compiling…", "derleniyor…").into();
         }
         if !st.engine {
             return t!("no working wallpaper", "geçerli duvar kâğıdı yok").into();

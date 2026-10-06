@@ -15,6 +15,8 @@
 //!   çizdiği seçim dikdörtgeni gibi şeyleri örter. Çizim penceresi bu katmanlı tutucunun içinde
 //!   sıradan bir çocuktur (takas zinciri katmanlı pencereyi sevmez).
 
+use std::time::{Duration, Instant};
+
 use windows::Win32::Foundation::{COLORREF, HWND, LPARAM, LRESULT, RECT, WPARAM};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::WindowsAndMessaging::*;
@@ -74,10 +76,33 @@ unsafe extern "system" fn find_legacy_worker(top: HWND, out: LPARAM) -> BOOL {
     }
 }
 
+/// Oturum açılışında Explorer masaüstünü bizden sonra kurar: Progman'ı, yükseltilmiş düzende
+/// ikon katmanını (DefView) da bekleriz. Erken yerleşirsek sonradan gelen pencereler üstümüze biner.
+const SETUP_WAIT: Duration = Duration::from_secs(30);
+
+fn wait_for<T>(mut probe: impl FnMut() -> Option<T>) -> Option<T> {
+    let start = Instant::now();
+    loop {
+        if let Some(v) = probe() {
+            return Some(v);
+        }
+        if start.elapsed() >= SETUP_WAIT {
+            return None;
+        }
+        std::thread::sleep(Duration::from_millis(250));
+    }
+}
+
 fn find_host(pref: &str) -> Res<Host> {
     unsafe {
-        let progman = FindWindowW(w!("Progman"), PCWSTR::null())
-            .map_err(|_| "Progman penceresi bulunamadı (Explorer çalışıyor mu?)")?;
+        let progman = wait_for(|| FindWindowW(w!("Progman"), PCWSTR::null()).ok())
+            .ok_or("Progman penceresi bulunamadı (Explorer çalışıyor mu?)")?;
+        if raised_desktop() && find(Some(progman), None, w!("SHELLDLL_DefView")).is_none() {
+            log!("ikon katmanı henüz yok, bekleniyor");
+            if wait_for(|| find(Some(progman), None, w!("SHELLDLL_DefView"))).is_none() {
+                log!("ikon katmanı gelmedi, yine de yerleşiliyor");
+            }
+        }
 
         // Explorer'dan ikonların arkasına WorkerW oluşturmasını iste.
         for (wp, lp) in [(0xD, 0x1), (0, 0)] {
@@ -141,7 +166,9 @@ impl WallpaperWindow {
             };
             RegisterClassW(&wc); // İkinci kez kayıt başarısız olur, sorun değil.
 
-            let style = WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS | WS_CLIPCHILDREN | WS_DISABLED;
+            // Gizli yaratılır: ilk kare çizilene kadar (açılışta derleme sürerken) Explorer'ın
+            // sabit duvar kâğıdı görünür, siyah pencere değil. `show` ilk karede çağrılır.
+            let style = WS_CHILD | WS_CLIPSIBLINGS | WS_CLIPCHILDREN | WS_DISABLED;
             let make = |ex: WINDOW_EX_STYLE, name: PCWSTR, parent: HWND| {
                 CreateWindowExW(ex, class, name, style, 0, 0, width as i32, height as i32, Some(parent), None, Some(hinstance.into()), None)
             };
@@ -177,9 +204,45 @@ impl WallpaperWindow {
         }
     }
 
+    /// İlk kare çizildi: pencereyi göster (odağı almadan).
+    pub fn show(&self) {
+        unsafe {
+            let _ = ShowWindow(self.hwnd, SW_SHOWNA);
+            if let Some(h) = self.holder {
+                let _ = ShowWindow(h, SW_SHOWNA);
+            }
+        }
+    }
+
     /// Ebeveyn hâlâ yaşıyor mu? (Explorer yeniden başlarsa pencerelerimiz yok olur.)
     pub fn alive(&self) -> bool {
         unsafe { IsWindow(Some(self.hwnd)).as_bool() }
+    }
+
+    /// Yükseltilmiş masaüstünde yerimiz doğru mu: ikon katmanının hemen altında, Explorer'ın
+    /// WorkerW'si altımızda. Explorer duvar kâğıdını yeniden uygulayınca (oturum açılışı, tema,
+    /// Spotlight) WorkerW'yi yeniden yaratır ve yeni pencere üstümüze gelir; çizim görünmez olur.
+    pub fn in_place(&self) -> bool {
+        let Some(holder) = self.holder else { return true };
+        unsafe {
+            let Ok(progman) = GetParent(holder) else { return false };
+            let Some(defview) = find(Some(progman), None, w!("SHELLDLL_DefView")) else { return true };
+            GetWindow(holder, GW_HWNDPREV).ok() == Some(defview)
+        }
+    }
+
+    /// Yeri düzeltir: ikon katmanının altına, WorkerW'nin üstüne.
+    pub fn restack(&self) {
+        let Some(holder) = self.holder else { return };
+        unsafe {
+            let Ok(progman) = GetParent(holder) else { return };
+            if let Some(defview) = find(Some(progman), None, w!("SHELLDLL_DefView")) {
+                let _ = SetWindowPos(holder, Some(defview), 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+            }
+            if let Some(worker) = find(Some(progman), None, w!("WorkerW")) {
+                let _ = SetWindowPos(worker, Some(HWND_BOTTOM), 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+            }
+        }
     }
 
     /// Monitör düzeni değiştiyse yeni boyutu döndürür.
