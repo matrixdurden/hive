@@ -1,14 +1,13 @@
 //! Ortak renkler ve parçalar: kenar çubuğu ve bütün araç sayfaları aynı görünür. Windows 11
 //! teması (koyu): pencerenin zemini Mica, üstündeki her şey yarı saydam katmanlar; düğme, anahtar
-//! ve kaydırıcılar sistemin vurgu rengindedir. Araçların kendi renkleri ikonlarda ve sayfa içi
-//! küçük vurgularda kalır.
+//! ve kaydırıcılar sistemin vurgu rengindedir. Araçların kendi renkleri yalnızca ikonlarda kalır.
 
 use std::cell::Cell;
 
 use crate::gfx::{Color, Gfx, Rect};
 
 /// Mica yoksa (Windows 10) pencerenin düz zemini.
-pub const BG: Color = Color::rgb(0x202020);
+pub const BG: Color = Color::rgb(0x141414);
 pub const HOVER: Color = Color(0xffffff, 0.06);
 pub const SEL: Color = Color(0xffffff, 0.09);
 pub const LINE: Color = Color(0xffffff, 0.08);
@@ -19,10 +18,8 @@ pub const MUTED: Color = Color(0xffffff, 0.786);
 pub const FAINT: Color = Color(0xffffff, 0.5);
 pub const GREEN: Color = Color::rgb(0x6ccb5f);
 pub const RED: Color = Color::rgb(0xff99a4);
-/// Araçların kendi renginde dolu parçaların (seçili vites, seçili sekme) üstündeki yazı.
-pub const ON_ACCENT: Color = Color::rgb(0x111111);
 /// İpucu kutusu (opak, içeriğin üstünde okunsun).
-pub const TIP: Color = Color::rgb(0x2c2c2c);
+pub const TIP: Color = Color::rgb(0x262626);
 
 thread_local! {
     static ACCENT: Cell<Option<Color>> = const { Cell::new(None) };

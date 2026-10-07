@@ -939,8 +939,8 @@ impl App {
     fn paint(&mut self) {
         let (w, h) = self.size();
         let sw = self.layout_tool(w, h);
-        // Mica varsa zemin saydam (Windows çizer), yoksa düz renk.
-        let bg = if self.mica { Color(0, 0.0) } else { BG };
+        // Mica varsa zemin Windows'un camı, üstü koyulaştırılır; yoksa düz renk.
+        let bg = if self.mica { Color(0, 0.4) } else { BG };
         if !self.gfx.begin(self.hwnd, self.dpi, bg) {
             unsafe {
                 let _ = ValidateRect(Some(self.hwnd), None);
@@ -951,7 +951,7 @@ impl App {
         // İçerik alanı Mica'nın üstünde ayrı bir katman: sol üst köşesi yuvarlak (Windows Ayarlar
         // uygulaması gibi).
         let layer = Rect::new(sw, HEADER, w + 12.0, h + 12.0);
-        g.fill(layer, 8.0, Color(0xffffff, 0.03));
+        g.fill(layer, 8.0, Color(0x000000, 0.22));
         g.stroke(layer, 8.0, LINE, 1.0);
         self.paint_sidebar(w, h);
         match (self.page, self.tool_live()) {
@@ -1555,7 +1555,7 @@ pub fn run(hidden: bool, tab: Option<String>) -> Res<()> {
             hInstance: instance.into(),
             hIcon: icon,
             hCursor: LoadCursorW(None, IDC_ARROW)?,
-            hbrBackground: CreateSolidBrush(COLORREF(0x202020)),
+            hbrBackground: CreateSolidBrush(COLORREF(0x141414)),
             lpszClassName: CLASS,
             ..Default::default()
         };
@@ -1587,10 +1587,10 @@ pub fn run(hidden: bool, tab: Option<String>) -> Res<()> {
         if mica {
             let margins = MARGINS { cxLeftWidth: -1, cxRightWidth: -1, cyTopHeight: -1, cyBottomHeight: -1 };
             let _ = DwmExtendFrameIntoClientArea(hwnd, &margins);
-            let backdrop = windows::Win32::Graphics::Dwm::DWMSBT_MAINWINDOW;
+            let backdrop = windows::Win32::Graphics::Dwm::DWMSBT_TABBEDWINDOW;
             let _ = DwmSetWindowAttribute(hwnd, windows::Win32::Graphics::Dwm::DWMWA_SYSTEMBACKDROP_TYPE, &backdrop as *const _ as _, 4);
         } else {
-            let caption = COLORREF(0x202020);
+            let caption = COLORREF(0x141414);
             let _ = DwmSetWindowAttribute(hwnd, DWMWINDOWATTRIBUTE(35), &caption as *const _ as _, 4);
             let margins = MARGINS { cxLeftWidth: 0, cxRightWidth: 0, cyTopHeight: 1, cyBottomHeight: 0 };
             let _ = DwmExtendFrameIntoClientArea(hwnd, &margins);

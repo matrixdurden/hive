@@ -28,7 +28,6 @@ use crate::log;
 use crate::ui::*;
 use crate::util::{self, Res};
 
-const ACCENT: Color = Color::rgb(0xf472b6);
 
 /// cheshire/src/hub.rs ile aynı olmalı.
 pub const WM_STATE: u32 = WM_APP + 40;
@@ -761,8 +760,8 @@ impl Cheshire {
         }
         for (j, (s, label)) in segs.iter().zip(labels).enumerate() {
             let c = if j == selected {
-                g.fill(*s, 6.0, ACCENT);
-                ON_ACCENT
+                g.fill(*s, 6.0, accent());
+                on_accent()
             } else if hover(j) {
                 g.fill(*s, 6.0, SEL);
                 TEXT
@@ -841,11 +840,11 @@ impl Cheshire {
                     None => g.text(t!("preparing preview…", "önizleme hazırlanıyor…"), &g.f.small_center, img, FAINT),
                 }
                 if selected {
-                    g.stroke(Rect::new(img.l - 3.0, img.t - 3.0, img.r + 3.0, img.b + 3.0), 10.0, ACCENT, 2.0);
+                    g.stroke(Rect::new(img.l - 3.0, img.t - 3.0, img.r + 3.0, img.b + 3.0), 10.0, accent(), 2.0);
                 } else if hovered {
                     g.stroke(img, 8.0, LINE, 1.0);
                 }
-                let lc = if selected { ACCENT } else if hovered { TEXT } else { MUTED };
+                let lc = if selected { accent() } else if hovered { TEXT } else { MUTED };
                 g.text(name, &g.f.text, Rect::new(c.l + 2.0, c.b - 30.0, c.r, c.b - 4.0), lc);
             }
             if st.walls.is_empty() {
@@ -876,7 +875,7 @@ impl Cheshire {
                         let (a, b) = Self::slider_track(r);
                         let active = self.drag == Some(n) || self.hover == Hit::Slider(n);
                         let v = if max > min { (value - min) / (max - min) } else { 0.0 };
-                        slider(g, a, b, r.cy(), v, ACCENT, active);
+                        slider(g, a, b, r.cy(), v, accent(), active);
                         g.text(&format!("{value:.2}"), &g.f.small_right, Rect::new(b + 8.0, r.t, r.r, r.b), MUTED);
                     }
                     Kind::Choice { options, value, .. } if options.len() > MAX_SEGMENTS => {
@@ -893,7 +892,7 @@ impl Cheshire {
                     Kind::Choice { options, value, .. } => {
                         self.paint_segments(g, r, &choice_labels(options), *value, |j| self.hover == Hit::Choice(n, j));
                     }
-                    Kind::Toggle { value, .. } => toggle(g, toggle_rect(r.r, r.cy()), *value, ACCENT, true),
+                    Kind::Toggle { value, .. } => toggle(g, toggle_rect(r.r, r.cy()), *value, accent(), true),
                     Kind::Color { value, default } => {
                         let list = colors(default);
                         for (j, hex) in list.iter().enumerate() {
@@ -918,7 +917,7 @@ impl Cheshire {
             let r = l.battery_row;
             g.fill(Rect::new(r.l, r.t, r.r, r.t + 1.0), 0.0, HOVER);
             g.text(t!("Pause on battery", "Pildeyken duraklat"), &g.f.text, Rect::new(r.l, r.t, r.l + LABEL_W, r.b), TEXT);
-            toggle(g, toggle_rect(r.r, r.cy()), st.battery, ACCENT, true);
+            toggle(g, toggle_rect(r.r, r.cy()), st.battery, accent(), true);
 
             if !st.error.is_empty() {
                 let t = l.panel2.b + 12.0;

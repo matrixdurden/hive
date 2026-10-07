@@ -38,12 +38,11 @@ use windows::Win32::UI::Input::KeyboardAndMouse::*;
 use windows::Win32::UI::WindowsAndMessaging::*;
 use windows::core::{GUID, PCWSTR, implement};
 
-use crate::gfx::{Color, Gfx, Rect};
+use crate::gfx::{Gfx, Rect};
 use crate::osd;
 use crate::ui::*;
 use crate::util::{self, wide};
 
-const ACCENT: Color = Color::rgb(0x38bdf8);
 
 /// Ses cihazı olayı (Core Audio'nun iş parçacığından).
 pub const WM_DEVICE: u32 = WM_APP + 50;
@@ -729,14 +728,14 @@ impl Tweedle {
                 g.fill(*r, 8.0, HOVER);
             }
             let (icon, color) = match (mic, selected, self.muted) {
-                (false, _, _) => (ICON_HEADPHONE, if selected { ACCENT } else { MUTED }),
+                (false, _, _) => (ICON_HEADPHONE, if selected { accent() } else { MUTED }),
                 (true, _, true) => (ICON_MIC_OFF, if selected { RED } else { MUTED }),
-                (true, _, false) => (ICON_MIC, if selected { ACCENT } else { MUTED }),
+                (true, _, false) => (ICON_MIC, if selected { accent() } else { MUTED }),
             };
             g.text(icon, &g.f.icon_small, Rect::new(r.l + 12.0, r.t, r.l + 32.0, r.b), color);
             let mut right = r.r - 12.0;
             if selected {
-                g.text(ICON_CHECK, &g.f.icon_small, Rect::new(r.r - 34.0, r.t, r.r - 12.0, r.b), ACCENT);
+                g.text(ICON_CHECK, &g.f.icon_small, Rect::new(r.r - 34.0, r.t, r.r - 12.0, r.b), accent());
                 right -= 30.0;
             }
             g.text(&d.name, &g.f.text, Rect::new(r.l + 44.0, r.t, right, r.b), if selected { TEXT } else { MUTED });
@@ -777,7 +776,7 @@ impl Tweedle {
                 }
                 g.text(name, &g.f.text, Rect::new(r.l + 14.0, r.t, r.r - 160.0, r.b), TEXT);
                 let (c, b) = match () {
-                    _ if self.bind == Some(i) => (ACCENT, ACCENT),
+                    _ if self.bind == Some(i) => (accent(), accent()),
                     _ if self.conflicts[i] => (RED, LINE),
                     _ if self.settings.keys[i].is_none() => (FAINT, LINE),
                     _ if self.hover == Hit::Key(i) => (TEXT, FAINT),

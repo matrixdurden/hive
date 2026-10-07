@@ -21,12 +21,11 @@ use std::path::PathBuf;
 use windows::Win32::Foundation::HWND;
 use windows::Win32::Graphics::Gdi::InvalidateRect;
 
-use crate::gfx::{Color, Gfx, Rect};
+use crate::gfx::{Gfx, Rect};
 use crate::ui::*;
 use crate::util;
 
 pub const ACCENT: u32 = 0xfb923c;
-const ACCENT_C: Color = Color::rgb(ACCENT);
 
 const ROW: f32 = 68.0;
 const SIZES: (u32, u32, u32) = (36, 64, 4);
@@ -416,7 +415,7 @@ impl Hatter {
                     continue;
                 }
                 setting_row(g, r, title, sub, 120.0);
-                toggle(g, toggle_rect(r.r, r.cy()), *on, ACCENT_C, true);
+                toggle(g, toggle_rect(r.r, r.cy()), *on, accent(), true);
             }
 
             let r = self.row(4);
@@ -424,7 +423,7 @@ impl Hatter {
             let (a, b) = self.slider_x();
             let (lo, hi, _) = SIZES;
             let v = (s.size - lo) as f32 / (hi - lo) as f32;
-            slider(g, a, b, r.cy(), v, ACCENT_C, self.dragging || self.hover == Hit::Size);
+            slider(g, a, b, r.cy(), v, accent(), self.dragging || self.hover == Hit::Size);
             g.text(&s.size.to_string(), &g.f.small_right, Rect::new(b + 8.0, r.t, r.r, r.b), MUTED);
 
             let t = self.row(5).t + 18.0;

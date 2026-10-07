@@ -18,11 +18,10 @@ use windows::Win32::System::Services::*;
 use windows::Win32::UI::WindowsAndMessaging::*;
 use windows::core::{PCWSTR, w};
 
-use crate::gfx::{Color, Gfx, Rect};
+use crate::gfx::{Gfx, Rect};
 use crate::log;
 use crate::ui::*;
 
-const ACCENT: Color = Color::rgb(0xa78bfa);
 
 pub const WM_DONE: u32 = WM_APP + 30;
 pub const WM_LINE: u32 = WM_APP + 31;
@@ -578,13 +577,13 @@ impl Rabbithole {
         let ring = Rect::new(w / 2.0 - r, cy - r, w / 2.0 + r, cy + r);
         match self.st.state {
             Some(State::On) => {
-                g.fill(ring, r, ACCENT.alpha(0.12));
-                g.stroke(ring, r, ACCENT, 2.0);
+                g.fill(ring, r, accent().alpha(0.12));
+                g.stroke(ring, r, accent(), 2.0);
             }
-            Some(State::Starting | State::Stopping) => g.stroke(ring, r, ACCENT.alpha(0.5), 2.0),
+            Some(State::Starting | State::Stopping) => g.stroke(ring, r, accent().alpha(0.5), 2.0),
             _ => g.stroke(ring, r, LINE, 2.0),
         }
-        g.text("\u{E7E8}", &g.f.icon_large, ring, if accent_live { ACCENT } else { FAINT });
+        g.text("\u{E7E8}", &g.f.icon_large, ring, if accent_live { accent() } else { FAINT });
 
         let (label, sub) = match (self.busy, self.st.state, self.st.mode) {
             (Some(b), _, _) => (b.to_string(), String::new()),
@@ -618,12 +617,12 @@ impl Rabbithole {
             let inner = Rect::new(mr.l + 3.0, mr.t + 3.0, mr.r - 3.0, mr.b - 3.0);
             let dim = k == 0 && self.st.host.is_none();
             if k == current {
-                g.fill(inner, 6.0, if k == 2 { SEL } else { ACCENT });
+                g.fill(inner, 6.0, if k == 2 { SEL } else { accent() });
             } else if self.hover == Hit::Mode(k) {
                 g.fill(inner, 6.0, SEL);
             }
             let c = match () {
-                _ if k == current && k != 2 => ON_ACCENT,
+                _ if k == current && k != 2 => on_accent(),
                 _ if k == current || self.hover == Hit::Mode(k) => TEXT,
                 _ if dim => FAINT,
                 _ => MUTED,
@@ -653,7 +652,7 @@ impl Rabbithole {
         let r1 = self.row(1);
         let sub = t!("Comes back in the mode it was left · needs administrator", "Açılışta kaldığı moda döner · yönetici izni ister");
         setting_row(g, r1, t!("Start with Windows", "Windows ile başlat"), sub, 120.0);
-        toggle(g, toggle_rect(r1.r, r1.cy()), self.st.autostart, ACCENT, true);
+        toggle(g, toggle_rect(r1.r, r1.cy()), self.st.autostart, accent(), true);
     }
 
     // --- Olaylar ---

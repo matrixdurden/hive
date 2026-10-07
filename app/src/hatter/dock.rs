@@ -79,6 +79,8 @@ const TIMER_CLOCK: usize = 7;
 
 // Ölçüler (DIP). Simge boyu ayardan gelir.
 const GAP: f32 = 6.0;
+/// Pil simgesinin genişliği (yüzde yazısı yanında).
+const BATTERY_GLYPH: f32 = 20.0;
 const PAD: f32 = 10.0;
 const PAD_T: f32 = 7.0;
 const PAD_B: f32 = 11.0;
@@ -404,6 +406,8 @@ struct Dock {
     glyph: IDWriteTextFormat,
     clock: IDWriteTextFormat,
     clock_w: f32,
+    /// Pil yüzdesinin genişliği (simgenin yanında yazılır).
+    battery_w: f32,
 
     shown: f32,
     mag: f32,
@@ -457,7 +461,7 @@ impl Dock {
     fn parts(&self) -> Vec<(Part, f32)> {
         let mut v = vec![(Part::Net, 30.0), (Part::Volume, 30.0)];
         if self.status.battery.is_some() {
-            v.push((Part::Battery, 30.0));
+            v.push((Part::Battery, BATTERY_GLYPH + self.battery_w + 10.0));
         }
         v.push((Part::Clock, self.clock_w + 16.0));
         v
@@ -472,15 +476,20 @@ impl Dock {
         n * (icon + GAP) + sep2 + parts + 2.0 * PAD
     }
 
-    fn measure_clock(&mut self) {
-        let t: Vec<u16> = self.status.time.encode_utf16().collect();
-        self.clock_w = unsafe {
+    fn text_w(&self, text: &str) -> f32 {
+        let t: Vec<u16> = text.encode_utf16().collect();
+        unsafe {
             self.dw.CreateTextLayout(&t, &self.clock, 200.0, 40.0).ok().map_or(40.0, |l| {
                 let mut m = DWRITE_TEXT_METRICS::default();
                 let _ = l.GetMetrics(&mut m);
                 m.width.ceil()
             })
-        };
+        }
+    }
+
+    fn measure_clock(&mut self) {
+        self.clock_w = self.text_w(&self.status.time);
+        self.battery_w = self.text_w(&self.status.battery_pct());
     }
 
     fn band_dip(&self) -> f32 {
@@ -1125,6 +1134,15 @@ impl Dock {
                         let f = if part == Part::Clock { &self.clock } else { &self.glyph };
                         let t: Vec<u16> = text.encode_utf16().collect();
                         brush.SetColor(&c);
+                        if part == Part::Battery {
+                            // Simge solda, yüzde sağında (macOS menü çubuğu gibi).
+                            let gl = s.l + 5.0;
+                            rt.DrawText(&t, f, &rect(gl, cy - 14.0, gl + BATTERY_GLYPH, cy + 14.0), brush, D2D1_DRAW_TEXT_OPTIONS_NONE, DWRITE_MEASURING_MODE_NATURAL);
+                            let pct: Vec<u16> = st.battery_pct().encode_utf16().collect();
+                            let tl = gl + BATTERY_GLYPH;
+                            rt.DrawText(&pct, &self.clock, &rect(tl, cy - 14.0, tl + self.battery_w + 4.0, cy + 14.0), brush, D2D1_DRAW_TEXT_OPTIONS_NONE, DWRITE_MEASURING_MODE_NATURAL);
+                            continue;
+                        }
                         rt.DrawText(&t, f, &rect(s.l, cy - 14.0, s.r, cy + 14.0), brush, D2D1_DRAW_TEXT_OPTIONS_NONE, DWRITE_MEASURING_MODE_NATURAL);
                         continue;
                     }
@@ -1727,9 +1745,9 @@ unsafe extern "system" fn proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> 
                 TIMER_CLOCK => {
                     with(|d| {
                         let next = d.status.read_time();
-                        let old = d.clock_w;
+                        let old = (d.clock_w, d.battery_w);
                         d.measure_clock();
-                        if (d.clock_w - old).abs() > 0.5 {
+                        if (d.clock_w - old.0).abs() > 0.5 || (d.battery_w - old.1).abs() > 0.5 {
                             d.relayout();
                         } else {
                             d.render();
@@ -1927,8 +1945,10 @@ unsafe extern "system" fn proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> 
         WM_POWERBROADCAST => {
             with(|d| {
                 let had = d.status.battery.is_some();
+                let old = d.battery_w;
                 d.status.read_battery();
-                if had != d.status.battery.is_some() {
+                d.measure_clock();
+                if had != d.status.battery.is_some() || (d.battery_w - old).abs() > 0.5 {
                     d.relayout();
                 } else {
                     d.render();
@@ -2116,6 +2136,7 @@ fn create(settings: Settings, lines: Vec<String>) -> windows::core::Result<Dock>
                 glyph,
                 clock,
                 clock_w: 40.0,
+                battery_w: 24.0,
                 shown: 0.0,
                 mag: 0.0,
                 dirty: true,

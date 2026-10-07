@@ -30,12 +30,11 @@ use windows::Win32::UI::Shell::ShellExecuteW;
 use windows::Win32::UI::WindowsAndMessaging::*;
 use windows::core::{GUID, PCWSTR, w};
 
-use crate::gfx::{Color, Gfx, Rect};
+use crate::gfx::{Gfx, Rect};
 use crate::log;
 use crate::ui::*;
 use crate::util::{self, wide};
 
-const ACCENT: Color = Color::rgb(0x34d399);
 
 pub const TIMER_TICK: usize = 401;
 pub const TIMER_UI: usize = 402;
@@ -864,8 +863,8 @@ impl Dormouse {
         }
         for (j, (s, label)) in segs.iter().zip(labels).enumerate() {
             let c = if j == selected {
-                g.fill(*s, 6.0, ACCENT);
-                ON_ACCENT
+                g.fill(*s, 6.0, accent());
+                on_accent()
             } else if hover(j) {
                 g.fill(*s, 6.0, SEL);
                 TEXT
@@ -881,7 +880,7 @@ impl Dormouse {
         let dot = if self.ac {
             GREEN
         } else if self.awake.is_empty() {
-            ACCENT
+            accent()
         } else {
             RED
         };
@@ -901,13 +900,13 @@ impl Dormouse {
                 let hovered = self.hover == Hit::Card(m);
                 g.fill(*c, 12.0, if hovered && !selected { HOVER } else { PANEL });
                 if selected {
-                    g.stroke(*c, 12.0, ACCENT, 2.0);
+                    g.stroke(*c, 12.0, accent(), 2.0);
                 } else {
                     g.stroke(*c, 12.0, LINE, 1.0);
                 }
                 let x = c.l + 16.0;
-                let fg = if selected { ACCENT } else { TEXT };
-                g.text(mode_icon(m), &g.f.icon, Rect::new(x, c.t + 14.0, x + 26.0, c.t + 40.0), if selected { ACCENT } else { MUTED });
+                let fg = if selected { accent() } else { TEXT };
+                g.text(mode_icon(m), &g.f.icon, Rect::new(x, c.t + 14.0, x + 26.0, c.t + 40.0), if selected { accent() } else { MUTED });
                 g.text(mode_name(m), &g.f.strong, Rect::new(x + 34.0, c.t + 14.0, c.r - 16.0, c.t + 40.0), fg);
                 let est = self.full_text(m);
                 let ec = if self.rate_for(m).is_some() { TEXT } else { FAINT };
@@ -922,7 +921,7 @@ impl Dormouse {
             Self::panel(g, l.panel1, t!("Automatic", "Otomatik"), "");
             let r = l.auto_row;
             setting(r, t!("Follow the charger", "Şarja göre geç"), t!("unplugged → Out, plugged in → Plugged in", "çıkınca Dışarıda, takılınca Prizde"), 60.0);
-            toggle(g, toggle_rect(r.r, r.cy()), self.cfg.auto, ACCENT, true);
+            toggle(g, toggle_rect(r.r, r.cy()), self.cfg.auto, accent(), true);
             let r = l.thr_row;
             g.fill(Rect::new(r.l, r.t, r.r, r.t + 1.0), 0.0, HOVER);
             setting(r, t!("Low battery alert", "Pil uyarısı"), t!("a notification; switching stays yours", "bildirim gelir, geçiş sende"), 300.0);
@@ -931,7 +930,7 @@ impl Dormouse {
             let r = l.guard_row;
             g.fill(Rect::new(r.l, r.t, r.r, r.t + 1.0), 0.0, HOVER);
             setting(r, t!("RTX watch", "RTX bekçisi"), t!("names the app that wakes the discrete GPU on battery", "pildeyken RTX'i uyandıran uygulamayı söyler"), 60.0);
-            toggle(g, toggle_rect(r.r, r.cy()), self.cfg.guard, ACCENT, self.luid.is_some());
+            toggle(g, toggle_rect(r.r, r.cy()), self.cfg.guard, accent(), self.luid.is_some());
 
             if let Some(r) = l.hint {
                 let text = format!("{} · {}", t!("Worth closing", "Kapatman iyi olur"), self.suggest.join(", "));

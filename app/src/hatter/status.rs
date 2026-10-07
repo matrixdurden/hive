@@ -263,6 +263,12 @@ impl Status {
         battery_glyph(self.battery.map_or(100, |b| b.0))
     }
 
+    /// Dock'ta simgenin yanındaki yüzde.
+    pub fn battery_pct(&self) -> String {
+        let p = self.battery.map_or(0, |b| b.0);
+        t!(format!("{p}%"), format!("%{p}"))
+    }
+
     pub fn battery_text(&self) -> String {
         match self.battery {
             Some((p, true)) => t!(format!("{p}% · plugged in"), format!("%{p} · prizde")),
