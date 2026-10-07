@@ -2,17 +2,20 @@
 name = "hive"
 version = "0.2.1"
 edition = "2024"
-description = "hive: matrixdurden'in Windows araçları tek yerde (lyrebird, cheshire, rabbithole, dormouse)"
+description = "hive: matrixdurden'in Windows araçları tek yerde (lyrebird, cheshire, rabbithole, dormouse, tweedle)"
 license = "MIT"
 
 [dependencies]
 windows-numerics = "0.3"
+# tweedle'ın ses olayı dinleyicisi (#[implement]).
+windows-core = "0.62"
 # lyrebird motoru (../lyrebird): hive sürecinde çalışır, sayfası src/lyrebird.rs.
 lyrebird_motor = { package = "lyrebird", path = "../lyrebird" }
 
 [dependencies.windows]
 version = "0.62"
 features = [
+    "Media_Control",
     "Win32_Foundation",
     "Win32_Devices_FunctionDiscovery",
     "Win32_Graphics_Direct2D",
@@ -25,6 +28,7 @@ features = [
     "Win32_Globalization",
     "Win32_Graphics_Imaging",
     "Win32_Media_Audio",
+    "Win32_Media_Audio_Endpoints",
     "Win32_Media_KernelStreaming",
     "Win32_Media_MediaFoundation",
     "Win32_Media_Multimedia",

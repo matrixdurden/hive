@@ -17,6 +17,7 @@ mod rabbithole;
 mod shell;
 mod tools;
 mod tray;
+mod tweedle;
 mod ui;
 mod util;
 
@@ -35,6 +36,7 @@ use windows::core::w;
 //   hive --leftovers      kurulu olmayan araçlardan kalan iz var mı, listele
 //   hive --lyrebird-test  her mikrofona test sesi gönder, geri geliyor mu ölç
 //   hive --dormouse-test  dormouse'un okuduğu pil, ekran ve ekran kartı bilgilerini yazdır
+//   hive --tweedle-test   tweedle'ın gördüğü ses çıkışlarını ve medya oturumlarını yazdır
 
 /// Bayrak İngilizce ya da Türkçe adıyla verilmiş mi.
 fn flag(args: &[String], en: &str, tr: &str) -> bool {
@@ -92,6 +94,14 @@ fn main() {
                 let _ = windows::Win32::System::Com::CoInitializeEx(None, windows::Win32::System::Com::COINIT_APARTMENTTHREADED);
             }
             print!("{}", dormouse::probe());
+            std::process::exit(0);
+        }
+        Some("--tweedle-test" | "--tweedle-dene") => {
+            unsafe {
+                let _ = AttachConsole(ATTACH_PARENT_PROCESS);
+                let _ = windows::Win32::System::Com::CoInitializeEx(None, windows::Win32::System::Com::COINIT_MULTITHREADED);
+            }
+            print!("{}", tweedle::probe());
             std::process::exit(0);
         }
         Some("--lyrebird-test" | "--lyrebird-dene") => {

@@ -30,6 +30,7 @@ use windows::core::{BOOL, PCWSTR, w};
 use crate::cheshire::{self, Cheshire};
 use crate::config::Config;
 use crate::dormouse::{self, Dormouse};
+use crate::tweedle::{self, Tweedle};
 use crate::gfx::{Color, Gfx, ImageId, Rect};
 use crate::log;
 use crate::lyrebird::{self, Lyrebird};
@@ -171,6 +172,7 @@ struct App {
     rabbit: Option<Rabbithole>,
     cheshire: Option<Cheshire>,
     dormouse: Option<Dormouse>,
+    tweedle: Option<Tweedle>,
     /// Süren kurulum (`true`) ya da kaldırma (`false`), araç başına.
     busy: [Option<bool>; tools::COUNT],
     /// Son kurulum / kaldırma hatası, araç kartında görünür.
@@ -247,12 +249,14 @@ fn page_mut<'a>(
     rabbit: &'a mut Option<Rabbithole>,
     cheshire: &'a mut Option<Cheshire>,
     dormouse: &'a mut Option<Dormouse>,
+    tweedle: &'a mut Option<Tweedle>,
     i: usize,
 ) -> Option<&'a mut dyn ToolPage> {
     match i {
         tools::LYREBIRD => lyrebird.as_mut().map(|l| l as &mut dyn ToolPage),
         tools::CHESHIRE => cheshire.as_mut().map(|c| c as &mut dyn ToolPage),
         tools::DORMOUSE => dormouse.as_mut().map(|d| d as &mut dyn ToolPage),
+        tools::TWEEDLE => tweedle.as_mut().map(|t| t as &mut dyn ToolPage),
         tools::RABBITHOLE => rabbit.as_mut().map(|r| r as &mut dyn ToolPage),
         _ => None,
     }
@@ -290,6 +294,7 @@ impl App {
             tools::LYREBIRD => self.lyrebird.is_some(),
             tools::CHESHIRE => self.cheshire.is_some(),
             tools::DORMOUSE => self.dormouse.is_some(),
+            tools::TWEEDLE => self.tweedle.is_some(),
             _ => self.rabbit.is_some(),
         }
     }
@@ -300,6 +305,7 @@ impl App {
             tools::CHESHIRE => self.cheshire.as_ref().map(|c| c as &dyn ToolPage),
             tools::RABBITHOLE => self.rabbit.as_ref().map(|r| r as &dyn ToolPage),
             tools::DORMOUSE => self.dormouse.as_ref().map(|d| d as &dyn ToolPage),
+            tools::TWEEDLE => self.tweedle.as_ref().map(|t| t as &dyn ToolPage),
             _ => None,
         }
     }
@@ -345,6 +351,9 @@ impl App {
         if let Some(d) = self.dormouse.as_mut() {
             d.set_visible(on && page == Page::Tool(tools::DORMOUSE));
         }
+        if let Some(t) = self.tweedle.as_mut() {
+            t.set_visible(on && page == Page::Tool(tools::TWEEDLE));
+        }
     }
 
     fn select(&mut self, page: Page) {
@@ -381,6 +390,8 @@ impl App {
                 (tools::CHESHIRE, false) => self.cheshire = None,
                 (tools::DORMOUSE, true) => self.dormouse = Some(Dormouse::start(hwnd)),
                 (tools::DORMOUSE, false) => self.dormouse = None,
+                (tools::TWEEDLE, true) => self.tweedle = Some(Tweedle::start(hwnd)),
+                (tools::TWEEDLE, false) => self.tweedle = None,
                 (_, true) => self.rabbit = Some(Rabbithole::start(hwnd)),
                 (_, false) => self.rabbit = None,
             }
@@ -406,6 +417,10 @@ impl App {
                 "Screen, power and lid settings go back to what they were; the GPU preferences it wrote and its measurements are deleted.",
                 "Ekran, güç ve kapak ayarları eski haline döner; yazdığı GPU tercihleri ve ölçümleri silinir."
             ),
+            tools::TWEEDLE => t!(
+                "Its shortcuts are released, and music keeps playing from the speakers again when your headphones drop.",
+                "Kısayolları bırakılır; kulaklık kopunca müzik yine hoparlörden çalmaya devam eder."
+            ),
             _ => t!(
                 "The tunnel closes; the service, network adapter and your server link are deleted.",
                 "Tünel kapanır; hizmet, ağ bağdaştırıcısı ve sunucu bağlantın silinir."
@@ -430,6 +445,7 @@ impl App {
                 tools::LYREBIRD => self.lyrebird = None,
                 tools::CHESHIRE => self.cheshire = None,
                 tools::DORMOUSE => self.dormouse = None,
+                tools::TWEEDLE => self.tweedle = None,
                 _ => self.rabbit = None,
             }
             self.page = self.valid(self.page);
@@ -516,7 +532,7 @@ impl App {
         if let Some(i) = self.tool_live() {
             let hx = self.head_x(i);
             let hr = w - sw - CAPTIONS - 12.0;
-            if let Some(p) = page_mut(&mut self.lyrebird, &mut self.rabbit, &mut self.cheshire, &mut self.dormouse, i) {
+            if let Some(p) = page_mut(&mut self.lyrebird, &mut self.rabbit, &mut self.cheshire, &mut self.dormouse, &mut self.tweedle, i) {
                 p.layout(w - sw, h, hx, hr);
             }
         }
@@ -582,6 +598,7 @@ impl App {
         self.cheshire = None;
         self.rabbit = None;
         self.dormouse = None;
+        self.tweedle = None;
         self.page = Page::Settings;
         self.removing_self = true;
         self.redraw();
@@ -1170,7 +1187,7 @@ impl App {
                 let hit = self.hit(mx, my);
                 if hit != self.hover {
                     if self.hover == Hit::Content
-                        && let Some(p) = live.and_then(|i| page_mut(&mut self.lyrebird, &mut self.rabbit, &mut self.cheshire, &mut self.dormouse, i))
+                        && let Some(p) = live.and_then(|i| page_mut(&mut self.lyrebird, &mut self.rabbit, &mut self.cheshire, &mut self.dormouse, &mut self.tweedle, i))
                     {
                         p.mouse_leave();
                     }
@@ -1188,13 +1205,13 @@ impl App {
                 }
                 // Kaydırıcı sürüklenirken imleç kenar çubuğuna kaysa da sayfa izlemeli.
                 if (hit == Hit::Content || self.pressed == Hit::Content)
-                    && let Some(p) = live.and_then(|i| page_mut(&mut self.lyrebird, &mut self.rabbit, &mut self.cheshire, &mut self.dormouse, i))
+                    && let Some(p) = live.and_then(|i| page_mut(&mut self.lyrebird, &mut self.rabbit, &mut self.cheshire, &mut self.dormouse, &mut self.tweedle, i))
                 {
                     p.mouse_move(&self.gfx, mx - sw, my);
                 }
             }
             WM_MOUSELEAVE => {
-                if let Some(p) = live.and_then(|i| page_mut(&mut self.lyrebird, &mut self.rabbit, &mut self.cheshire, &mut self.dormouse, i)) {
+                if let Some(p) = live.and_then(|i| page_mut(&mut self.lyrebird, &mut self.rabbit, &mut self.cheshire, &mut self.dormouse, &mut self.tweedle, i)) {
                     p.mouse_leave();
                 }
                 self.hover = Hit::None;
@@ -1206,7 +1223,7 @@ impl App {
                 self.pressed = self.hit(mx, my);
                 unsafe { SetCapture(self.hwnd) };
                 if self.pressed == Hit::Content
-                    && let Some(p) = live.and_then(|i| page_mut(&mut self.lyrebird, &mut self.rabbit, &mut self.cheshire, &mut self.dormouse, i))
+                    && let Some(p) = live.and_then(|i| page_mut(&mut self.lyrebird, &mut self.rabbit, &mut self.cheshire, &mut self.dormouse, &mut self.tweedle, i))
                 {
                     p.mouse_down(&self.gfx, mx - sw, my);
                 }
@@ -1219,7 +1236,7 @@ impl App {
                 let sw = self.layout_tool(w, h);
                 let pressed = std::mem::replace(&mut self.pressed, Hit::None);
                 if pressed == Hit::Content {
-                    if let Some(p) = live.and_then(|i| page_mut(&mut self.lyrebird, &mut self.rabbit, &mut self.cheshire, &mut self.dormouse, i)) {
+                    if let Some(p) = live.and_then(|i| page_mut(&mut self.lyrebird, &mut self.rabbit, &mut self.cheshire, &mut self.dormouse, &mut self.tweedle, i)) {
                         p.mouse_up(&self.gfx, mx - sw, my);
                     }
                 } else if self.hit(mx, my) == pressed {
@@ -1236,7 +1253,7 @@ impl App {
                 let (w, h) = self.size();
                 let sw = self.layout_tool(w, h);
                 if x >= sw
-                    && let Some(p) = live.and_then(|i| page_mut(&mut self.lyrebird, &mut self.rabbit, &mut self.cheshire, &mut self.dormouse, i))
+                    && let Some(p) = live.and_then(|i| page_mut(&mut self.lyrebird, &mut self.rabbit, &mut self.cheshire, &mut self.dormouse, &mut self.tweedle, i))
                 {
                     p.wheel(&self.gfx, x - sw, y, delta);
                 } else if x >= sw && live.is_none() && self.page == Page::Store {
@@ -1247,7 +1264,7 @@ impl App {
             }
             WM_KEYDOWN | WM_SYSKEYDOWN => {
                 let vk = VIRTUAL_KEY(wp.0 as u16);
-                if let Some(p) = live.and_then(|i| page_mut(&mut self.lyrebird, &mut self.rabbit, &mut self.cheshire, &mut self.dormouse, i))
+                if let Some(p) = live.and_then(|i| page_mut(&mut self.lyrebird, &mut self.rabbit, &mut self.cheshire, &mut self.dormouse, &mut self.tweedle, i))
                     && p.key(vk.0)
                 {
                     return Some(LRESULT(0));
@@ -1265,15 +1282,25 @@ impl App {
                 }
             }
             // Kısayol atarken Alt ile gelen menü ve bip sesi olmasın.
-            WM_SYSCHAR | WM_SYSKEYUP if self.lyrebird.as_ref().is_some_and(|l| l.binding()) => {}
+            WM_SYSCHAR | WM_SYSKEYUP
+                if self.lyrebird.as_ref().is_some_and(|l| l.binding())
+                    || self.tweedle.as_ref().is_some_and(|t| t.binding()) => {}
             WM_KILLFOCUS => {
                 if let Some(l) = self.lyrebird.as_mut() {
                     l.kill_focus();
                 }
+                if let Some(t) = self.tweedle.as_mut() {
+                    t.kill_focus();
+                }
             }
             WM_HOTKEY => {
-                if let Some(l) = self.lyrebird.as_mut() {
-                    l.hotkey(wp.0 as i32);
+                let id = wp.0 as i32;
+                if id >= tweedle::HK_BASE {
+                    if let Some(t) = self.tweedle.as_mut() {
+                        t.hotkey(id);
+                    }
+                } else if let Some(l) = self.lyrebird.as_mut() {
+                    l.hotkey(id);
                 }
             }
             WM_TIMER => match wp.0 {
@@ -1292,6 +1319,11 @@ impl App {
                         d.timer(wp.0);
                     }
                     self.dormouse_notice();
+                }
+                tweedle::TIMER_RECHECK => {
+                    if let Some(t) = self.tweedle.as_mut() {
+                        t.timer(wp.0);
+                    }
                 }
                 _ => return None,
             },
@@ -1338,6 +1370,16 @@ impl App {
                     self.dormouse_notice();
                 }
                 return Some(LRESULT(1));
+            }
+            tweedle::WM_DEVICE => {
+                if let Some(t) = self.tweedle.as_mut() {
+                    t.device_changed();
+                }
+            }
+            tweedle::WM_MIC => {
+                if let Some(t) = self.tweedle.as_mut() {
+                    t.mic_changed();
+                }
             }
             WM_TOOL_SETUP => self.setup_done(),
             WM_SELF_DONE => self.self_remove_done(),
@@ -1527,6 +1569,7 @@ pub fn run(hidden: bool, tab: Option<String>) -> Res<()> {
             rabbit: None,
             cheshire: None,
             dormouse: None,
+            tweedle: None,
             busy: [None; tools::COUNT],
             errors: Default::default(),
             results: Arc::default(),

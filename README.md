@@ -33,6 +33,7 @@ hive is a launcher: install tools from its **Tools** page like plugins. Every to
 | <img src="app/assets/araclar/cheshire-64.png" width="40"> | **cheshire** | Live wallpapers drawn by your GPU behind the desktop icons. Pauses on its own in fullscreen and on battery. |
 | <img src="app/assets/araclar/rabbithole-64.png" width="40"> | **rabbithole** | Tunnels your whole computer past network blocks: through your own server, or serverless in DPI mode. [Separate repository](https://github.com/matrixdurden/rabbithole). |
 | <img src="app/assets/araclar/dormouse-64.png" width="40"> | **dormouse** | Three gears for a laptop: plugged in, out for an hour or two, survival. Switches on its own when the charger comes and goes, keeps the discrete GPU asleep on battery and learns how long each gear really lasts. |
+| <img src="app/assets/araclar/tweedle-64.png" width="40"> | **tweedle** | Audio outputs and inputs in one list: click one to make it the default. One key switches to the next output (`Ctrl+Alt+O`), next input (`Ctrl+Alt+I`) or mutes the microphone (`Ctrl+Alt+K`). And when your headphones drop, the music pauses instead of carrying on from the laptop speakers. |
 
 <table>
   <tr>

@@ -204,6 +204,7 @@ version = "0.2.1"
 dependencies = [
  "lyrebird",
  "windows",
+ "windows-core",
  "windows-numerics",
 ]
 

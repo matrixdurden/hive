@@ -33,6 +33,7 @@ hive bir başlatıcı: araçları **Araçlar** sayfasından eklenti gibi kurars�
 | <img src="app/assets/araclar/cheshire-64.png" width="40"> | **cheshire** | Masaüstü ikonlarının arkasında GPU ile çizilen canlı duvar kâğıtları. Tam ekranda ve pilde kendiliğinden durur. |
 | <img src="app/assets/araclar/rabbithole-64.png" width="40"> | **rabbithole** | Bütün bilgisayarı ağ engellerinin ötesine geçiren tünel: kendi sunucun üzerinden ya da sunucusuz DPI modunda. [Ayrı depo](https://github.com/matrixdurden/rabbithole). |
 | <img src="app/assets/araclar/dormouse-64.png" width="40"> | **dormouse** | Dizüstü için üç vites: prizde, dışarıda bir iki saat, hayatta kalma. Şarj takılıp çıkınca kendi geçer, pildeyken ekran kartını uyutur, her vitesin gerçekte kaç saat gittiğini öğrenir. |
+| <img src="app/assets/araclar/tweedle-64.png" width="40"> | **tweedle** | Ses çıkışları ve girişleri tek listede: tıkladığın varsayılan olur. Tek tuşla sonraki çıkışa (`Ctrl+Alt+O`), sonraki girişe (`Ctrl+Alt+I`) geçer ya da mikrofonu susturur (`Ctrl+Alt+K`). Kulaklık kopunca da müzik laptop hoparlöründen devam etmez, durur. |
 
 <table>
   <tr>
