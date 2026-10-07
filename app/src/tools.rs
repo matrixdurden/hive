@@ -6,6 +6,7 @@
 //! - rabbithole: GitHub'daki son sürüm indirilir, SHA-256'sı doğrulanır, kendi kurulumu çalışır.
 //! - dormouse: motoru hive'ın içinde; kurmak mevcut güç ayarlarını yedekleyip uygulamaların GPU tercihini yazmaktır.
 //! - tweedle: motoru hive'ın içinde; kurmak yalnızca kısayol dosyasını yazmaktır.
+//! - hatter: motoru (dock) hive'ın içinde; kurmak ayarları ve dock'un ilk listesini yazmaktır.
 
 use std::os::windows::process::CommandExt;
 use std::process::{Command, Stdio};
@@ -18,14 +19,15 @@ use windows::Win32::System::Threading::{OpenProcess, PROCESS_TERMINATE, Terminat
 use windows::Win32::UI::WindowsAndMessaging::{FindWindowW, GetWindowThreadProcessId};
 use windows::core::{PCWSTR, w};
 
-use crate::{cheshire, dormouse, log, lyrebird, net, rabbithole, shell, tweedle, util};
+use crate::{cheshire, dormouse, hatter, log, lyrebird, net, rabbithole, shell, tweedle, util};
 
 pub const LYREBIRD: usize = 0;
 pub const CHESHIRE: usize = 1;
 pub const RABBITHOLE: usize = 2;
 pub const DORMOUSE: usize = 3;
 pub const TWEEDLE: usize = 4;
-pub const COUNT: usize = 5;
+pub const HATTER: usize = 5;
+pub const COUNT: usize = 6;
 
 pub struct Tool {
     pub id: &'static str,
@@ -103,6 +105,14 @@ pub static TOOLS: [Tool; COUNT] = [
         note: ["Comes with hive · no internet needed", "hive ile birlikte gelir · internet gerekmez"],
         icons: icons!("tweedle"),
     },
+    Tool {
+        id: "hatter",
+        name: "hatter",
+        accent: hatter::ACCENT,
+        tagline: ["A dock in place of the taskbar", "Görev çubuğunun yerine bir dock"],
+        note: ["Comes with hive · the taskbar comes back when removed", "hive ile birlikte gelir · kaldırınca görev çubuğu geri gelir"],
+        icons: icons!("hatter"),
+    },
 ];
 
 /// Araç bu bilgisayarda kurulu mu.
@@ -112,6 +122,7 @@ pub fn installed(i: usize) -> bool {
         CHESHIRE => cheshire::installed(),
         DORMOUSE => dormouse::installed(),
         TWEEDLE => tweedle::installed(),
+        HATTER => hatter::installed(),
         _ => rabbithole::installed(),
     }
 }
@@ -132,6 +143,7 @@ pub fn run(i: usize, install: bool) -> Result<(), String> {
         (CHESHIRE, true) => cheshire::install(),
         (DORMOUSE, true) => dormouse::install(),
         (TWEEDLE, true) => tweedle::install(),
+        (HATTER, true) => hatter::install(),
         (_, true) => rabbithole_install(),
         (_, false) => uninstall(i),
     }
@@ -151,6 +163,7 @@ fn uninstall(i: usize) -> Result<(), String> {
         CHESHIRE => cheshire::uninstall()?,
         DORMOUSE => dormouse::uninstall()?,
         TWEEDLE => tweedle::uninstall()?,
+        HATTER => hatter::uninstall()?,
         _ => {
             rabbithole::run(&["remove"])?;
             // Program Files'taki exe kendini silemez: rabbithole arkasında birkaç saniye içinde
@@ -189,6 +202,7 @@ pub fn leftovers(i: usize) -> Vec<String> {
         CHESHIRE => cheshire::leftovers(),
         DORMOUSE => dormouse::leftovers(),
         TWEEDLE => tweedle::leftovers(),
+        HATTER => hatter::leftovers(),
         _ => {
             let mut l: Vec<String> =
                 [rabbithole::install_dir(), rabbithole::data_dir()].into_iter().filter_map(exists).collect();

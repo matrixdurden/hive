@@ -1,26 +1,38 @@
 //! lyrebird sayfası. Motor (çözme, ortak bellek, kulaklık, kısayollar) ../lyrebird'de ve
 //! hive sürecinde çalışır; mikrofon efekti (APO) audiodg.exe içinde.
 //!
-//! Sayfa: üstte mikrofon durumu ve düğmeler, ortada ses listesi, altta iki ses düzeyi.
+//! Sayfa: üstte mikrofon durumu ve "hepsini sustur", altında iki sekme, en altta iki ses düzeyi.
+//! - Seslerim: listedeki sesler. Sağ üstte "Son 10 saniye" (bilgisayarda az önce çalanı listeye
+//!   ekler, kısayolu da var) ve "Dosya ekle".
+//! - Ses bul: Myinstants araması. Sonuca tıklamak onu kulaklıkta çalar (yalnızca sana, mikrofona
+//!   gitmez), "Ekle" listeye indirir.
 
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
 
 use windows::Win32::Foundation::*;
 use windows::Win32::Graphics::Gdi::InvalidateRect;
+use windows::Win32::Media::Multimedia::mciSendStringW;
 use windows::Win32::System::Com::{
     CLSCTX_INPROC_SERVER, COINIT_APARTMENTTHREADED, CoCreateInstance, CoInitializeEx, CoTaskMemFree,
 };
+use windows::Win32::System::DataExchange::{CloseClipboard, GetClipboardData, OpenClipboard};
+use windows::Win32::System::Memory::{GlobalLock, GlobalUnlock};
+use windows::Win32::System::Ole::CF_UNICODETEXT;
+use windows::Win32::System::SystemInformation::GetLocalTime;
 use windows::Win32::UI::Input::KeyboardAndMouse::*;
 use windows::Win32::UI::Shell::Common::COMDLG_FILTERSPEC;
 use windows::Win32::UI::Shell::*;
 use windows::Win32::UI::WindowsAndMessaging::*;
-use windows::core::w;
+use windows::core::{PCWSTR, w};
 
 use crate::gfx::{Color, Gfx, Rect};
 use crate::log;
 use crate::ui::*;
-use crate::util::{Res, error_box};
+use crate::util::{Res, error_box, wide};
+use crate::{myinstants, osd};
 use lyrebird_motor::bus::{self, Bus};
+use lyrebird_motor::clip::{self, Clipper};
 use lyrebird_motor::config::{self, Config, Sound};
 use lyrebird_motor::decode::EXTENSIONS;
 use lyrebird_motor::hotkey::{self, Hotkey};
@@ -33,20 +45,40 @@ const ACCENT: Color = Color::rgb(0xfbbf24);
 
 pub const WM_PLAYER: u32 = WM_APP + 20;
 pub const WM_INSTALLED: u32 = WM_APP + 21;
+/// Myinstants araması bitti / bir ses indi.
+pub const WM_SEARCHED: u32 = WM_APP + 22;
+pub const WM_FETCHED: u32 = WM_APP + 23;
+/// MCI önizlemesi bitti (wParam: MCI_NOTIFY_*).
+pub const MM_MCINOTIFY: u32 = 0x3B9;
+const MCI_NOTIFY_SUCCESSFUL: usize = 1;
 pub const TIMER_ANIM: usize = 101;
 pub const TIMER_STATUS: usize = 102;
-/// Kısayol kimlikleri: durdur ve her ses (1100 + sıra).
+/// Yazmayı bırakınca arama.
+pub const TIMER_SEARCH: usize = 103;
+const SEARCH_DELAY: u32 = 450;
+/// Kısayol kimlikleri: durdur, son 10 saniye ve her ses (1100 + sıra).
 pub const HK_STOP: i32 = 1001;
+pub const HK_CLIP: i32 = 1002;
 pub const HK_SOUND: i32 = 1100;
 
 /// Yükseltilmiş kurulumun komut satırı bayrakları.
 pub const ARG_INSTALL: &str = "--lyrebird-kur";
 pub const ARG_UNINSTALL: &str = "--lyrebird-kaldir";
 
+const ICON_SEARCH: &str = "\u{E721}";
+const ICON_CLIP: &str = "\u{E7C8}";
+const ICON_CHECK: &str = "\u{E73E}";
+const ICON_STOP: &str = "\u{E71A}";
+
 const BOTTOM: f32 = 60.0;
-/// Listenin ilk satırı: başlık çizgisinin biraz altı.
-const LIST_T: f32 = HEADER + 6.0;
+/// Sekme çubuğu ve altındaki içeriğin başladığı yer.
+const TABS_T: f32 = HEADER + 10.0;
+const TABS_H: f32 = 34.0;
+const BODY_T: f32 = TABS_T + TABS_H + 10.0;
 const ROW: f32 = 40.0;
+const SEARCH_H: f32 = 40.0;
+/// Arama kutusunun en çok karakteri.
+const QUERY_MAX: usize = 60;
 
 /// `--lyrebird-kur` / `--lyrebird-kaldir`: yükseltilmiş olarak çalışır, çıkış kodu sonucu bildirir.
 pub fn setup(install: bool) -> i32 {
@@ -64,22 +96,37 @@ pub fn setup(install: bool) -> i32 {
 }
 
 #[derive(Clone, Copy, PartialEq, Debug)]
+enum Tab {
+    Mine,
+    Find,
+}
+
+#[derive(Clone, Copy, PartialEq, Debug)]
 enum Hit {
     None,
     Status,
-    Add,
     Stop,
     StopKey,
+    Tab(Tab),
+    AddFiles,
+    Clip,
+    ClipKey,
     Row(usize),
     RowKey(usize),
     RowRemove(usize),
     Slider(usize),
-    Empty,
+    /// Boş listedeki "Ses bul".
+    EmptyFind,
+    Search,
+    SearchClear,
+    Found(usize),
+    FoundAdd(usize),
 }
 
 #[derive(Clone, Copy, PartialEq)]
 enum Bind {
     Stop,
+    Clip,
     Sound(usize),
 }
 
@@ -113,6 +160,58 @@ impl Item {
     }
 }
 
+/// Myinstants sonucu.
+struct Found {
+    name: String,
+    url: String,
+    /// Önizleme ya da ekleme için iniyor.
+    loading: bool,
+    added: bool,
+}
+
+enum FindState {
+    Idle,
+    Loading,
+    Done,
+    Error(String),
+}
+
+/// Arka plandaki bir indirme: hangi ses, listeye mi (yoksa önizleme), sonuç.
+struct Fetched {
+    url: String,
+    add: bool,
+    result: Result<PathBuf, String>,
+}
+
+fn sounds_dir() -> PathBuf {
+    data_dir().join("sesler")
+}
+
+fn clips_dir() -> PathBuf {
+    data_dir().join("klipler")
+}
+
+/// Dinlenen Myinstants sesleri; sekmeden çıkınca silinir.
+fn preview_dir() -> PathBuf {
+    data_dir().join("onizleme")
+}
+
+fn preview_path(url: &str) -> PathBuf {
+    preview_dir().join(myinstants::file_name(url.rsplit('/').next().unwrap_or("ses.mp3")))
+}
+
+/// Myinstants sesinin listedeki dosyası.
+fn target(name: &str) -> PathBuf {
+    sounds_dir().join(format!("{}.mp3", myinstants::file_name(name)))
+}
+
+fn mci(cmd: &str, notify: Option<HWND>) -> bool {
+    let cmd = wide(cmd);
+    unsafe { mciSendStringW(PCWSTR(cmd.as_ptr()), None, notify) == 0 }
+}
+
+const PREVIEW: &str = "lyrebird_onizleme";
+
 pub struct Lyrebird {
     hwnd: HWND,
     bus: &'static Bus,
@@ -141,6 +240,24 @@ pub struct Lyrebird {
     head_r: f32,
     /// Sayfa ekranda mı (zamanlayıcılar yalnızca o zaman çalışır).
     visible: bool,
+    tab: Tab,
+    /// Son 10 saniye: bilgisayarın sesini (yalnızca ses çalarken) izleyen motor.
+    clipper: Clipper,
+    clip: Option<Hotkey>,
+    clip_conflict: bool,
+    /// Ses bul.
+    query: String,
+    /// Ctrl+A: yazılan her şey seçili (yeni yazı yerine geçer).
+    selected: bool,
+    found: Vec<Found>,
+    find_state: FindState,
+    find_scroll: f32,
+    search_seq: u64,
+    searched: Arc<Mutex<Option<(u64, Result<Vec<myinstants::Instant>, String>)>>>,
+    fetched: Arc<Mutex<Vec<Fetched>>>,
+    /// Kulaklıkta çalan önizleme ve beklenen (inerken).
+    preview: Option<String>,
+    want_preview: Option<String>,
 }
 
 fn is_audio(p: &Path) -> bool {
@@ -200,6 +317,20 @@ impl Lyrebird {
             head_x: 0.0,
             head_r: 0.0,
             visible: false,
+            tab: Tab::Mine,
+            clipper: Clipper::start(),
+            clip: cfg.clip,
+            clip_conflict: false,
+            query: String::new(),
+            selected: false,
+            found: Vec::new(),
+            find_state: FindState::Idle,
+            find_scroll: 0.0,
+            search_seq: 0,
+            searched: Arc::default(),
+            fetched: Arc::default(),
+            preview: None,
+            want_preview: None,
         };
         l.register();
         l.refresh_mic();
@@ -213,6 +344,7 @@ impl Lyrebird {
         self.head_x = head_x;
         self.head_r = head_r;
         self.scroll = self.scroll.min(self.max_scroll());
+        self.find_scroll = self.find_scroll.min(self.find_max_scroll());
     }
 
     pub fn take_modal(&mut self) -> Option<Modal> {
@@ -230,6 +362,7 @@ impl Lyrebird {
             mic: self.level[0],
             ear: self.level[1],
             stop: self.stop,
+            clip: self.clip,
             sounds: self.items.iter().map(|i| Sound { path: i.path.clone(), hotkey: i.hotkey }).collect(),
         }
         .save();
@@ -257,6 +390,7 @@ impl Lyrebird {
             !ok
         };
         self.stop_conflict = reg(HK_STOP, self.stop);
+        self.clip_conflict = reg(HK_CLIP, self.clip);
         let keys: Vec<_> = self.items.iter().map(|i| i.hotkey).collect();
         let conflicts: Vec<bool> = keys.iter().enumerate().map(|(n, &h)| reg(HK_SOUND + n as i32, h)).collect();
         for (item, c) in self.items.iter_mut().zip(conflicts) {
@@ -281,6 +415,9 @@ impl Lyrebird {
                 if self.stop == key {
                     self.stop = None;
                 }
+                if self.clip == key {
+                    self.clip = None;
+                }
                 for i in &mut self.items {
                     if i.hotkey == key {
                         i.hotkey = None;
@@ -289,6 +426,7 @@ impl Lyrebird {
             }
             match b {
                 Bind::Stop => self.stop = key,
+                Bind::Clip => self.clip = key,
                 Bind::Sound(n) => {
                     if let Some(i) = self.items.get_mut(n) {
                         i.hotkey = key;
@@ -340,7 +478,10 @@ impl Lyrebird {
         }
         let item = self.items.remove(n);
         if self.playing.iter().any(|p| p.id == item.id) {
-            self.player.toggle(item.id, item.path);
+            self.player.toggle(item.id, item.path.clone());
+        }
+        if let Some(f) = self.found.iter_mut().find(|f| target(&f.name) == item.path) {
+            f.added = false;
         }
         self.register();
         self.save();
@@ -371,6 +512,33 @@ impl Lyrebird {
             _ => self.monitor.set_gain(config::gain(v)),
         }
         self.redraw();
+    }
+
+    /// Bilgisayarda duyulan son 10 saniyeyi listeye ekler; ekranın altında söyler.
+    fn save_clip(&mut self) {
+        let t = unsafe { GetLocalTime() };
+        let name = format!("{} {:02}.{:02}.{:02}", t!("Clip", "Klip"), t.wHour, t.wMinute, t.wSecond);
+        let path = clips_dir().join(format!("{name}.wav"));
+        match self.clipper.save(&path) {
+            Ok(Some(secs)) => {
+                self.add(vec![path]);
+                let text = format!("{} · {:.0} {}", t!("Clip added", "Klip eklendi"), secs.max(1.0), t!("s", "sn"));
+                osd::show(ICON_CLIP, 0xfbbf24, &text);
+            }
+            Ok(None) => {
+                let text = format!(
+                    "{} {} {}",
+                    t!("Nothing heard in the last", "Son"),
+                    clip::SECONDS,
+                    t!("seconds", "saniyede ses yok")
+                );
+                osd::show(ICON_CLIP, 0x8b8b93, &text);
+            }
+            Err(e) => {
+                log!("klip kaydedilemedi: {e}");
+                osd::show(ICON_CLIP, osd::RED, t!("Could not save the clip", "Klip kaydedilemedi"));
+            }
+        }
     }
 
     // --- Mikrofon durumu ---
@@ -408,18 +576,33 @@ impl Lyrebird {
         });
     }
 
+    // --- Sekmeler ---
+
+    fn set_tab(&mut self, tab: Tab) {
+        if self.tab == tab {
+            return;
+        }
+        self.tab = tab;
+        self.hover = Hit::None;
+        self.selected = false;
+        if tab == Tab::Find {
+            if matches!(self.find_state, FindState::Idle) {
+                self.search_now();
+            }
+            unsafe {
+                let _ = SetFocus(Some(self.hwnd));
+            }
+        } else {
+            self.stop_preview();
+            let _ = std::fs::remove_dir_all(preview_dir());
+        }
+        self.redraw();
+    }
+
     // --- Yerleşim (sayfanın kendi köşesine göre) ---
 
-    fn max_scroll(&self) -> f32 {
-        (self.items.len() as f32 * ROW + 14.0 - (self.h - HEADER - BOTTOM)).max(0.0)
-    }
-
-    fn add_rect(&self) -> Rect {
-        Rect::new(self.head_r - 36.0, HEAD_CY - 18.0, self.head_r, HEAD_CY + 18.0)
-    }
-
     fn stop_rect(&self) -> Rect {
-        Rect::new(self.head_r - 74.0, HEAD_CY - 18.0, self.head_r - 38.0, HEAD_CY + 18.0)
+        Rect::new(self.head_r - 36.0, HEAD_CY - 18.0, self.head_r, HEAD_CY + 18.0)
     }
 
     fn chip_text(&self, key: Option<Hotkey>, binding: bool) -> String {
@@ -430,9 +613,20 @@ impl Lyrebird {
         }
     }
 
+    /// Kısayol kutucuğunun renkleri: (yazı, çerçeve).
+    fn chip_colors(&self, binding: bool, conflict: bool, unset: bool, hovered: bool) -> (Color, Color) {
+        match () {
+            _ if binding => (ACCENT, ACCENT),
+            _ if conflict => (RED, LINE),
+            _ if unset => (FAINT, LINE),
+            _ if hovered => (TEXT, FAINT),
+            _ => (MUTED, LINE),
+        }
+    }
+
     fn stop_key_rect(&self, g: &Gfx) -> Rect {
         let text = self.chip_text(self.stop, self.bind == Some(Bind::Stop));
-        chip_rect(g, self.head_r - 80.0, HEAD_CY, &text)
+        chip_rect(g, self.head_r - 42.0, HEAD_CY, &text)
     }
 
     /// Başlıktaki mikrofon rozeti: bağlıyken "Bağlı" (ad balonda), değilken "Mikrofona bağla"
@@ -458,16 +652,63 @@ impl Lyrebird {
         Rect::new(l, HEAD_CY - 13.0, l + w, HEAD_CY + 13.0)
     }
 
-    /// Boş listede ortadaki "Ses ekle" düğmesi.
-    fn empty_rect(&self, g: &Gfx) -> Rect {
-        let cy = (HEADER + self.h - BOTTOM) / 2.0;
-        let b = button_rect(g, 0.0, cy + 34.0, t!("Add sounds", "Ses ekle"), true);
-        let l = self.w / 2.0 - b.w() / 2.0;
-        Rect::new(l, b.t, l + b.w(), b.b)
+    fn tab_label(&self, tab: Tab) -> String {
+        match tab {
+            Tab::Mine if self.items.is_empty() => t!("My sounds", "Seslerim").into(),
+            Tab::Mine => format!("{}  {}", t!("My sounds", "Seslerim"), self.items.len()),
+            Tab::Find => t!("Find sounds", "Ses bul").into(),
+        }
+    }
+
+    fn tab_rects(&self, g: &Gfx) -> [Rect; 2] {
+        let mut x = 16.0 + 3.0;
+        [Tab::Mine, Tab::Find].map(|t| {
+            let w = g.measure(&self.tab_label(t), &g.f.button) + 32.0;
+            let r = Rect::new(x, TABS_T + 3.0, x + w, TABS_T + TABS_H - 3.0);
+            x += w;
+            r
+        })
+    }
+
+    /// Seslerim sekmesinin sağındaki düğmeler: (dosya ekle, son 10 saniye, kısayolu). Yer
+    /// yoksa kısayol kutucuğu gizlenir.
+    fn mine_tools(&self, g: &Gfx) -> (Rect, Rect, Option<Rect>) {
+        let t = TABS_T;
+        let add = button_rect_right(g, self.w - 16.0, t, t!("Add files", "Dosya ekle"), true);
+        let clip = button_rect_right(g, add.l - 8.0, t, &self.clip_label(), true);
+        let text = self.chip_text(self.clip, self.bind == Some(Bind::Clip));
+        let key = chip_rect(g, clip.l - 8.0, clip.cy(), &text);
+        let tabs_r = self.tab_rects(g)[1].r + 12.0;
+        (add, clip, (key.l > tabs_r).then_some(key))
+    }
+
+    fn clip_label(&self) -> String {
+        format!("{} {} {}", t!("Last", "Son"), clip::SECONDS, t!("seconds", "saniye"))
+    }
+
+    fn body(&self) -> Rect {
+        Rect::new(0.0, BODY_T, self.w, self.h - BOTTOM)
+    }
+
+    fn max_scroll(&self) -> f32 {
+        let body = self.body();
+        (self.items.len() as f32 * ROW + 10.0 - (body.b - body.t)).max(0.0)
+    }
+
+    /// Boş listede ortadaki düğmeler: (dosya ekle, ses bul).
+    fn empty_rects(&self, g: &Gfx) -> (Rect, Rect) {
+        let cy = self.body().cy();
+        let add = button_rect(g, 0.0, cy + 34.0, t!("Add files", "Dosya ekle"), true);
+        let find = button_rect(g, 0.0, cy + 34.0, t!("Find sounds", "Ses bul"), true);
+        let l = self.w / 2.0 - (add.w() + 10.0 + find.w()) / 2.0;
+        (
+            Rect::new(l, add.t, l + add.w(), add.b),
+            Rect::new(l + add.w() + 10.0, find.t, l + add.w() + 10.0 + find.w(), find.b),
+        )
     }
 
     fn row_rect(&self, n: usize) -> Rect {
-        let t = LIST_T + n as f32 * ROW - self.scroll;
+        let t = BODY_T + n as f32 * ROW - self.scroll;
         Rect::new(16.0, t + 1.0, self.w - 16.0, t + ROW - 1.0)
     }
 
@@ -482,6 +723,35 @@ impl Lyrebird {
         Rect::new(self.w - 50.0, r.t + 6.0, self.w - 22.0, r.b - 6.0)
     }
 
+    fn search_rect(&self) -> Rect {
+        Rect::new(16.0, BODY_T, self.w - 16.0, BODY_T + SEARCH_H)
+    }
+
+    fn search_clear_rect(&self) -> Rect {
+        let b = self.search_rect();
+        Rect::new(b.r - 36.0, b.t + 6.0, b.r - 8.0, b.b - 6.0)
+    }
+
+    /// Sonuç listesinin üstü (kaydırılmamış).
+    fn found_top(&self) -> f32 {
+        BODY_T + SEARCH_H + 10.0
+    }
+
+    fn found_rect(&self, n: usize) -> Rect {
+        let t = self.found_top() + n as f32 * ROW - self.find_scroll;
+        Rect::new(16.0, t + 1.0, self.w - 16.0, t + ROW - 1.0)
+    }
+
+    fn found_add_rect(&self, g: &Gfx, n: usize) -> Rect {
+        let r = self.found_rect(n);
+        let b = button_rect_right(g, r.r - 6.0, 0.0, t!("Add", "Ekle"), true);
+        Rect::new(b.l, r.cy() - 14.0, b.r, r.cy() + 14.0)
+    }
+
+    fn find_max_scroll(&self) -> f32 {
+        (self.found.len() as f32 * ROW + 10.0 - (self.h - BOTTOM - self.found_top())).max(0.0)
+    }
+
     /// (bölge, iz başı, iz sonu)
     fn slider(&self, k: usize) -> (Rect, f32, f32) {
         let (w, h) = (self.w, self.h);
@@ -491,9 +761,7 @@ impl Lyrebird {
 
     fn hit(&self, g: &Gfx, x: f32, y: f32) -> Hit {
         if y < HEADER {
-            return if self.add_rect().contains(x, y) {
-                Hit::Add
-            } else if self.stop_rect().contains(x, y) {
+            return if self.stop_rect().contains(x, y) {
                 Hit::Stop
             } else if self.stop_key_rect(g).contains(x, y) {
                 Hit::StopKey
@@ -506,10 +774,41 @@ impl Lyrebird {
         if y >= self.h - BOTTOM {
             return (0..2).find(|&k| self.slider(k).0.contains(x, y)).map_or(Hit::None, Hit::Slider);
         }
-        if self.items.is_empty() {
-            return if self.empty_rect(g).contains(x, y) { Hit::Empty } else { Hit::None };
+        if y < BODY_T {
+            let [mine, find] = self.tab_rects(g);
+            if mine.contains(x, y) {
+                return Hit::Tab(Tab::Mine);
+            }
+            if find.contains(x, y) {
+                return Hit::Tab(Tab::Find);
+            }
+            if self.tab == Tab::Mine {
+                let (add, clip, key) = self.mine_tools(g);
+                return match () {
+                    _ if add.contains(x, y) => Hit::AddFiles,
+                    _ if clip.contains(x, y) => Hit::Clip,
+                    _ if key.is_some_and(|k| k.contains(x, y)) => Hit::ClipKey,
+                    _ => Hit::None,
+                };
+            }
+            return Hit::None;
         }
-        let n = ((y - LIST_T + self.scroll) / ROW).floor();
+        match self.tab {
+            Tab::Mine => self.mine_hit(g, x, y),
+            Tab::Find => self.find_hit(g, x, y),
+        }
+    }
+
+    fn mine_hit(&self, g: &Gfx, x: f32, y: f32) -> Hit {
+        if self.items.is_empty() {
+            let (add, find) = self.empty_rects(g);
+            return match () {
+                _ if add.contains(x, y) => Hit::AddFiles,
+                _ if find.contains(x, y) => Hit::EmptyFind,
+                _ => Hit::None,
+            };
+        }
+        let n = ((y - BODY_T + self.scroll) / ROW).floor();
         if n < 0.0 || n as usize >= self.items.len() {
             return Hit::None;
         }
@@ -523,6 +822,26 @@ impl Lyrebird {
         }
     }
 
+    fn find_hit(&self, g: &Gfx, x: f32, y: f32) -> Hit {
+        let b = self.search_rect();
+        if b.contains(x, y) {
+            return if !self.query.is_empty() && self.search_clear_rect().contains(x, y) {
+                Hit::SearchClear
+            } else {
+                Hit::Search
+            };
+        }
+        if y < self.found_top() {
+            return Hit::None;
+        }
+        let n = ((y - self.found_top() + self.find_scroll) / ROW).floor();
+        if n < 0.0 || n as usize >= self.found.len() {
+            return Hit::None;
+        }
+        let n = n as usize;
+        if self.found_add_rect(g, n).contains(x, y) { Hit::FoundAdd(n) } else { Hit::Found(n) }
+    }
+
     fn slide_to(&mut self, k: usize, x: f32) {
         let (_, a, b) = self.slider(k);
         self.set_level(k, (((x - a) / (b - a)).clamp(0.0, 1.0) * 100.0).round() as u32);
@@ -532,109 +851,12 @@ impl Lyrebird {
 
     pub fn paint(&self, g: &Gfx) {
         let (w, h) = (self.w, self.h);
-        let playing_any = !self.playing.is_empty();
-
-        // Üst çubuk: mikrofon rozeti, sustur, ekle.
-        let label = self.pill_label();
-        if !label.is_empty() {
-            let p = self.pill_rect(g);
-            let hovered = self.hover == Hit::Status;
-            if matches!(self.mic, MicState::Detached) {
-                g.fill(p, 13.0, ACCENT.alpha(if hovered { 0.88 } else { 1.0 }));
-                g.text(label, &g.f.button, p, ON_ACCENT);
-            } else {
-                g.fill(p, 13.0, HOVER);
-                let dot = match &self.mic {
-                    MicState::Attached(_) if self.active => GREEN,
-                    MicState::Busy => ACCENT,
-                    _ => FAINT,
-                };
-                g.circle(p.l + 14.0, p.cy(), 3.5, dot);
-                g.text(label, &g.f.small, Rect::new(p.l + 24.0, p.t, p.r, p.b), if hovered { TEXT } else { MUTED });
-            }
+        self.paint_header(g);
+        self.paint_tabs(g);
+        match self.tab {
+            Tab::Mine => self.paint_mine(g),
+            Tab::Find => self.paint_find(g),
         }
-
-        let stop = self.stop_rect();
-        icon_button(g, stop, ICON_MUTE, if playing_any { ACCENT } else { MUTED }, self.hover == Hit::Stop);
-        let binding = self.bind == Some(Bind::Stop);
-        if self.stop.is_some() || binding || matches!(self.hover, Hit::Stop | Hit::StopKey) {
-            let text = self.chip_text(self.stop, binding);
-            let (c, b) = match () {
-                _ if binding => (ACCENT, ACCENT),
-                _ if self.stop_conflict => (RED, LINE),
-                _ if self.stop.is_none() => (FAINT, LINE),
-                _ => (MUTED, LINE),
-            };
-            chip(g, self.stop_key_rect(g), &text, c, b);
-        }
-        icon_button(g, self.add_rect(), ICON_ADD, MUTED, self.hover == Hit::Add);
-
-        // Liste.
-        let list = Rect::new(0.0, HEADER, w, h - BOTTOM);
-        if self.items.is_empty() {
-            let cy = list.cy();
-            g.text(ICON_AUDIO, &g.f.icon_large, Rect::new(0.0, cy - 62.0, w, cy - 22.0), FAINT);
-            let title = t!("Drop sound files here", "Ses dosyalarını buraya sürükle");
-            text_center(g, title, &g.f.strong, w / 2.0, cy - 14.0, cy + 8.0, TEXT);
-            let kinds = t!("mp3, wav, m4a, aac, wma or flac", "mp3, wav, m4a, aac, wma ya da flac");
-            g.text(kinds, &g.f.small_center, Rect::new(0.0, cy + 8.0, w, cy + 26.0), MUTED);
-            let b = self.empty_rect(g);
-            button(g, b, t!("Add sounds", "Ses ekle"), Some(ICON_ADD), Some(ACCENT), self.hover == Hit::Empty);
-        }
-        g.clip(list, || {
-            for (n, item) in self.items.iter().enumerate() {
-                let r = self.row_rect(n);
-                if r.b < list.t || r.t > list.b {
-                    continue;
-                }
-                let hovered = matches!(self.hover, Hit::Row(i) | Hit::RowKey(i) | Hit::RowRemove(i) if i == n);
-                let playing = self.playing.iter().find(|p| p.id == item.id);
-                if playing.is_some() {
-                    g.fill(r, 8.0, ACCENT.alpha(if hovered { 0.12 } else { 0.08 }));
-                } else if hovered {
-                    g.fill(r, 8.0, HOVER);
-                }
-                let binding = self.bind == Some(Bind::Sound(n));
-                let key = self.row_key_rect(g, n);
-                let show_chip = item.hotkey.is_some() || binding || hovered;
-                let name_right = if show_chip { key.l - 10.0 } else { w - 56.0 };
-                let (icon, icon_color) =
-                    if playing.is_some() { (ICON_PAUSE, ACCENT) } else { (ICON_PLAY, if hovered { MUTED } else { FAINT }) };
-                g.text(icon, &g.f.icon_small, Rect::new(r.l + 8.0, r.t, r.l + 28.0, r.b), icon_color);
-                let name_color = match () {
-                    _ if item.missing => FAINT,
-                    _ if playing.is_some() => ACCENT,
-                    _ => TEXT,
-                };
-                g.text(&item.name, &g.f.text, Rect::new(r.l + 36.0, r.t, name_right, r.b), name_color);
-                if show_chip {
-                    let text = self.chip_text(item.hotkey, binding);
-                    let (c, b) = match () {
-                        _ if binding => (ACCENT, ACCENT),
-                        _ if item.conflict => (RED, LINE),
-                        _ if item.hotkey.is_none() => (FAINT, LINE),
-                        _ if self.hover == Hit::RowKey(n) => (TEXT, FAINT),
-                        _ => (MUTED, LINE),
-                    };
-                    chip(g, key, &text, c, b);
-                }
-                if hovered {
-                    let rm = self.remove_rect(n);
-                    let over = self.hover == Hit::RowRemove(n);
-                    if over {
-                        g.fill(rm, 6.0, LINE);
-                    }
-                    g.text(ICON_REMOVE, &g.f.icon_small, rm, if over { TEXT } else { FAINT });
-                }
-                if let Some(p) = playing
-                    && p.duration > 0.0
-                {
-                    let t = (p.started.elapsed().as_secs_f64() / p.duration).clamp(0.0, 1.0) as f32;
-                    let (a, b) = (r.l + 10.0, r.r - 10.0);
-                    g.fill(Rect::new(a, r.b - 3.0, a + (b - a) * t, r.b - 1.0), 1.0, ACCENT.alpha(0.7));
-                }
-            }
-        });
 
         // Alt çubuk: mikrofon ve kulaklık düzeyi.
         g.fill(Rect::new(0.0, h - BOTTOM, w, h - BOTTOM + 1.0), 0.0, LINE);
@@ -657,6 +879,225 @@ impl Lyrebird {
         }
     }
 
+    /// Üst çubuk: mikrofon rozeti, hepsini sustur ve kısayolu.
+    fn paint_header(&self, g: &Gfx) {
+        let label = self.pill_label();
+        if !label.is_empty() {
+            let p = self.pill_rect(g);
+            let hovered = self.hover == Hit::Status;
+            if matches!(self.mic, MicState::Detached) {
+                g.fill(p, 13.0, ACCENT.alpha(if hovered { 0.88 } else { 1.0 }));
+                g.text(label, &g.f.button, p, ON_ACCENT);
+            } else {
+                g.fill(p, 13.0, HOVER);
+                let dot = match &self.mic {
+                    MicState::Attached(_) if self.active => GREEN,
+                    MicState::Busy => ACCENT,
+                    _ => FAINT,
+                };
+                g.circle(p.l + 14.0, p.cy(), 3.5, dot);
+                g.text(label, &g.f.small, Rect::new(p.l + 24.0, p.t, p.r, p.b), if hovered { TEXT } else { MUTED });
+            }
+        }
+        let playing_any = !self.playing.is_empty();
+        icon_button(g, self.stop_rect(), ICON_MUTE, if playing_any { ACCENT } else { MUTED }, self.hover == Hit::Stop);
+        let binding = self.bind == Some(Bind::Stop);
+        if self.stop.is_some() || binding || matches!(self.hover, Hit::Stop | Hit::StopKey) {
+            let (c, b) = self.chip_colors(binding, self.stop_conflict, self.stop.is_none(), false);
+            chip(g, self.stop_key_rect(g), &self.chip_text(self.stop, binding), c, b);
+        }
+    }
+
+    /// Sekmeler ve seçili sekmenin düğmeleri.
+    fn paint_tabs(&self, g: &Gfx) {
+        let [mine, find] = self.tab_rects(g);
+        g.fill(Rect::new(mine.l - 3.0, mine.t - 3.0, find.r + 3.0, find.b + 3.0), 8.0, HOVER);
+        for (r, t) in [(mine, Tab::Mine), (find, Tab::Find)] {
+            let selected = self.tab == t;
+            if selected {
+                g.fill(r, 6.0, SEL);
+            }
+            let fg = if selected || self.hover == Hit::Tab(t) { TEXT } else { MUTED };
+            g.text(&self.tab_label(t), &g.f.button, r, fg);
+            if selected {
+                g.fill(Rect::new(r.l + 12.0, r.b - 2.0, r.r - 12.0, r.b), 1.0, ACCENT);
+            }
+        }
+        if self.tab == Tab::Mine {
+            let (add, clip, key) = self.mine_tools(g);
+            button(g, add, t!("Add files", "Dosya ekle"), Some(ICON_ADD), None, self.hover == Hit::AddFiles);
+            button(g, clip, &self.clip_label(), Some(ICON_CLIP), None, self.hover == Hit::Clip);
+            if let Some(k) = key {
+                let binding = self.bind == Some(Bind::Clip);
+                let (c, b) =
+                    self.chip_colors(binding, self.clip_conflict, self.clip.is_none(), self.hover == Hit::ClipKey);
+                chip(g, k, &self.chip_text(self.clip, binding), c, b);
+            }
+        }
+    }
+
+    fn paint_mine(&self, g: &Gfx) {
+        let w = self.w;
+        let list = self.body();
+        if self.items.is_empty() {
+            let cy = list.cy();
+            g.text(ICON_AUDIO, &g.f.icon_large, Rect::new(0.0, cy - 62.0, w, cy - 22.0), FAINT);
+            let title = t!("No sounds yet", "Henüz ses yok");
+            text_center(g, title, &g.f.strong, w / 2.0, cy - 14.0, cy + 8.0, TEXT);
+            let kinds = t!(
+                "drop sound files here, or find some on Myinstants",
+                "ses dosyalarını buraya sürükle ya da Myinstants'ta bul"
+            );
+            g.text(kinds, &g.f.small_center, Rect::new(0.0, cy + 8.0, w, cy + 26.0), MUTED);
+            let (add, find) = self.empty_rects(g);
+            button(g, add, t!("Add files", "Dosya ekle"), Some(ICON_ADD), Some(ACCENT), self.hover == Hit::AddFiles);
+            button(g, find, t!("Find sounds", "Ses bul"), Some(ICON_SEARCH), None, self.hover == Hit::EmptyFind);
+            return;
+        }
+        g.clip(list, || {
+            for (n, item) in self.items.iter().enumerate() {
+                let r = self.row_rect(n);
+                if r.b < list.t || r.t > list.b {
+                    continue;
+                }
+                let hovered = matches!(self.hover, Hit::Row(i) | Hit::RowKey(i) | Hit::RowRemove(i) if i == n);
+                let playing = self.playing.iter().find(|p| p.id == item.id);
+                if playing.is_some() {
+                    g.fill(r, 8.0, ACCENT.alpha(if hovered { 0.12 } else { 0.08 }));
+                } else if hovered {
+                    g.fill(r, 8.0, HOVER);
+                }
+                let binding = self.bind == Some(Bind::Sound(n));
+                let key = self.row_key_rect(g, n);
+                let show_chip = item.hotkey.is_some() || binding || hovered;
+                let name_right = if show_chip { key.l - 10.0 } else { w - 56.0 };
+                let (icon, icon_color) = if playing.is_some() {
+                    (ICON_PAUSE, ACCENT)
+                } else {
+                    (ICON_PLAY, if hovered { MUTED } else { FAINT })
+                };
+                g.text(icon, &g.f.icon_small, Rect::new(r.l + 8.0, r.t, r.l + 28.0, r.b), icon_color);
+                let name_color = match () {
+                    _ if item.missing => FAINT,
+                    _ if playing.is_some() => ACCENT,
+                    _ => TEXT,
+                };
+                g.text(&item.name, &g.f.text, Rect::new(r.l + 36.0, r.t, name_right, r.b), name_color);
+                if show_chip {
+                    let (c, b) =
+                        self.chip_colors(binding, item.conflict, item.hotkey.is_none(), self.hover == Hit::RowKey(n));
+                    chip(g, key, &self.chip_text(item.hotkey, binding), c, b);
+                }
+                if hovered {
+                    let rm = self.remove_rect(n);
+                    let over = self.hover == Hit::RowRemove(n);
+                    if over {
+                        g.fill(rm, 6.0, LINE);
+                    }
+                    g.text(ICON_REMOVE, &g.f.icon_small, rm, if over { TEXT } else { FAINT });
+                }
+                if let Some(p) = playing
+                    && p.duration > 0.0
+                {
+                    let t = (p.started.elapsed().as_secs_f64() / p.duration).clamp(0.0, 1.0) as f32;
+                    let (a, b) = (r.l + 10.0, r.r - 10.0);
+                    g.fill(Rect::new(a, r.b - 3.0, a + (b - a) * t, r.b - 1.0), 1.0, ACCENT.alpha(0.7));
+                }
+            }
+        });
+    }
+
+    fn paint_find(&self, g: &Gfx) {
+        let (w, h) = (self.w, self.h);
+
+        // Arama kutusu: yazılan her şey buraya gelir.
+        let b = self.search_rect();
+        g.fill(b, 8.0, HOVER);
+        g.stroke(b, 8.0, ACCENT.alpha(0.6), 1.0);
+        g.text(ICON_SEARCH, &g.f.icon_small, Rect::new(b.l + 12.0, b.t, b.l + 32.0, b.b), MUTED);
+        let tx = b.l + 40.0;
+        let text_r = if self.query.is_empty() { b.r - 12.0 } else { self.search_clear_rect().l - 6.0 };
+        let tw = g.measure(&self.query, &g.f.text);
+        if self.query.is_empty() {
+            g.text(
+                t!("Search Myinstants…", "Myinstants'ta ara…"),
+                &g.f.text,
+                Rect::new(tx + 4.0, b.t, text_r, b.b),
+                FAINT,
+            );
+        } else {
+            if self.selected {
+                g.fill(
+                    Rect::new(tx - 2.0, b.cy() - 11.0, (tx + tw + 2.0).min(text_r), b.cy() + 11.0),
+                    3.0,
+                    ACCENT.alpha(0.35),
+                );
+            }
+            g.text(&self.query, &g.f.text, Rect::new(tx, b.t, text_r, b.b), TEXT);
+            let c = self.search_clear_rect();
+            icon_button(g, c, ICON_REMOVE, FAINT, self.hover == Hit::SearchClear);
+        }
+        if !self.selected {
+            let cx = (tx + tw + 1.0).min(text_r);
+            g.fill(Rect::new(cx, b.cy() - 9.0, cx + 1.5, b.cy() + 9.0), 0.0, ACCENT);
+        }
+
+        // Sonuçlar ya da durum.
+        let area = Rect::new(0.0, self.found_top() - 2.0, w, h - BOTTOM);
+        let message = match &self.find_state {
+            FindState::Error(e) => Some((e.as_str(), RED)),
+            FindState::Loading if self.found.is_empty() => Some((t!("Searching…", "Aranıyor…"), MUTED)),
+            FindState::Done if self.found.is_empty() => Some((t!("Nothing found", "Bir şey bulunamadı"), MUTED)),
+            _ => None,
+        };
+        if let Some((text, color)) = message {
+            g.text(text, &g.f.small_center, Rect::new(16.0, area.t + 20.0, w - 16.0, area.t + 44.0), color);
+            if !matches!(self.find_state, FindState::Error(_)) {
+                return;
+            }
+        }
+        g.clip(area, || {
+            for (n, f) in self.found.iter().enumerate() {
+                let r = self.found_rect(n);
+                if r.b < area.t || r.t > area.b {
+                    continue;
+                }
+                let hovered = matches!(self.hover, Hit::Found(i) | Hit::FoundAdd(i) if i == n);
+                let playing = self.preview.as_deref() == Some(f.url.as_str());
+                let waiting = self.want_preview.as_deref() == Some(f.url.as_str());
+                if playing {
+                    g.fill(r, 8.0, ACCENT.alpha(0.08));
+                } else if hovered {
+                    g.fill(r, 8.0, HOVER);
+                }
+                let left = Rect::new(r.l + 8.0, r.t, r.l + 28.0, r.b);
+                if waiting {
+                    g.text("…", &g.f.small_center, left, MUTED);
+                } else if playing {
+                    g.text(ICON_STOP, &g.f.icon_small, left, ACCENT);
+                } else if hovered {
+                    g.text(ICON_PLAY, &g.f.icon_small, left, MUTED);
+                }
+                let add = self.found_add_rect(g, n);
+                let name_r = if f.added || f.loading || hovered { add.l - 10.0 } else { r.r - 10.0 };
+                g.text(
+                    &f.name,
+                    &g.f.text,
+                    Rect::new(r.l + 36.0, r.t, name_r, r.b),
+                    if playing { ACCENT } else { TEXT },
+                );
+                if f.added {
+                    g.text(ICON_CHECK, &g.f.icon_small, Rect::new(add.l, add.t, add.l + 20.0, add.b), ACCENT);
+                    g.text(t!("Added", "Eklendi"), &g.f.small, Rect::new(add.l + 24.0, add.t, add.r, add.b), ACCENT);
+                } else if f.loading && !waiting {
+                    g.text(t!("Adding…", "Ekleniyor…"), &g.f.small, add, MUTED);
+                } else if hovered {
+                    button(g, add, t!("Add", "Ekle"), Some(ICON_ADD), None, self.hover == Hit::FoundAdd(n));
+                }
+            }
+        });
+    }
+
     // --- Görünürlük ve zamanlayıcılar ---
 
     /// Sayfa ekrana geldi ya da gitti (pencere gizlendi, başka sekmeye geçildi).
@@ -670,6 +1111,7 @@ impl Lyrebird {
         if !visible {
             self.end_bind(None);
             self.hover = Hit::None;
+            self.stop_preview();
         }
         self.visible = visible;
         self.update_timers();
@@ -714,7 +1156,7 @@ impl Lyrebird {
     pub fn mouse_down(&mut self, g: &Gfx, x: f32, y: f32) {
         let hit = self.hit(g, x, y);
         self.pressed = hit;
-        if self.bind.is_some() && !matches!(hit, Hit::RowKey(_) | Hit::StopKey) {
+        if self.bind.is_some() && !matches!(hit, Hit::RowKey(_) | Hit::StopKey | Hit::ClipKey) {
             self.end_bind(None);
         }
         if let Hit::Slider(k) = hit {
@@ -734,13 +1176,24 @@ impl Lyrebird {
             return;
         }
         match hit {
-            Hit::Add | Hit::Empty => self.modal = Some(Modal::AddFiles),
             Hit::Stop => self.player.stop_all(),
             Hit::StopKey => self.start_bind(Bind::Stop),
             Hit::Status if matches!(self.mic, MicState::Detached) => self.run_setup(true),
+            Hit::Tab(t) => self.set_tab(t),
+            Hit::EmptyFind => self.set_tab(Tab::Find),
+            Hit::AddFiles => self.modal = Some(Modal::AddFiles),
+            Hit::Clip => self.save_clip(),
+            Hit::ClipKey => self.start_bind(Bind::Clip),
             Hit::Row(n) => self.toggle(n),
             Hit::RowKey(n) => self.start_bind(Bind::Sound(n)),
             Hit::RowRemove(n) => self.remove(n),
+            Hit::Search => {
+                self.selected = false;
+                self.redraw();
+            }
+            Hit::SearchClear => self.clear_query(),
+            Hit::Found(n) => self.toggle_preview(n),
+            Hit::FoundAdd(n) => self.add_found(n),
             _ => {}
         }
     }
@@ -751,6 +1204,11 @@ impl Lyrebird {
                 self.set_level(k, (self.level[k] as f32 + delta * 5.0).round().max(0.0) as u32);
                 self.save();
             }
+            _ if self.tab == Tab::Find => {
+                self.find_scroll = (self.find_scroll - delta * ROW).clamp(0.0, self.find_max_scroll());
+                self.hover = self.hit(g, x, y);
+                self.redraw();
+            }
             _ => {
                 self.scroll = (self.scroll - delta * ROW).clamp(0.0, self.max_scroll());
                 self.hover = self.hit(g, x, y);
@@ -759,7 +1217,8 @@ impl Lyrebird {
         }
     }
 
-    /// Kısayol atanıyorsa tuşu yakalar (`true`); Esc her şeyi durdurur.
+    /// Kısayol atanıyorsa tuşu yakalar (`true`). Ctrl+F ses bul'u açar; Esc ses bul'da önce
+    /// seçimi, sonra yazıyı siler, sonra Seslerim'e döner; Seslerim'de her şeyi susturur.
     pub fn key(&mut self, vk: u16) -> bool {
         if self.bind.is_some() {
             if !hotkey::is_modifier(vk) {
@@ -771,6 +1230,16 @@ impl Lyrebird {
                 self.end_bind(key);
             }
             return true;
+        }
+        let ctrl = unsafe { GetKeyState(VK_CONTROL.0 as i32) } < 0;
+        if ctrl && VIRTUAL_KEY(vk) == VK_F {
+            self.set_tab(Tab::Find);
+            self.selected = !self.query.is_empty();
+            self.redraw();
+            return true;
+        }
+        if self.tab == Tab::Find {
+            return self.find_key(vk, ctrl);
         }
         if VIRTUAL_KEY(vk) == VK_ESCAPE {
             self.player.stop_all();
@@ -791,6 +1260,7 @@ impl Lyrebird {
     pub fn hotkey(&mut self, id: i32) {
         match id {
             HK_STOP => self.player.stop_all(),
+            HK_CLIP => self.save_clip(),
             id if id >= HK_SOUND => self.toggle((id - HK_SOUND) as usize),
             _ => {}
         }
@@ -800,6 +1270,7 @@ impl Lyrebird {
         match id {
             TIMER_ANIM => self.redraw(),
             TIMER_STATUS => self.refresh_mic(),
+            TIMER_SEARCH => self.search_now(),
             _ => {}
         }
     }
@@ -821,6 +1292,273 @@ impl Lyrebird {
                 "Mikrofona bağlanamadı.\n\nAyrıntılar: %LOCALAPPDATA%\\Programs\\hive\\hive.log"
             ));
         }
+    }
+}
+
+// --- Ses bul: arama kutusu, Myinstants, önizleme ---
+
+impl Lyrebird {
+    /// Ses bul açıkken yazılanlar arama kutusuna gider; her şey seçiliyse yerine geçer.
+    pub fn char(&mut self, c: char) -> bool {
+        if self.tab != Tab::Find || self.bind.is_some() || c.is_control() {
+            return false;
+        }
+        if std::mem::take(&mut self.selected) {
+            self.query.clear();
+        }
+        if self.query.chars().count() < QUERY_MAX {
+            self.query.push(c);
+        }
+        self.schedule_search();
+        true
+    }
+
+    fn find_key(&mut self, vk: u16, ctrl: bool) -> bool {
+        match VIRTUAL_KEY(vk) {
+            VK_ESCAPE => {
+                if std::mem::take(&mut self.selected) {
+                    self.redraw();
+                } else if self.preview.is_some() || self.want_preview.is_some() {
+                    self.stop_preview();
+                    self.redraw();
+                } else if !self.query.is_empty() {
+                    self.clear_query();
+                } else {
+                    self.set_tab(Tab::Mine);
+                }
+            }
+            VK_BACK | VK_DELETE => {
+                if std::mem::take(&mut self.selected) || ctrl {
+                    self.query.clear();
+                } else if VIRTUAL_KEY(vk) == VK_BACK {
+                    self.query.pop();
+                }
+                self.schedule_search();
+            }
+            VK_RETURN => self.search_now(),
+            VK_A if ctrl => {
+                self.selected = !self.query.is_empty();
+                self.redraw();
+            }
+            VK_V if ctrl => {
+                if let Some(text) = clipboard_text() {
+                    if std::mem::take(&mut self.selected) {
+                        self.query.clear();
+                    }
+                    let line = text.lines().next().unwrap_or("").trim().to_string();
+                    let room = QUERY_MAX.saturating_sub(self.query.chars().count());
+                    self.query.extend(line.chars().take(room));
+                    self.schedule_search();
+                }
+            }
+            _ => return false,
+        }
+        true
+    }
+
+    fn clear_query(&mut self) {
+        self.query.clear();
+        self.selected = false;
+        self.search_now();
+    }
+
+    /// Yazmayı bırakınca arar.
+    fn schedule_search(&mut self) {
+        unsafe {
+            SetTimer(Some(self.hwnd), TIMER_SEARCH, SEARCH_DELAY, None);
+        }
+        self.redraw();
+    }
+
+    fn search_now(&mut self) {
+        unsafe {
+            let _ = KillTimer(Some(self.hwnd), TIMER_SEARCH);
+        }
+        self.search_seq += 1;
+        self.find_state = FindState::Loading;
+        let (seq, query, out, hwnd) =
+            (self.search_seq, self.query.clone(), self.searched.clone(), self.hwnd.0 as usize);
+        std::thread::spawn(move || {
+            let r = myinstants::search(&query).map_err(|e| e.to_string());
+            *out.lock().unwrap() = Some((seq, r));
+            post(hwnd, WM_SEARCHED, 0);
+        });
+        self.redraw();
+    }
+
+    /// WM_SEARCHED: yalnızca son aramanın sonucu alınır.
+    pub fn searched(&mut self) {
+        let Some((seq, r)) = self.searched.lock().unwrap().take() else { return };
+        if seq != self.search_seq {
+            return;
+        }
+        match r {
+            Ok(list) => {
+                self.found = list
+                    .into_iter()
+                    .map(|i| {
+                        let added = self.items.iter().any(|it| it.path == target(&i.name));
+                        Found { name: i.name, url: i.url, loading: false, added }
+                    })
+                    .collect();
+                self.find_scroll = 0.0;
+                self.find_state = FindState::Done;
+            }
+            Err(e) => self.find_state = FindState::Error(e),
+        }
+        self.redraw();
+    }
+
+    /// İndirir (önizleme ya da listeye); bitince WM_FETCHED.
+    fn fetch(&mut self, n: usize, dest: Option<PathBuf>) {
+        let Some(f) = self.found.get_mut(n) else { return };
+        f.loading = true;
+        let (url, out, hwnd) = (f.url.clone(), self.fetched.clone(), self.hwnd.0 as usize);
+        std::thread::spawn(move || {
+            let cache = preview_path(&url);
+            let add = dest.is_some();
+            let result = (|| -> Result<PathBuf, String> {
+                let dest = dest.unwrap_or_else(|| cache.clone());
+                if dest == cache && cache.is_file() {
+                    return Ok(cache);
+                }
+                if let Some(dir) = dest.parent() {
+                    std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+                }
+                if cache.is_file() {
+                    std::fs::copy(&cache, &dest).map_err(|e| e.to_string())?;
+                } else {
+                    let data = myinstants::download(&url).map_err(|e| e.to_string())?;
+                    // mp3: ID3 etiketi ya da çerçeve başı. Değilse doğrulama sayfası gelmiştir.
+                    if !(data.starts_with(b"ID3") || data.first() == Some(&0xFF) || data.starts_with(b"RIFF")) {
+                        return Err(t!(
+                            "Myinstants sent something that is not a sound",
+                            "Myinstants ses yerine başka bir şey gönderdi"
+                        )
+                        .into());
+                    }
+                    std::fs::write(&dest, data).map_err(|e| e.to_string())?;
+                }
+                Ok(dest)
+            })();
+            out.lock().unwrap().push(Fetched { url, add, result });
+            post(hwnd, WM_FETCHED, 0);
+        });
+        self.redraw();
+    }
+
+    /// WM_FETCHED: listeye ekle ya da kulaklıkta çal.
+    pub fn fetched(&mut self) {
+        let done = std::mem::take(&mut *self.fetched.lock().unwrap());
+        for f in done {
+            let n = self.found.iter().position(|x| x.url == f.url);
+            if let Some(x) = n.and_then(|n| self.found.get_mut(n)) {
+                x.loading = false;
+            }
+            match f.result {
+                Ok(path) if f.add => {
+                    self.add(vec![path]);
+                    if let Some(x) = n.and_then(|n| self.found.get_mut(n)) {
+                        x.added = true;
+                    }
+                }
+                Ok(path) => {
+                    if self.want_preview.as_deref() == Some(f.url.as_str()) {
+                        self.start_preview(f.url, &path);
+                    }
+                }
+                Err(e) => {
+                    log!("myinstants: {e}");
+                    if self.want_preview.as_deref() == Some(f.url.as_str()) {
+                        self.want_preview = None;
+                    }
+                    self.find_state = FindState::Error(e);
+                }
+            }
+        }
+        self.redraw();
+    }
+
+    fn add_found(&mut self, n: usize) {
+        let Some(f) = self.found.get(n) else { return };
+        if f.added || f.loading {
+            return;
+        }
+        let path = target(&f.name);
+        if path.is_file() {
+            // Daha önce indirilmiş (listeden çıkarılmış olabilir): yeniden indirmeye gerek yok.
+            self.add(vec![path]);
+            self.found[n].added = true;
+            self.redraw();
+        } else {
+            self.fetch(n, Some(path));
+        }
+    }
+
+    // --- Önizleme: yalnızca kulaklıkta, Windows'un MCI oynatıcısıyla ---
+
+    fn toggle_preview(&mut self, n: usize) {
+        let Some(f) = self.found.get(n) else { return };
+        let url = f.url.clone();
+        let same = self.preview.as_deref() == Some(url.as_str()) || self.want_preview.as_deref() == Some(url.as_str());
+        self.stop_preview();
+        if !same {
+            self.want_preview = Some(url.clone());
+            let cache = preview_path(&url);
+            if cache.is_file() {
+                self.start_preview(url, &cache);
+            } else {
+                self.fetch(n, None);
+            }
+        }
+        self.redraw();
+    }
+
+    fn start_preview(&mut self, url: String, path: &Path) {
+        mci(&format!("close {PREVIEW}"), None);
+        let ok = mci(&format!("open \"{}\" type mpegvideo alias {PREVIEW}", path.display()), None)
+            && mci(&format!("play {PREVIEW} notify"), Some(self.hwnd));
+        if !ok {
+            log!("önizleme çalınamadı: {}", path.display());
+        }
+        self.preview = ok.then_some(url);
+        self.want_preview = None;
+        self.redraw();
+    }
+
+    fn stop_preview(&mut self) {
+        if self.preview.take().is_some() {
+            mci(&format!("close {PREVIEW}"), None);
+        }
+        self.want_preview = None;
+    }
+
+    /// MM_MCINOTIFY: önizleme sona geldi (durdurulanlar da bildirilir; onlar yok sayılır).
+    pub fn preview_done(&mut self, code: usize) {
+        if code == MCI_NOTIFY_SUCCESSFUL {
+            self.stop_preview();
+            self.redraw();
+        }
+    }
+}
+
+/// Panodaki yazı.
+fn clipboard_text() -> Option<String> {
+    unsafe {
+        OpenClipboard(None).ok()?;
+        let text = (|| {
+            let h = GetClipboardData(CF_UNICODETEXT.0 as u32).ok()?;
+            let p = GlobalLock(HGLOBAL(h.0)) as *const u16;
+            if p.is_null() {
+                return None;
+            }
+            let len = (0..).take_while(|&i| *p.add(i) != 0).count();
+            let s = String::from_utf16_lossy(std::slice::from_raw_parts(p, len));
+            let _ = GlobalUnlock(HGLOBAL(h.0));
+            Some(s)
+        })();
+        let _ = CloseClipboard();
+        text
     }
 }
 
@@ -890,19 +1628,24 @@ impl ToolPage for Lyrebird {
     fn key(&mut self, vk: u16) -> bool {
         Lyrebird::key(self, vk)
     }
+    fn char(&mut self, c: char) -> bool {
+        Lyrebird::char(self, c)
+    }
     fn set_visible(&mut self, visible: bool) {
         Lyrebird::set_visible(self, visible)
     }
     fn tip(&self) -> Option<(Rect, String)> {
         match (&self.hover, &self.mic) {
             (Hit::Stop, _) => Some((self.stop_rect(), t!("Mute all", "Hepsini sustur").into())),
-            (Hit::Add, _) => Some((self.add_rect(), t!("Add sounds", "Ses ekle").into())),
             (Hit::Status, MicState::Attached(name)) => {
                 let state = match self.active {
                     true => t!("an app is listening", "bir uygulama dinliyor"),
                     false => t!("nothing is listening", "şu an dinleyen yok"),
                 };
-                Some((Rect::new(self.head_x + 14.0, HEAD_CY - 13.0, self.head_x + 90.0, HEAD_CY + 13.0), format!("{name} · {state}")))
+                Some((
+                    Rect::new(self.head_x + 14.0, HEAD_CY - 13.0, self.head_x + 90.0, HEAD_CY + 13.0),
+                    format!("{name} · {state}"),
+                ))
             }
             _ => None,
         }
@@ -914,9 +1657,12 @@ impl Drop for Lyrebird {
     fn drop(&mut self) {
         self.unregister();
         self.player.stop_all();
+        self.stop_preview();
+        let _ = std::fs::remove_dir_all(preview_dir());
         unsafe {
             let _ = KillTimer(Some(self.hwnd), TIMER_ANIM);
             let _ = KillTimer(Some(self.hwnd), TIMER_STATUS);
+            let _ = KillTimer(Some(self.hwnd), TIMER_SEARCH);
         }
     }
 }

@@ -1,17 +1,56 @@
-//! Ortak renkler ve parçalar: kenar çubuğu ve bütün araç sayfaları aynı görünür.
+//! Ortak renkler ve parçalar: kenar çubuğu ve bütün araç sayfaları aynı görünür. Windows 11
+//! teması (koyu): pencerenin zemini Mica, üstündeki her şey yarı saydam katmanlar; düğme, anahtar
+//! ve kaydırıcılar sistemin vurgu rengindedir. Araçların kendi renkleri ikonlarda ve sayfa içi
+//! küçük vurgularda kalır.
+
+use std::cell::Cell;
 
 use crate::gfx::{Color, Gfx, Rect};
 
-pub const BG: Color = Color::rgb(0x0f0f10);
-pub const HOVER: Color = Color::rgb(0x1b1b1e);
-pub const SEL: Color = Color::rgb(0x222226);
-pub const LINE: Color = Color::rgb(0x2a2a2e);
-pub const TEXT: Color = Color::rgb(0xe8e8ea);
-pub const MUTED: Color = Color::rgb(0x8b8b93);
-pub const FAINT: Color = Color::rgb(0x55555c);
-pub const GREEN: Color = Color::rgb(0x4ade80);
-pub const RED: Color = Color::rgb(0xf87171);
+/// Mica yoksa (Windows 10) pencerenin düz zemini.
+pub const BG: Color = Color::rgb(0x202020);
+pub const HOVER: Color = Color(0xffffff, 0.06);
+pub const SEL: Color = Color(0xffffff, 0.09);
+pub const LINE: Color = Color(0xffffff, 0.08);
+/// Kart ve panel zemini.
+pub const PANEL: Color = Color(0xffffff, 0.05);
+pub const TEXT: Color = Color::rgb(0xffffff);
+pub const MUTED: Color = Color(0xffffff, 0.786);
+pub const FAINT: Color = Color(0xffffff, 0.5);
+pub const GREEN: Color = Color::rgb(0x6ccb5f);
+pub const RED: Color = Color::rgb(0xff99a4);
+/// Araçların kendi renginde dolu parçaların (seçili vites, seçili sekme) üstündeki yazı.
 pub const ON_ACCENT: Color = Color::rgb(0x111111);
+/// İpucu kutusu (opak, içeriğin üstünde okunsun).
+pub const TIP: Color = Color::rgb(0x2c2c2c);
+
+thread_local! {
+    static ACCENT: Cell<Option<Color>> = const { Cell::new(None) };
+}
+
+/// Sistemin vurgu rengi (koyu temadaki açık tonu), bir kez okunur.
+pub fn accent() -> Color {
+    ACCENT.with(|a| {
+        a.get().unwrap_or_else(|| {
+            let c = crate::hatter::theme::current().accent;
+            a.set(Some(c));
+            c
+        })
+    })
+}
+
+/// Vurgu renginin üstündeki yazı: açık vurguda siyah, koyuda beyaz.
+pub fn on_accent() -> Color {
+    let c = accent().0;
+    let ch = |s: u32| ((c >> s) & 0xff) as f32 / 255.0;
+    let lum = 0.2126 * ch(16) + 0.7152 * ch(8) + 0.0722 * ch(0);
+    if lum > 0.5 { Color(0x000000, 0.9) } else { Color::rgb(0xffffff) }
+}
+
+/// Windows'ta vurgu rengi değişti: bir sonraki çizimde yeniden okunur.
+pub fn reset_accent() {
+    ACCENT.with(|a| a.set(None));
+}
 
 /// Araç sayfasının üst çubuğu ve kenar boşluğu.
 pub const HEADER: f32 = 48.0;
@@ -45,16 +84,17 @@ pub fn button_rect_right(g: &Gfx, r: f32, t: f32, label: &str, icon: bool) -> Re
     Rect::new(r - b.w(), b.t, r, b.b)
 }
 
-/// `accent` varsa dolu (ana eylem), yoksa çerçeveli.
-pub fn button(g: &Gfx, r: Rect, label: &str, icon: Option<&str>, accent: Option<Color>, hovered: bool) {
-    let fg = match accent {
-        Some(a) => {
-            g.fill(r, 6.0, a.alpha(if hovered { 0.88 } else { 1.0 }));
-            ON_ACCENT
+/// `primary` verilirse dolu (ana eylem, sistemin vurgu renginde), yoksa Windows'un standart
+/// düğmesi. Verilen renk yalnızca "ana eylem" işaretidir.
+pub fn button(g: &Gfx, r: Rect, label: &str, icon: Option<&str>, primary: Option<Color>, hovered: bool) {
+    let fg = match primary {
+        Some(_) => {
+            g.fill(r, 4.0, accent().alpha(if hovered { 0.9 } else { 1.0 }));
+            on_accent()
         }
         None => {
-            g.fill(r, 6.0, if hovered { SEL } else { HOVER });
-            g.stroke(r, 6.0, LINE, 1.0);
+            g.fill(r, 4.0, if hovered { Color(0xffffff, 0.084) } else { Color(0xffffff, 0.061) });
+            g.stroke(r, 4.0, LINE, 1.0);
             TEXT
         }
     };
@@ -70,7 +110,7 @@ pub fn button(g: &Gfx, r: Rect, label: &str, icon: Option<&str>, accent: Option<
 /// Yalnızca ikon: üstüne gelince zemin belirir.
 pub fn icon_button(g: &Gfx, r: Rect, icon: &str, color: Color, hovered: bool) {
     if hovered {
-        g.fill(r, 6.0, HOVER);
+        g.fill(r, 4.0, HOVER);
     }
     g.text(icon, &g.f.icon, r, if hovered { TEXT } else { color });
 }
@@ -80,19 +120,28 @@ pub fn toggle_rect(right: f32, cy: f32) -> Rect {
     Rect::new(right - 40.0, cy - 11.0, right, cy + 11.0)
 }
 
-pub fn toggle(g: &Gfx, r: Rect, on: bool, accent: Color, enabled: bool) {
+/// Windows'un anahtarı: açıkken vurgu renginde dolu, kapalıyken çerçeveli. (Renk parametresi
+/// eski çağrılarla uyum için; Windows teması sistemin vurgu rengini kullanır.)
+pub fn toggle(g: &Gfx, r: Rect, on: bool, _accent: Color, enabled: bool) {
     let on = on && enabled;
-    g.fill(r, 11.0, if on { accent } else { LINE });
-    let knob = if on { BG } else if enabled { MUTED } else { FAINT };
-    g.circle(if on { r.r - 11.0 } else { r.l + 11.0 }, r.cy(), 7.0, knob);
+    if on {
+        g.fill(r, r.h() / 2.0, accent());
+        g.circle(r.r - 11.0, r.cy(), 6.0, on_accent());
+    } else {
+        let c = if enabled { MUTED } else { FAINT };
+        g.stroke(r, r.h() / 2.0, c, 1.0);
+        g.circle(r.l + 11.0, r.cy(), 5.0, c);
+    }
 }
 
 /// Yatay kaydırıcı: `a..b` izi, `v` 0..1.
-pub fn slider(g: &Gfx, a: f32, b: f32, cy: f32, v: f32, accent: Color, active: bool) {
+/// Windows'un kaydırıcısı: ince iz, vurgu renginde dolu kısım, ortası vurgu renginde tutamak.
+pub fn slider(g: &Gfx, a: f32, b: f32, cy: f32, v: f32, _accent: Color, active: bool) {
     let x = a + (b - a) * v.clamp(0.0, 1.0);
-    g.fill(Rect::new(a, cy - 2.0, b, cy + 2.0), 2.0, LINE);
-    g.fill(Rect::new(a, cy - 2.0, x, cy + 2.0), 2.0, if active { accent } else { accent.alpha(0.8) });
-    g.circle(x, cy, if active { 7.0 } else { 6.0 }, TEXT);
+    g.fill(Rect::new(a, cy - 2.0, b, cy + 2.0), 2.0, Color(0xffffff, 0.54));
+    g.fill(Rect::new(a, cy - 2.0, x, cy + 2.0), 2.0, accent());
+    g.circle(x, cy, 10.0, Color::rgb(0x454545));
+    g.circle(x, cy, if active { 7.0 } else { 6.0 }, accent());
 }
 
 /// Ayar satırı: başlık, altında açıklama, altında ince çizgi. Sağ taraf kontrol için boş kalır.
@@ -146,6 +195,10 @@ pub trait ToolPage {
     fn wheel(&mut self, _g: &Gfx, _x: f32, _y: f32, _delta: f32) {}
     /// Tuşu kullandıysa `true`.
     fn key(&mut self, _vk: u16) -> bool {
+        false
+    }
+    /// Yazılan karakter (WM_CHAR); kullandıysa `true`.
+    fn char(&mut self, _c: char) -> bool {
         false
     }
     /// Bu noktada tıklanabilir bir şey var mı: yoksa başlık bandında pencere sürüklenir.

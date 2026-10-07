@@ -9,7 +9,7 @@ use windows::Win32::Graphics::DirectWrite::*;
 use windows::Win32::Graphics::Imaging::*;
 use windows::Win32::System::Com::{CLSCTX_INPROC_SERVER, CoCreateInstance};
 use windows::Win32::UI::WindowsAndMessaging::GetClientRect;
-use windows::core::{BOOL, PCWSTR, w};
+use windows::core::{BOOL, Interface, PCWSTR, w};
 
 use crate::util::Res;
 
@@ -34,6 +34,10 @@ impl Rect {
         (self.t + self.b) / 2.0
     }
 
+    pub fn h(&self) -> f32 {
+        self.b - self.t
+    }
+
     pub fn w(&self) -> f32 {
         self.r - self.l
     }
@@ -52,8 +56,9 @@ impl Color {
         Self(c, 1.0)
     }
 
+    /// Saydamlıkla çarpar: opak renkte `a` olur, yarı saydam tema renklerinde orantılı kalır.
     pub const fn alpha(self, a: f32) -> Self {
-        Self(self.0, a)
+        Self(self.0, self.1 * a)
     }
 
     fn d2d(self) -> D2D1_COLOR_F {
@@ -84,7 +89,7 @@ pub struct Fonts {
 
 /// Gömülü PNG'nin farklı boyutları; çizim hedefi yeniden yaratılınca bitmap'ler de yenilenir.
 struct Image {
-    sizes: Vec<(u32, IWICFormatConverter)>,
+    sizes: Vec<(u32, IWICBitmapSource)>,
     cache: RefCell<Vec<Option<ID2D1Bitmap>>>,
 }
 
@@ -97,6 +102,8 @@ pub struct Gfx {
     wic: IWICImagingFactory,
     rt: Option<(ID2D1HwndRenderTarget, ID2D1SolidColorBrush)>,
     dpi: f32,
+    /// Önçarpımlı alfa: pencerenin camı (acrylic) saydam yerlerden görünür.
+    transparent: bool,
     images: Vec<Image>,
     pub f: Fonts,
 }
@@ -136,12 +143,13 @@ impl Gfx {
                 f.SetTrimming(&trim, &sign)?;
                 Ok(())
             };
-            let ui = w!("Segoe UI");
+            // Windows 11'in yazı tipi; olmayan sistemde DirectWrite Segoe UI'a düşer.
+            let ui = w!("Segoe UI Variable Text");
             let (normal, semi) = (DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_WEIGHT_SEMI_BOLD);
             let (lead, center, right) =
                 (DWRITE_TEXT_ALIGNMENT_LEADING, DWRITE_TEXT_ALIGNMENT_CENTER, DWRITE_TEXT_ALIGNMENT_TRAILING);
 
-            let heading = format(ui, 18.0, semi, lead)?;
+            let heading = format(w!("Segoe UI Variable Display"), 20.0, semi, lead)?;
             let strong = format(ui, 14.0, semi, lead)?;
             let text = format(ui, 13.0, normal, lead)?;
             let small = format(ui, 12.0, normal, lead)?;
@@ -171,7 +179,7 @@ impl Gfx {
                 icon_large: format(icons, 30.0, normal, center)?,
                 icon_caption: format(icons, 10.0, normal, center)?,
             };
-            Ok(Self { d2d, dw, wic, rt: None, dpi: 96.0, images: Vec::new(), f })
+            Ok(Self { d2d, dw, wic, rt: None, dpi: 96.0, transparent: false, images: Vec::new(), f })
         }
     }
 
@@ -193,7 +201,7 @@ impl Gfx {
                     0.0,
                     WICBitmapPaletteTypeMedianCut,
                 )?;
-                sizes.push((px, conv));
+                sizes.push((px, conv.cast()?));
             }
         }
         sizes.sort_by_key(|s| s.0);
@@ -225,13 +233,45 @@ impl Gfx {
             )?;
             conv
         };
-        let img = Image { sizes: vec![(u32::MAX, conv)], cache: RefCell::new(vec![None]) };
+        let img = Image { sizes: vec![(u32::MAX, conv.cast()?)], cache: RefCell::new(vec![None]) };
         if let Some(id) = reuse {
             self.images[id.0] = img;
             return Ok(id);
         }
         self.images.push(img);
         Ok(ImageId(self.images.len() - 1))
+    }
+
+
+    pub fn wic(&self) -> &IWICImagingFactory {
+        &self.wic
+    }
+
+
+    /// WIC resmini kopyalayarak yükler.
+    pub fn load_bitmap_source(&mut self, src: &IWICBitmapSource) -> Res<ImageId> {
+        let bmp: IWICBitmapSource = unsafe { self.wic.CreateBitmapFromSource(src, WICBitmapCacheOnLoad)?.cast()? };
+        self.images.push(Image { sizes: vec![(u32::MAX, bmp)], cache: RefCell::new(vec![None]) });
+        Ok(ImageId(self.images.len() - 1))
+    }
+
+
+    /// `n`'den sonraki resimleri bırakır (pencere başına geçici resimler).
+    pub fn truncate_images(&mut self, n: usize) {
+        self.images.truncate(n);
+    }
+
+    /// Çizim hedefini bırakır: sonraki `begin` yeni pencereye yeni hedef kurar.
+    pub fn reset_target(&mut self) {
+        self.rt = None;
+    }
+
+    /// Saydam çizim (önçarpımlı alfa); hedef ilk çizimden önce ayarlanmalı.
+    pub fn set_transparent(&mut self, on: bool) {
+        if self.transparent != on {
+            self.transparent = on;
+            self.rt = None;
+        }
     }
 
     /// Çizime başlar; hedef yoksa oluşturur, boyutu pencereyle eşitler. Çizilecek yoksa `false`.
@@ -245,7 +285,13 @@ impl Gfx {
                 return false;
             }
             if self.rt.is_none() {
-                let props = D2D1_RENDER_TARGET_PROPERTIES { dpiX: dpi, dpiY: dpi, ..Default::default() };
+                let mut props = D2D1_RENDER_TARGET_PROPERTIES { dpiX: dpi, dpiY: dpi, ..Default::default() };
+                if self.transparent {
+                    props.pixelFormat = D2D1_PIXEL_FORMAT {
+                        format: windows::Win32::Graphics::Dxgi::Common::DXGI_FORMAT_B8G8R8A8_UNORM,
+                        alphaMode: D2D1_ALPHA_MODE_PREMULTIPLIED,
+                    };
+                }
                 let hwnd_props = D2D1_HWND_RENDER_TARGET_PROPERTIES {
                     hwnd,
                     pixelSize: size,

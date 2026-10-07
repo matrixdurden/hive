@@ -50,7 +50,6 @@ const ROW: f32 = 52.0;
 const PANEL_HEAD: f32 = 56.0;
 const LABEL_W: f32 = 180.0;
 /// Panellerin zemini: sayfadan bir ton açık.
-const PANEL: Color = Color::rgb(0x141416);
 /// Bu kadar seçeneğe kadar bölmeli seçici; fazlası ‹ › ile.
 const MAX_SEGMENTS: usize = 5;
 

@@ -4,10 +4,12 @@
 //!   önünde yazar; audiodg.exe içindeki mikrofon efekti (`apo/`) oradan okuyup karıştırır.
 //! - `monitor` aynı sesi kulaklığa verir, `hotkey` kısayolları tutar, `install` efekti
 //!   mikrofonlara takar ve çıkarır (yönetici ister).
+//! - `clip` bilgisayarda çalan sesin son 10 saniyesini tutar, istenince wav'a yazar.
 //!
 //! Arayüz hive'da; motor onun sürecinde çalışır.
 
 pub mod bus;
+pub mod clip;
 pub mod config;
 pub mod decode;
 pub mod hotkey;

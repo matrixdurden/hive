@@ -36,7 +36,6 @@ use crate::ui::*;
 use crate::util::{self, wide};
 
 const ACCENT: Color = Color::rgb(0x34d399);
-const PANEL: Color = Color::rgb(0x141416);
 
 pub const TIMER_TICK: usize = 401;
 pub const TIMER_UI: usize = 402;

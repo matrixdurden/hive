@@ -17,9 +17,6 @@ use windows::Win32::Graphics::Gdi::{CreateSolidBrush, InvalidateRect, ScreenToCl
 use windows::Win32::System::Com::{COINIT_APARTMENTTHREADED, CoInitializeEx};
 use windows::Win32::System::DataExchange::COPYDATASTRUCT;
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
-use windows::Win32::System::Registry::{
-    HKEY_CURRENT_USER, REG_SZ, RRF_RT_REG_SZ, RegDeleteKeyValueW, RegGetValueW, RegSetKeyValueW,
-};
 use windows::Win32::UI::Controls::MARGINS;
 use windows::Win32::UI::HiDpi::{GetDpiForWindow, GetSystemMetricsForDpi};
 use windows::Win32::UI::Input::KeyboardAndMouse::*;
@@ -31,6 +28,7 @@ use crate::cheshire::{self, Cheshire};
 use crate::config::Config;
 use crate::dormouse::{self, Dormouse};
 use crate::tweedle::{self, Tweedle};
+use crate::hatter::Hatter;
 use crate::gfx::{Color, Gfx, ImageId, Rect};
 use crate::log;
 use crate::lyrebird::{self, Lyrebird};
@@ -67,7 +65,6 @@ const NAV: f32 = 40.0;
 const PAGE_PAD: f32 = PAD;
 /// Araçlar sayfasındaki kartlar.
 const CARD_H: f32 = 108.0;
-const PANEL: Color = Color::rgb(0x141416);
 
 /// Pencere düğmeleri (küçült, büyüt, kapat).
 const CAP_W: f32 = 46.0;
@@ -76,7 +73,6 @@ const CAPTIONS: f32 = CAP_W * 3.0;
 const CLOSE_RED: Color = Color::rgb(0xc42b1c);
 
 const ICON_APPS: &str = "\u{E71D}";
-const RUN_KEY: PCWSTR = w!(r"Software\Microsoft\Windows\CurrentVersion\Run");
 
 #[derive(Clone, Copy, PartialEq, Debug)]
 enum Cap {
@@ -173,6 +169,7 @@ struct App {
     cheshire: Option<Cheshire>,
     dormouse: Option<Dormouse>,
     tweedle: Option<Tweedle>,
+    hatter: Option<Hatter>,
     /// Süren kurulum (`true`) ya da kaldırma (`false`), araç başına.
     busy: [Option<bool>; tools::COUNT],
     /// Son kurulum / kaldırma hatası, araç kartında görünür.
@@ -190,10 +187,14 @@ struct App {
     active: bool,
     cap_hover: Option<Cap>,
     cap_pressed: Option<Cap>,
+    /// Pencerenin zemini Mica (Windows 11 22H2+).
+    mica: bool,
 }
 
 /// Başlık çubuğunu biz çiziyoruz (pencere kurulduktan sonra açılır).
 static CUSTOM_FRAME: AtomicBool = AtomicBool::new(false);
+/// Mica: pencere düğmelerini (küçült, büyüt, kapat) Windows çizer ve işler.
+static MICA: AtomicBool = AtomicBool::new(false);
 
 /// WM_NCCALCSIZE: başlık çubuğunu ve üst kenarlığı kaldırır, diğer kenarlıklar yerinde kalır.
 /// Uygulamanın durumuna bakmaz: uygulama o an meşgulken (ör. pencere geri açılırken iç içe
@@ -219,27 +220,13 @@ thread_local! {
 }
 
 fn autostart() -> bool {
-    unsafe { RegGetValueW(HKEY_CURRENT_USER, RUN_KEY, w!("hive"), RRF_RT_REG_SZ, None, None, None).is_ok() }
+    crate::shell::autostart()
 }
 
 fn set_autostart(on: bool) {
-    unsafe {
-        match util::installed_copy() {
-            Some(exe) if on => {
-                let data = wide(&format!("\"{exe}\" --hidden"));
-                let _ = RegSetKeyValueW(
-                    HKEY_CURRENT_USER,
-                    RUN_KEY,
-                    w!("hive"),
-                    REG_SZ.0,
-                    Some(data.as_ptr().cast()),
-                    (data.len() * 2) as u32,
-                );
-            }
-            _ => {
-                let _ = RegDeleteKeyValueW(HKEY_CURRENT_USER, RUN_KEY, w!("hive"));
-            }
-        }
+    match util::installed_copy() {
+        Some(exe) if on => crate::shell::set_autostart(Some(&exe)),
+        _ => crate::shell::set_autostart(None),
     }
 }
 
@@ -250,6 +237,7 @@ fn page_mut<'a>(
     cheshire: &'a mut Option<Cheshire>,
     dormouse: &'a mut Option<Dormouse>,
     tweedle: &'a mut Option<Tweedle>,
+    hatter: &'a mut Option<Hatter>,
     i: usize,
 ) -> Option<&'a mut dyn ToolPage> {
     match i {
@@ -257,6 +245,7 @@ fn page_mut<'a>(
         tools::CHESHIRE => cheshire.as_mut().map(|c| c as &mut dyn ToolPage),
         tools::DORMOUSE => dormouse.as_mut().map(|d| d as &mut dyn ToolPage),
         tools::TWEEDLE => tweedle.as_mut().map(|t| t as &mut dyn ToolPage),
+        tools::HATTER => hatter.as_mut().map(|h| h as &mut dyn ToolPage),
         tools::RABBITHOLE => rabbit.as_mut().map(|r| r as &mut dyn ToolPage),
         _ => None,
     }
@@ -295,6 +284,7 @@ impl App {
             tools::CHESHIRE => self.cheshire.is_some(),
             tools::DORMOUSE => self.dormouse.is_some(),
             tools::TWEEDLE => self.tweedle.is_some(),
+            tools::HATTER => self.hatter.is_some(),
             _ => self.rabbit.is_some(),
         }
     }
@@ -306,6 +296,7 @@ impl App {
             tools::RABBITHOLE => self.rabbit.as_ref().map(|r| r as &dyn ToolPage),
             tools::DORMOUSE => self.dormouse.as_ref().map(|d| d as &dyn ToolPage),
             tools::TWEEDLE => self.tweedle.as_ref().map(|t| t as &dyn ToolPage),
+            tools::HATTER => self.hatter.as_ref().map(|h| h as &dyn ToolPage),
             _ => None,
         }
     }
@@ -354,6 +345,9 @@ impl App {
         if let Some(t) = self.tweedle.as_mut() {
             t.set_visible(on && page == Page::Tool(tools::TWEEDLE));
         }
+        if let Some(h) = self.hatter.as_mut() {
+            h.set_visible(on && page == Page::Tool(tools::HATTER));
+        }
     }
 
     fn select(&mut self, page: Page) {
@@ -392,6 +386,8 @@ impl App {
                 (tools::DORMOUSE, false) => self.dormouse = None,
                 (tools::TWEEDLE, true) => self.tweedle = Some(Tweedle::start(hwnd)),
                 (tools::TWEEDLE, false) => self.tweedle = None,
+                (tools::HATTER, true) => self.hatter = Some(Hatter::start(hwnd)),
+                (tools::HATTER, false) => self.hatter = None,
                 (_, true) => self.rabbit = Some(Rabbithole::start(hwnd)),
                 (_, false) => self.rabbit = None,
             }
@@ -421,6 +417,10 @@ impl App {
                 "Its shortcuts are released, and music keeps playing from the speakers again when your headphones drop.",
                 "Kısayolları bırakılır; kulaklık kopunca müzik yine hoparlörden çalmaya devam eder."
             ),
+            tools::HATTER => t!(
+                "The dock closes; the Windows taskbar and your desktop icons come back as they were.",
+                "Dock kapanır; Windows görev çubuğu ve masaüstü simgelerin eski haline döner."
+            ),
             _ => t!(
                 "The tunnel closes; the service, network adapter and your server link are deleted.",
                 "Tünel kapanır; hizmet, ağ bağdaştırıcısı ve sunucu bağlantın silinir."
@@ -446,6 +446,7 @@ impl App {
                 tools::CHESHIRE => self.cheshire = None,
                 tools::DORMOUSE => self.dormouse = None,
                 tools::TWEEDLE => self.tweedle = None,
+                tools::HATTER => self.hatter = None,
                 _ => self.rabbit = None,
             }
             self.page = self.valid(self.page);
@@ -532,7 +533,7 @@ impl App {
         if let Some(i) = self.tool_live() {
             let hx = self.head_x(i);
             let hr = w - sw - CAPTIONS - 12.0;
-            if let Some(p) = page_mut(&mut self.lyrebird, &mut self.rabbit, &mut self.cheshire, &mut self.dormouse, &mut self.tweedle, i) {
+            if let Some(p) = page_mut(&mut self.lyrebird, &mut self.rabbit, &mut self.cheshire, &mut self.dormouse, &mut self.tweedle, &mut self.hatter, i) {
                 p.layout(w - sw, h, hx, hr);
             }
         }
@@ -599,6 +600,7 @@ impl App {
         self.rabbit = None;
         self.dormouse = None;
         self.tweedle = None;
+        self.hatter = None;
         self.page = Page::Settings;
         self.removing_self = true;
         self.redraw();
@@ -764,15 +766,12 @@ impl App {
         let r = self.nav_rect(page, w, h);
         let selected = self.page == page;
         let hovered = self.hover == Hit::Nav(page);
-        let accent = match page {
-            Page::Tool(i) => Color::rgb(TOOLS[i].accent),
-            _ => TEXT,
-        };
+        // Windows'un gezinti çubuğu gibi: seçili satır hafif dolu, solunda vurgu renginde hap.
         if selected {
-            g.fill(r, 6.0, SEL);
-            g.fill(Rect::new(r.l, r.t + 11.0, r.l + 3.0, r.b - 11.0), 1.5, accent);
+            g.fill(r, 4.0, SEL);
+            g.fill(Rect::new(r.l, r.cy() - 8.0, r.l + 3.0, r.cy() + 8.0), 1.5, accent());
         } else if hovered {
-            g.fill(r, 6.0, HOVER);
+            g.fill(r, 4.0, HOVER);
         }
         let ic = Rect::new(r.l + 10.0, r.cy() - 12.0, r.l + 34.0, r.cy() + 12.0);
         let fg = if selected || hovered { TEXT } else { MUTED };
@@ -789,7 +788,6 @@ impl App {
     fn paint_sidebar(&self, w: f32, h: f32) {
         let g = &self.gfx;
         let sw = self.side_w(w);
-        g.fill(Rect::new(sw - 1.0, 0.0, sw, h), 0.0, LINE);
         icon_button(g, Self::toggle_rect(), ICON_MENU, MUTED, self.hover == Hit::Toggle);
         if !self.narrow(w) {
             g.image(self.logo, Rect::new(56.0, HEAD_CY - 11.0, 78.0, HEAD_CY + 11.0), 1.0);
@@ -800,7 +798,7 @@ impl App {
         }
         // Araçlar ile alt bölüm arasında ince çizgi.
         let store = self.nav_rect(Page::Store, w, h);
-        g.fill(Rect::new(14.0, store.t - 7.0, sw - 14.0, store.t - 6.0), 0.0, HOVER);
+        g.fill(Rect::new(14.0, store.t - 7.0, sw - 14.0, store.t - 6.0), 0.0, LINE);
     }
 
     /// Canlı araç sayfası: başlıkta ikon ve ad, gerisini araç çizer; üstüne gelinen ikon
@@ -817,8 +815,8 @@ impl App {
                 let tw = g.measure(&text, &g.f.small);
                 let l = ((r.l + r.r) / 2.0 - tw / 2.0 - 10.0).clamp(8.0, w - sw - tw - 28.0);
                 let tip = Rect::new(l, r.b + 6.0, l + tw + 20.0, r.b + 32.0);
-                g.fill(tip, 6.0, SEL);
-                g.stroke(tip, 6.0, LINE, 1.0);
+                g.fill(tip, 4.0, TIP);
+                g.stroke(tip, 4.0, LINE, 1.0);
                 g.text(&text, &g.f.small_center, tip, TEXT);
             }
         }
@@ -846,8 +844,8 @@ impl App {
         for (i, tool) in TOOLS.iter().enumerate() {
             let c = self.card(i, w);
             let installed = self.installed(i);
-            g.fill(c, 12.0, PANEL);
-            g.stroke(c, 12.0, LINE, 1.0);
+            g.fill(c, 8.0, PANEL);
+            g.stroke(c, 8.0, LINE, 1.0);
             g.image(self.icons[i], Rect::new(c.l + 20.0, c.cy() - 28.0, c.l + 76.0, c.cy() + 28.0), 1.0);
 
             let (primary, second) = self.card_buttons(i, w);
@@ -941,13 +939,20 @@ impl App {
     fn paint(&mut self) {
         let (w, h) = self.size();
         let sw = self.layout_tool(w, h);
-        if !self.gfx.begin(self.hwnd, self.dpi, BG) {
+        // Mica varsa zemin saydam (Windows çizer), yoksa düz renk.
+        let bg = if self.mica { Color(0, 0.0) } else { BG };
+        if !self.gfx.begin(self.hwnd, self.dpi, bg) {
             unsafe {
                 let _ = ValidateRect(Some(self.hwnd), None);
             }
             return;
         }
         let g = &self.gfx;
+        // İçerik alanı Mica'nın üstünde ayrı bir katman: sol üst köşesi yuvarlak (Windows Ayarlar
+        // uygulaması gibi).
+        let layer = Rect::new(sw, HEADER, w + 12.0, h + 12.0);
+        g.fill(layer, 8.0, Color(0xffffff, 0.03));
+        g.stroke(layer, 8.0, LINE, 1.0);
         self.paint_sidebar(w, h);
         match (self.page, self.tool_live()) {
             (_, Some(i)) => g.clip(Rect::new(sw, 0.0, w, h), || self.paint_live(i, sw, w)),
@@ -962,12 +967,10 @@ impl App {
             let r = self.nav_rect(p, w, h);
             let tw = g.measure(p.label(), &g.f.text);
             let tip = Rect::new(sw + 6.0, r.cy() - 14.0, sw + 6.0 + tw + 20.0, r.cy() + 14.0);
-            g.fill(tip, 6.0, SEL);
-            g.stroke(tip, 6.0, LINE, 1.0);
+            g.fill(tip, 4.0, TIP);
+            g.stroke(tip, 4.0, LINE, 1.0);
             g.text(p.label(), &g.f.text, Rect::new(tip.l + 10.0, tip.t, tip.r, tip.b), TEXT);
         }
-        // Başlık bandının alt çizgisi: bütün sayfalarda aynı yerde.
-        g.fill(Rect::new(sw, HEADER - 1.0, w, HEADER), 0.0, LINE);
         self.paint_captions(w);
 
         let lost = self.gfx.end();
@@ -993,6 +996,9 @@ impl App {
     }
 
     fn paint_captions(&self, w: f32) {
+        if self.mica {
+            return;
+        }
         let g = &self.gfx;
         for c in Cap::ALL {
             let r = Self::cap_rect(c, w);
@@ -1168,6 +1174,11 @@ impl App {
                 self.sync_visible();
                 self.redraw();
             }
+            WM_SETTINGCHANGE => {
+                // Windows'ta vurgu rengi ya da tema değişti.
+                reset_accent();
+                self.redraw();
+            }
             WM_DPICHANGED => {
                 self.dpi = (wp.0 & 0xFFFF) as f32;
                 let r = unsafe { &*(lp.0 as *const RECT) };
@@ -1187,7 +1198,7 @@ impl App {
                 let hit = self.hit(mx, my);
                 if hit != self.hover {
                     if self.hover == Hit::Content
-                        && let Some(p) = live.and_then(|i| page_mut(&mut self.lyrebird, &mut self.rabbit, &mut self.cheshire, &mut self.dormouse, &mut self.tweedle, i))
+                        && let Some(p) = live.and_then(|i| page_mut(&mut self.lyrebird, &mut self.rabbit, &mut self.cheshire, &mut self.dormouse, &mut self.tweedle, &mut self.hatter, i))
                     {
                         p.mouse_leave();
                     }
@@ -1205,13 +1216,13 @@ impl App {
                 }
                 // Kaydırıcı sürüklenirken imleç kenar çubuğuna kaysa da sayfa izlemeli.
                 if (hit == Hit::Content || self.pressed == Hit::Content)
-                    && let Some(p) = live.and_then(|i| page_mut(&mut self.lyrebird, &mut self.rabbit, &mut self.cheshire, &mut self.dormouse, &mut self.tweedle, i))
+                    && let Some(p) = live.and_then(|i| page_mut(&mut self.lyrebird, &mut self.rabbit, &mut self.cheshire, &mut self.dormouse, &mut self.tweedle, &mut self.hatter, i))
                 {
                     p.mouse_move(&self.gfx, mx - sw, my);
                 }
             }
             WM_MOUSELEAVE => {
-                if let Some(p) = live.and_then(|i| page_mut(&mut self.lyrebird, &mut self.rabbit, &mut self.cheshire, &mut self.dormouse, &mut self.tweedle, i)) {
+                if let Some(p) = live.and_then(|i| page_mut(&mut self.lyrebird, &mut self.rabbit, &mut self.cheshire, &mut self.dormouse, &mut self.tweedle, &mut self.hatter, i)) {
                     p.mouse_leave();
                 }
                 self.hover = Hit::None;
@@ -1223,7 +1234,7 @@ impl App {
                 self.pressed = self.hit(mx, my);
                 unsafe { SetCapture(self.hwnd) };
                 if self.pressed == Hit::Content
-                    && let Some(p) = live.and_then(|i| page_mut(&mut self.lyrebird, &mut self.rabbit, &mut self.cheshire, &mut self.dormouse, &mut self.tweedle, i))
+                    && let Some(p) = live.and_then(|i| page_mut(&mut self.lyrebird, &mut self.rabbit, &mut self.cheshire, &mut self.dormouse, &mut self.tweedle, &mut self.hatter, i))
                 {
                     p.mouse_down(&self.gfx, mx - sw, my);
                 }
@@ -1236,7 +1247,7 @@ impl App {
                 let sw = self.layout_tool(w, h);
                 let pressed = std::mem::replace(&mut self.pressed, Hit::None);
                 if pressed == Hit::Content {
-                    if let Some(p) = live.and_then(|i| page_mut(&mut self.lyrebird, &mut self.rabbit, &mut self.cheshire, &mut self.dormouse, &mut self.tweedle, i)) {
+                    if let Some(p) = live.and_then(|i| page_mut(&mut self.lyrebird, &mut self.rabbit, &mut self.cheshire, &mut self.dormouse, &mut self.tweedle, &mut self.hatter, i)) {
                         p.mouse_up(&self.gfx, mx - sw, my);
                     }
                 } else if self.hit(mx, my) == pressed {
@@ -1253,7 +1264,7 @@ impl App {
                 let (w, h) = self.size();
                 let sw = self.layout_tool(w, h);
                 if x >= sw
-                    && let Some(p) = live.and_then(|i| page_mut(&mut self.lyrebird, &mut self.rabbit, &mut self.cheshire, &mut self.dormouse, &mut self.tweedle, i))
+                    && let Some(p) = live.and_then(|i| page_mut(&mut self.lyrebird, &mut self.rabbit, &mut self.cheshire, &mut self.dormouse, &mut self.tweedle, &mut self.hatter, i))
                 {
                     p.wheel(&self.gfx, x - sw, y, delta);
                 } else if x >= sw && live.is_none() && self.page == Page::Store {
@@ -1262,9 +1273,16 @@ impl App {
                     self.redraw();
                 }
             }
+            WM_CHAR => {
+                let c = char::from_u32(wp.0 as u32)?;
+                let p = live.and_then(|i| page_mut(&mut self.lyrebird, &mut self.rabbit, &mut self.cheshire, &mut self.dormouse, &mut self.tweedle, &mut self.hatter, i))?;
+                if !p.char(c) {
+                    return None;
+                }
+            }
             WM_KEYDOWN | WM_SYSKEYDOWN => {
                 let vk = VIRTUAL_KEY(wp.0 as u16);
-                if let Some(p) = live.and_then(|i| page_mut(&mut self.lyrebird, &mut self.rabbit, &mut self.cheshire, &mut self.dormouse, &mut self.tweedle, i))
+                if let Some(p) = live.and_then(|i| page_mut(&mut self.lyrebird, &mut self.rabbit, &mut self.cheshire, &mut self.dormouse, &mut self.tweedle, &mut self.hatter, i))
                     && p.key(vk.0)
                 {
                     return Some(LRESULT(0));
@@ -1304,7 +1322,7 @@ impl App {
                 }
             }
             WM_TIMER => match wp.0 {
-                lyrebird::TIMER_ANIM | lyrebird::TIMER_STATUS => {
+                lyrebird::TIMER_ANIM | lyrebird::TIMER_STATUS | lyrebird::TIMER_SEARCH => {
                     if let Some(l) = self.lyrebird.as_mut() {
                         l.timer(wp.0);
                     }
@@ -1330,6 +1348,21 @@ impl App {
             lyrebird::WM_PLAYER => {
                 if let Some(l) = self.lyrebird.as_mut() {
                     l.player_changed();
+                }
+            }
+            lyrebird::WM_SEARCHED => {
+                if let Some(l) = self.lyrebird.as_mut() {
+                    l.searched();
+                }
+            }
+            lyrebird::WM_FETCHED => {
+                if let Some(l) = self.lyrebird.as_mut() {
+                    l.fetched();
+                }
+            }
+            lyrebird::MM_MCINOTIFY => {
+                if let Some(l) = self.lyrebird.as_mut() {
+                    l.preview_done(wp.0);
                 }
             }
             lyrebird::WM_INSTALLED => {
@@ -1447,6 +1480,14 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
     if msg == WM_NCCALCSIZE && wp.0 != 0 && CUSTOM_FRAME.load(Ordering::Relaxed) {
         return nc_calc_size(hwnd, msg, wp, lp);
     }
+    // Mica'da pencere düğmeleri Windows'un: üstüne gelme, basma ve tıklama onda. Kapat düğmesi
+    // WM_CLOSE gönderir, o da hive'ı tepsiye gizler.
+    if MICA.load(Ordering::Relaxed) {
+        let mut r = LRESULT(0);
+        if unsafe { windows::Win32::Graphics::Dwm::DwmDefWindowProc(hwnd, msg, wp, lp, &mut r) }.as_bool() {
+            return r;
+        }
+    }
     if msg == WM_DESTROY {
         APP.with(|a| drop(a.borrow_mut().take()));
         unsafe { PostQuitMessage(0) };
@@ -1514,7 +1555,7 @@ pub fn run(hidden: bool, tab: Option<String>) -> Res<()> {
             hInstance: instance.into(),
             hIcon: icon,
             hCursor: LoadCursorW(None, IDC_ARROW)?,
-            hbrBackground: CreateSolidBrush(COLORREF(0x100f0f)),
+            hbrBackground: CreateSolidBrush(COLORREF(0x202020)),
             lpszClassName: CLASS,
             ..Default::default()
         };
@@ -1538,16 +1579,27 @@ pub fn run(hidden: bool, tab: Option<String>) -> Res<()> {
         let _ = SetWindowPos(hwnd, None, 0, 0, size.0, size.1, SWP_NOMOVE | SWP_NOZORDER);
         let dark = BOOL(1);
         let _ = DwmSetWindowAttribute(hwnd, DWMWA_USE_IMMERSIVE_DARK_MODE, &dark as *const _ as _, 4);
-        // Windows 11: kenarlık ve gölge pencereyle aynı tonda (DWMWA_CAPTION_COLOR).
-        let caption = COLORREF(0x100f0f);
-        let _ = DwmSetWindowAttribute(hwnd, DWMWINDOWATTRIBUTE(35), &caption as *const _ as _, 4);
-        // Gölge ve köşeler DWM'de kalsın (başlık çubuğu WM_NCCALCSIZE'da kaldırılıyor).
-        let margins = MARGINS { cxLeftWidth: 0, cxRightWidth: 0, cyTopHeight: 1, cyBottomHeight: 0 };
-        let _ = DwmExtendFrameIntoClientArea(hwnd, &margins);
+        // Windows 11: zemin Mica (bütün pencere camın üstünde, içerik saydam çizilir). Mica
+        // yoksa düz koyu zemin; gölge ve köşeler DWM'de kalır (başlık çubuğu WM_NCCALCSIZE'da
+        // kaldırılıyor).
+        let mica = crate::hatter::theme::mica();
+        MICA.store(mica, Ordering::Relaxed);
+        if mica {
+            let margins = MARGINS { cxLeftWidth: -1, cxRightWidth: -1, cyTopHeight: -1, cyBottomHeight: -1 };
+            let _ = DwmExtendFrameIntoClientArea(hwnd, &margins);
+            let backdrop = windows::Win32::Graphics::Dwm::DWMSBT_MAINWINDOW;
+            let _ = DwmSetWindowAttribute(hwnd, windows::Win32::Graphics::Dwm::DWMWA_SYSTEMBACKDROP_TYPE, &backdrop as *const _ as _, 4);
+        } else {
+            let caption = COLORREF(0x202020);
+            let _ = DwmSetWindowAttribute(hwnd, DWMWINDOWATTRIBUTE(35), &caption as *const _ as _, 4);
+            let margins = MARGINS { cxLeftWidth: 0, cxRightWidth: 0, cyTopHeight: 1, cyBottomHeight: 0 };
+            let _ = DwmExtendFrameIntoClientArea(hwnd, &margins);
+        }
         DragAcceptFiles(hwnd, true);
 
         let cfg = Config::load();
         let mut gfx = Gfx::new()?;
+        gfx.set_transparent(mica);
         let icons = TOOLS.iter().map(|t| gfx.load_image(t.icons)).collect::<Res<Vec<_>>>()?;
         let logo = gfx.load_image(&[
             (24, include_bytes!("../assets/icon-24.png")),
@@ -1570,6 +1622,7 @@ pub fn run(hidden: bool, tab: Option<String>) -> Res<()> {
             cheshire: None,
             dormouse: None,
             tweedle: None,
+            hatter: None,
             busy: [None; tools::COUNT],
             errors: Default::default(),
             results: Arc::default(),
@@ -1583,9 +1636,12 @@ pub fn run(hidden: bool, tab: Option<String>) -> Res<()> {
             active: true,
             cap_hover: None,
             cap_pressed: None,
+            mica,
         };
         app.sync_tools();
         crate::shell::register_app();
+        crate::shell::migrate_autostart();
+        app.autostart = autostart();
         // İstenen ya da son açık sekme; kurulu araç yoksa Araçlar.
         let first = (0..TOOLS.len()).find(|&i| app.installed(i)).map_or(Page::Store, Page::Tool);
         let page = tab.as_deref().and_then(Page::from_id).or_else(|| Page::from_id(&cfg.tab)).unwrap_or(first);

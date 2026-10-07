@@ -10,9 +10,12 @@ mod cheshire;
 mod config;
 mod dormouse;
 mod gfx;
+mod hatter;
 mod log;
 mod lyrebird;
+mod myinstants;
 mod net;
+mod osd;
 mod rabbithole;
 mod shell;
 mod tools;
@@ -37,6 +40,8 @@ use windows::core::w;
 //   hive --lyrebird-test  her mikrofona test sesi gönder, geri geliyor mu ölç
 //   hive --dormouse-test  dormouse'un okuduğu pil, ekran ve ekran kartı bilgilerini yazdır
 //   hive --tweedle-test   tweedle'ın gördüğü ses çıkışlarını ve medya oturumlarını yazdır
+//   hive --hatter-test    hatter'ın gördüğü pencereleri ve dock'taki öğeleri yazdır
+//   hive --hatter-pin <yol>  dock'a sabitle (sağ tık menüsünden)
 
 /// Bayrak İngilizce ya da Türkçe adıyla verilmiş mi.
 fn flag(args: &[String], en: &str, tr: &str) -> bool {
@@ -102,6 +107,21 @@ fn main() {
                 let _ = windows::Win32::System::Com::CoInitializeEx(None, windows::Win32::System::Com::COINIT_MULTITHREADED);
             }
             print!("{}", tweedle::probe());
+            std::process::exit(0);
+        }
+        Some("--hatter-test" | "--hatter-dene") => {
+            unsafe {
+                let _ = AttachConsole(ATTACH_PARENT_PROCESS);
+                let _ = windows::Win32::System::Com::CoInitializeEx(None, windows::Win32::System::Com::COINIT_APARTMENTTHREADED);
+            }
+            print!("{}", hatter::probe());
+            std::process::exit(0);
+        }
+        Some("--hatter-pin") => {
+            unsafe {
+                let _ = windows::Win32::System::Com::CoInitializeEx(None, windows::Win32::System::Com::COINIT_APARTMENTTHREADED);
+            }
+            hatter::pin_from_cli(args.get(1).map(String::as_str).unwrap_or(""));
             std::process::exit(0);
         }
         Some("--lyrebird-test" | "--lyrebird-dene") => {

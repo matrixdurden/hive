@@ -6,11 +6,11 @@ use std::path::{Path, PathBuf};
 
 use windows::Win32::System::Com::{CLSCTX_INPROC_SERVER, CoCreateInstance, IPersistFile};
 use windows::Win32::System::Registry::{
-    HKEY, HKEY_CURRENT_USER, KEY_WRITE, REG_DWORD, REG_OPTION_NON_VOLATILE, REG_SZ, RegCloseKey, RegCreateKeyExW,
-    RegDeleteKeyValueW, RegDeleteTreeW, RegSetValueExW,
+    HKEY, HKEY_CURRENT_USER, KEY_WRITE, REG_DWORD, REG_OPTION_NON_VOLATILE, REG_SZ, RRF_RT_REG_BINARY, RRF_RT_REG_SZ,
+    RegCloseKey, RegCreateKeyExW, RegDeleteKeyValueW, RegDeleteTreeW, RegGetValueW, RegSetValueExW,
 };
 use windows::Win32::UI::Shell::{IShellLinkW, ShellLink};
-use windows::core::{Interface, PCWSTR, w};
+use windows::core::{BSTR, Interface, PCWSTR, w};
 
 use crate::log;
 use crate::tools::TOOLS;
@@ -136,12 +136,123 @@ pub fn register_app() {
     }
 }
 
+const RUN: PCWSTR = w!(r"Software\Microsoft\Windows\CurrentVersion\Run");
+const RUN_APPROVED: PCWSTR = w!(r"Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run");
+
+/// Windows ile başlama, Görev Zamanlayıcı'da oturum açılınca çalışan bir görevle: Run kaydındakiler
+/// masaüstü yüklendikten sonra hep birlikte açılır, görev ise ondan önce ve gecikmesiz çalışır.
+/// Böylece hive ilk açılan olur. Görev kullanıcıya özel, yönetici izni gerekmez.
+fn task_name() -> String {
+    format!("hive ({})", std::env::var("USERNAME").unwrap_or_default())
+}
+
+fn task_root() -> windows::core::Result<windows::Win32::System::TaskScheduler::ITaskFolder> {
+    use windows::Win32::System::TaskScheduler::{ITaskService, TaskScheduler};
+    use windows::Win32::System::Variant::VARIANT;
+    unsafe {
+        let svc: ITaskService = CoCreateInstance(&TaskScheduler, None, CLSCTX_INPROC_SERVER)?;
+        let none = VARIANT::default();
+        svc.Connect(&none, &none, &none, &none)?;
+        svc.GetFolder(&BSTR::from("\\"))
+    }
+}
+
+fn xml_escape(s: &str) -> String {
+    s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;")
+}
+
+/// COM başlatılmış iş parçacığında çağrılmalı.
+pub fn autostart() -> bool {
+    task_root().and_then(|r| unsafe { r.GetTask(&BSTR::from(task_name())) }).is_ok()
+}
+
+/// `Some(exe)`: o exe ile Windows ile başla; `None`: başlama. COM başlatılmış iş parçacığında çağrılmalı.
+pub fn set_autostart(exe: Option<&str>) {
+    use windows::Win32::System::TaskScheduler::{TASK_CREATE_OR_UPDATE, TASK_LOGON_INTERACTIVE_TOKEN};
+    use windows::Win32::System::Variant::VARIANT;
+    let root = match task_root() {
+        Ok(r) => r,
+        Err(e) => {
+            log!("Görev Zamanlayıcı açılamadı: {e}");
+            return;
+        }
+    };
+    let name = BSTR::from(task_name());
+    let Some(exe) = exe else {
+        let _ = unsafe { root.DeleteTask(&name, 0) };
+        return;
+    };
+    let user = xml_escape(&format!(
+        "{}\\{}",
+        std::env::var("USERDOMAIN").unwrap_or_default(),
+        std::env::var("USERNAME").unwrap_or_default()
+    ));
+    // Öncelik 4 normal (görevlerin varsayılanı 7, düşük); süre sınırı yok, pilde de başlar.
+    let xml = format!(
+        r#"<?xml version="1.0" encoding="UTF-16"?>
+<Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
+  <RegistrationInfo><Author>hive</Author><Description>{desc}</Description></RegistrationInfo>
+  <Triggers><LogonTrigger><Enabled>true</Enabled><UserId>{user}</UserId></LogonTrigger></Triggers>
+  <Principals><Principal id="Author"><UserId>{user}</UserId><LogonType>InteractiveToken</LogonType><RunLevel>LeastPrivilege</RunLevel></Principal></Principals>
+  <Settings>
+    <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>
+    <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>
+    <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>
+    <ExecutionTimeLimit>PT0S</ExecutionTimeLimit>
+    <Priority>4</Priority>
+  </Settings>
+  <Actions Context="Author"><Exec><Command>{exe}</Command><Arguments>--hidden</Arguments></Exec></Actions>
+</Task>"#,
+        desc = xml_escape(t!("Starts hive first when you sign in", "Oturum açınca hive'ı ilk sırada başlatır")),
+        exe = xml_escape(exe),
+    );
+    let none = VARIANT::default();
+    let r = unsafe {
+        root.RegisterTask(&name, &BSTR::from(xml), TASK_CREATE_OR_UPDATE.0, &none, &none, TASK_LOGON_INTERACTIVE_TOKEN, &none)
+    };
+    if let Err(e) = r {
+        log!("Windows ile başlama görevi yazılamadı: {e}");
+    }
+}
+
+/// Eski sürümler Run kaydını kullanıyordu: görevle değiştir. Görev Yöneticisi'nden kapatılmışsa
+/// kapalı kalır.
+pub fn migrate_autostart() {
+    let Some(exe) = util::installed_copy() else { return };
+    unsafe {
+        if RegGetValueW(HKEY_CURRENT_USER, RUN, w!("hive"), RRF_RT_REG_SZ, None, None, None).is_err() {
+            return;
+        }
+        let mut flags = [0u8; 12];
+        let mut size = flags.len() as u32;
+        let disabled = RegGetValueW(
+            HKEY_CURRENT_USER,
+            RUN_APPROVED,
+            w!("hive"),
+            RRF_RT_REG_BINARY,
+            None,
+            Some(flags.as_mut_ptr().cast()),
+            Some(&mut size),
+        )
+        .is_ok()
+            && flags[0] & 1 == 1;
+        if !disabled {
+            set_autostart(Some(&exe));
+        }
+        let _ = RegDeleteKeyValueW(HKEY_CURRENT_USER, RUN, w!("hive"));
+        let _ = RegDeleteKeyValueW(HKEY_CURRENT_USER, RUN_APPROVED, w!("hive"));
+    }
+    log!("Windows ile başlama Run kaydından göreve taşındı");
+}
+
 /// hive'ın kendi izleri: Uygulamalar kaydı, Windows ile başlama, Başlat menüsü kısayolu.
 /// Klasörü süreç kapandıktan sonra `remove_self_later` siler.
 pub fn unregister_app() {
+    set_autostart(None);
     unsafe {
         let _ = RegDeleteTreeW(HKEY_CURRENT_USER, UNINSTALL);
-        let _ = RegDeleteKeyValueW(HKEY_CURRENT_USER, w!(r"Software\Microsoft\Windows\CurrentVersion\Run"), w!("hive"));
+        let _ = RegDeleteKeyValueW(HKEY_CURRENT_USER, RUN, w!("hive"));
+        let _ = RegDeleteKeyValueW(HKEY_CURRENT_USER, RUN_APPROVED, w!("hive"));
     }
     if let Some(dir) = programs_dir() {
         let _ = std::fs::remove_file(dir.join("hive.lnk"));
@@ -194,6 +305,8 @@ pub fn install_self() -> Result<(), String> {
     use std::os::windows::process::CommandExt;
     let src = std::env::current_exe().map_err(|e| e.to_string())?;
     let dst = util::data_dir().join("hive.exe");
+    // İlk kurulumda Windows ile başlama açık gelir; güncelleme kullanıcının seçimine dokunmaz.
+    let fresh = !dst.exists();
     stop_running();
     std::fs::create_dir_all(util::data_dir()).map_err(|e| e.to_string())?;
     if src != dst {
@@ -210,6 +323,12 @@ pub fn install_self() -> Result<(), String> {
         if !copied {
             return Err(format!("{} yazılamadı: {last}", dst.display()));
         }
+    }
+    if fresh {
+        unsafe {
+            let _ = windows::Win32::System::Com::CoInitializeEx(None, windows::Win32::System::Com::COINIT_APARTMENTTHREADED);
+        }
+        set_autostart(Some(&dst.display().to_string()));
     }
     std::process::Command::new(&dst)
         .creation_flags(0x0000_0008) // DETACHED_PROCESS

@@ -29,11 +29,12 @@ hive is a launcher: install tools from its **Tools** page like plugins. Every to
 
 | | | |
 |:---:|---|---|
-| <img src="app/assets/araclar/lyrebird-64.png" width="40"> | **lyrebird** | A soundboard that plays straight into your microphone. No virtual microphone: Discord, games, OBS, anything that listens to the mic hears it. |
+| <img src="app/assets/araclar/lyrebird-64.png" width="40"> | **lyrebird** | A soundboard that plays straight into your microphone. No virtual microphone: Discord, games, OBS, anything that listens to the mic hears it. Find sounds on Myinstants without leaving it (listen on your headphones, add with one click), and grab the last 10 seconds your computer played with a shortcut (`Ctrl+Alt+L`). |
 | <img src="app/assets/araclar/cheshire-64.png" width="40"> | **cheshire** | Live wallpapers drawn by your GPU behind the desktop icons. Pauses on its own in fullscreen and on battery. |
 | <img src="app/assets/araclar/rabbithole-64.png" width="40"> | **rabbithole** | Tunnels your whole computer past network blocks: through your own server, or serverless in DPI mode. [Separate repository](https://github.com/matrixdurden/rabbithole). |
 | <img src="app/assets/araclar/dormouse-64.png" width="40"> | **dormouse** | Three gears for a laptop: plugged in, out for an hour or two, survival. Switches on its own when the charger comes and goes, keeps the discrete GPU asleep on battery and learns how long each gear really lasts. |
 | <img src="app/assets/araclar/tweedle-64.png" width="40"> | **tweedle** | Audio outputs and inputs in one list: click one to make it the default. One key switches to the next output (`Ctrl+Alt+O`), next input (`Ctrl+Alt+I`) or mutes the microphone (`Ctrl+Alt+K`). And when your headphones drop, the music pauses instead of carrying on from the laptop speakers. |
+| <img src="app/assets/araclar/hatter-64.png" width="40"> | **hatter** | A dock in place of the Windows taskbar, in the Windows 11 look: your pinned apps and the running ones in one floating bar, with Wi-Fi, sound, battery and the clock at its end. Icons under the cursor grow, apps bounce when they want your attention, hovering shows live previews of their windows and you rearrange them by dragging. It slides away when a window covers it (or stays on screen like a Mac, your choice) and stays out of fullscreen games. Win+1…9 opens the apps in dock order; "Pin to dock" is in the right-click menu. Remove it and the taskbar, Start and desktop come back as they were. |
 
 <table>
   <tr>
