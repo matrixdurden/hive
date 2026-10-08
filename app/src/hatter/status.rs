@@ -260,7 +260,8 @@ impl Status {
     }
 
     pub fn battery_icon(&self) -> &'static str {
-        battery_glyph(self.battery.map_or(100, |b| b.0))
+        let (p, ac) = self.battery.unwrap_or((100, false));
+        battery_glyph(p, ac)
     }
 
     /// Dock'ta simgenin yanındaki yüzde.
@@ -297,13 +298,18 @@ impl Drop for Status {
     }
 }
 
-/// Pil simgesi: dolulukla on basamak (Battery0..Battery10).
-pub fn battery_glyph(percent: u8) -> &'static str {
+/// Pil simgesi (Windows 11'in yuvarlak pilleri): dolulukla on basamak, prizdeyse şimşekli.
+pub fn battery_glyph(percent: u8, charging: bool) -> &'static str {
     const LEVELS: [&str; 11] = [
-        "\u{E850}", "\u{E851}", "\u{E852}", "\u{E853}", "\u{E854}", "\u{E855}", "\u{E856}", "\u{E857}", "\u{E858}",
-        "\u{E859}", "\u{E83F}",
+        "\u{EBA0}", "\u{EBA1}", "\u{EBA2}", "\u{EBA3}", "\u{EBA4}", "\u{EBA5}", "\u{EBA6}", "\u{EBA7}", "\u{EBA8}",
+        "\u{EBA9}", "\u{EBAA}",
     ];
-    LEVELS[(percent.min(100) as usize + 5) / 10]
+    const CHARGING: [&str; 11] = [
+        "\u{EBAB}", "\u{EBAC}", "\u{EBAD}", "\u{EBAE}", "\u{EBAF}", "\u{EBB0}", "\u{EBB1}", "\u{EBB2}", "\u{EBB3}",
+        "\u{EBB4}", "\u{EBB5}",
+    ];
+    let i = (percent.min(100) as usize + 5) / 10;
+    if charging { CHARGING[i] } else { LEVELS[i] }
 }
 
 /// Pil yüzdesi ve prizde mi; pil yoksa `None`.

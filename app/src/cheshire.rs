@@ -191,7 +191,7 @@ pub fn leftovers() -> Vec<String> {
         }
     }
     if engine_window().is_some() {
-        left.push(t!("running cheshire engine", "çalışan cheshire motoru").into());
+        left.push(t!("running wallpaper engine", "çalışan duvar kâğıdı motoru").into());
     }
     left
 }

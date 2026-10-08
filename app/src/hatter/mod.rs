@@ -15,6 +15,7 @@ mod keys;
 mod taskbar;
 pub(crate) mod theme;
 mod toasts;
+mod tray;
 
 use std::path::PathBuf;
 
@@ -441,8 +442,8 @@ impl Hatter {
                     "Win+1…9 uygulamaları dock sırasıyla açar · \"Dock'a sabitle\" Gezgin'in sağ tık menüsünde"
                 ),
                 t!(
-                    "The Windows taskbar comes back when hatter is removed or hive closes",
-                    "hatter kaldırılınca ya da hive kapanınca Windows görev çubuğu geri gelir"
+                    "The Windows taskbar comes back when the dock is removed or hive closes",
+                    "Dock kaldırılınca ya da hive kapanınca Windows görev çubuğu geri gelir"
                 ),
             ];
             for (i, tip) in tips.iter().enumerate() {

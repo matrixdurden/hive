@@ -31,7 +31,8 @@ pub const COUNT: usize = 6;
 
 pub struct Tool {
     pub id: &'static str,
-    pub name: &'static str,
+    /// Görünen ad (İngilizce, Türkçe): aracın ne işe yaradığı. Kod adı `id`'de kalır.
+    pub names: [&'static str; 2],
     pub accent: u32,
     /// [İngilizce, Türkçe]; `tagline()` seçili dildekini verir.
     tagline: [&'static str; 2],
@@ -42,6 +43,10 @@ pub struct Tool {
 }
 
 impl Tool {
+    pub fn name(&self) -> &'static str {
+        t!(self.names[0], self.names[1])
+    }
+
     pub fn tagline(&self) -> &'static str {
         t!(self.tagline[0], self.tagline[1])
     }
@@ -67,7 +72,7 @@ macro_rules! icons {
 pub static TOOLS: [Tool; COUNT] = [
     Tool {
         id: "lyrebird",
-        name: "lyrebird",
+        names: ["Soundboard", "Soundboard"],
         accent: 0xfbbf24,
         tagline: ["A soundboard that plays straight into your microphone", "Sesi doğrudan mikrofona veren soundboard"],
         note: ["Adds an effect to your microphone · needs admin", "Mikrofonuna bir ses efekti takar · yönetici izni ister"],
@@ -75,7 +80,7 @@ pub static TOOLS: [Tool; COUNT] = [
     },
     Tool {
         id: "cheshire",
-        name: "cheshire",
+        names: ["Wallpaper", "Duvar kâğıdı"],
         accent: 0xf472b6,
         tagline: ["Live wallpapers drawn by your GPU", "GPU ile çizilen canlı duvar kâğıdı"],
         note: ["Comes with hive · no internet needed", "hive ile birlikte gelir · internet gerekmez"],
@@ -83,7 +88,7 @@ pub static TOOLS: [Tool; COUNT] = [
     },
     Tool {
         id: "rabbithole",
-        name: "rabbithole",
+        names: ["Tunnel", "Tünel"],
         accent: 0xa78bfa,
         tagline: ["Tunnels your whole computer past network blocks", "Bütün bilgisayarı ağ engellerinin ötesine geçiren tünel"],
         note: ["Downloaded from GitHub (~40 MB) · needs admin", "GitHub'dan indirilir (~40 MB) · yönetici izni ister"],
@@ -91,7 +96,7 @@ pub static TOOLS: [Tool; COUNT] = [
     },
     Tool {
         id: "dormouse",
-        name: "dormouse",
+        names: ["Battery", "Pil"],
         accent: 0x34d399,
         tagline: ["Three gears for your laptop's battery", "Dizüstünün pili için üç vites"],
         note: ["Comes with hive · laptops only", "hive ile birlikte gelir · yalnızca dizüstü"],
@@ -99,7 +104,7 @@ pub static TOOLS: [Tool; COUNT] = [
     },
     Tool {
         id: "tweedle",
-        name: "tweedle",
+        names: ["Audio devices", "Ses aygıtları"],
         accent: 0x38bdf8,
         tagline: ["Audio outputs and inputs, one key away", "Ses çıkışları ve girişleri, tek tuş uzağında"],
         note: ["Comes with hive · no internet needed", "hive ile birlikte gelir · internet gerekmez"],
@@ -107,7 +112,7 @@ pub static TOOLS: [Tool; COUNT] = [
     },
     Tool {
         id: "hatter",
-        name: "hatter",
+        names: ["Dock", "Dock"],
         accent: hatter::ACCENT,
         tagline: ["A dock in place of the taskbar", "Görev çubuğunun yerine bir dock"],
         note: ["Comes with hive · the taskbar comes back when removed", "hive ile birlikte gelir · kaldırınca görev çubuğu geri gelir"],
@@ -179,7 +184,7 @@ fn uninstall(i: usize) -> Result<(), String> {
     if left.is_empty() {
         Ok(())
     } else {
-        log!("{} kalıntıları: {left:?}", TOOLS[i].name);
+        log!("{} kalıntıları: {left:?}", TOOLS[i].name());
         Err(format!("{} {}", t!("not fully removed, left behind:", "tam kaldırılamadı, kalanlar:"), left.join(" · ")))
     }
 }

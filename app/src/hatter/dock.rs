@@ -238,6 +238,8 @@ enum Action {
     Settings,
     /// Windows bildirimleri ve takvim (Win+N).
     Notices,
+    /// Gizli simgeler: alt orta noktası (fiziksel piksel).
+    Tray(i32, i32),
 }
 
 struct MenuSpec {
@@ -254,6 +256,8 @@ struct MenuSpec {
 /// Sağ uçtaki durum parçaları.
 #[derive(Clone, Copy, PartialEq, Debug)]
 enum Part {
+    /// Windows'un gizli simgeler penceresi.
+    Tray,
     Net,
     Volume,
     Battery,
@@ -459,7 +463,7 @@ impl Dock {
 
     /// Sağ uçtaki parçalar ve genişlikleri.
     fn parts(&self) -> Vec<(Part, f32)> {
-        let mut v = vec![(Part::Net, 30.0), (Part::Volume, 30.0)];
+        let mut v = vec![(Part::Tray, 26.0), (Part::Net, 30.0), (Part::Volume, 30.0)];
         if self.status.battery.is_some() {
             v.push((Part::Battery, BATTERY_GLYPH + self.battery_w + 10.0));
         }
@@ -1120,6 +1124,7 @@ impl Dock {
                         let cy = bottom - PAD_B - icon / 2.0 + 2.0;
                         let st = &self.status;
                         let (text, dim) = match part {
+                            Part::Tray => ("\u{E70E}", false),
                             Part::Net => (st.net_icon(), st.net == status::Net::None),
                             Part::Volume => (st.volume_icon(), st.volume.is_none()),
                             Part::Battery => (st.battery_icon(), false),
@@ -1203,6 +1208,7 @@ impl Dock {
                     (None, Some(p)) => slots.iter().find(|s| s.part == Some(p)).map(|s| {
                         let st = &self.status;
                         let text = match p {
+                            Part::Tray => t!("Hidden icons", "Gizli simgeler").to_string(),
                             Part::Net => st.net_text().to_string(),
                             Part::Volume => st.volume_text(),
                             Part::Battery => st.battery_text(),
@@ -1446,6 +1452,15 @@ impl Dock {
     /// Durum simgeleri Windows'un kendi panellerini açar: ağ, ses, pil hızlı ayarları (dock'un
     /// üstüne hizalanır, `place_flyout`); saat bildirimleri ve takvimi (sağda, yerinde kalır).
     fn click_part(&mut self, p: Part) -> Option<Action> {
+        if p == Part::Tray {
+            let slots = self.slots();
+            let s = slots.iter().find(|s| s.part == Some(Part::Tray))?;
+            let k = self.k();
+            let (_, h) = self.size_dip();
+            let pill_top = h - MARGIN - self.pill_h();
+            let x = self.place.left + ((s.l + s.r) / 2.0 * k) as i32;
+            return Some(Action::Tray(x, self.place.top + ((pill_top - 8.0) * k) as i32));
+        }
         Some(if p == Part::Clock { Action::Notices } else { Action::QuickSettings })
     }
 
@@ -1688,6 +1703,7 @@ fn act(a: Action) {
             FLYOUT.set(Some((Instant::now(), QUICK)));
             super::press(&[VK_LWIN, VK_A]);
         }
+        Action::Tray(x, y) => super::tray::toggle(x, y),
         Action::Menu(spec) => {
             let hwnd = HWND(HWND_DOCK.get() as *mut _);
             let Some((monitor, dpi)) = with(|d| (d.monitor, d.dpi)) else { return };
@@ -2054,7 +2070,7 @@ fn create(settings: Settings, lines: Vec<String>) -> windows::core::Result<Dock>
     {
         unsafe {
             let inst = GetModuleHandleW(None)?;
-            let wc = WNDCLASSW { lpfnWndProc: Some(proc), hInstance: inst.into(), lpszClassName: CLASS, ..Default::default() };
+            let wc = WNDCLASSW { lpfnWndProc: Some(proc), hInstance: inst.into(), lpszClassName: CLASS, hCursor: LoadCursorW(None, IDC_ARROW).unwrap_or_default(), ..Default::default() };
             RegisterClassW(&wc);
             let hwnd = CreateWindowExW(
                 WS_EX_LAYERED | WS_EX_TOOLWINDOW | WS_EX_TOPMOST | WS_EX_NOACTIVATE,

@@ -493,7 +493,7 @@ impl Dormouse {
             } else {
                 format!(" {}: {}.", t!("Worth closing", "Kapatman iyi olur"), self.suggest.join(", "))
             };
-            self.notice = Some((format!("dormouse · {}", mode_name(mode)), format!("{what}{hint}")));
+            self.notice = Some((format!("{} · {}", t!("Battery", "Pil"), mode_name(mode)), format!("{what}{hint}")));
         }
         self.redraw();
     }
@@ -583,10 +583,10 @@ impl Dormouse {
             if low && !self.low_warned && self.mode != SURVIVAL {
                 self.low_warned = true;
                 self.notice = Some((
-                    format!("dormouse · %{}", self.percent),
+                    format!("{} · %{}", t!("Battery", "Pil"), self.percent),
                     t!(
-                        "Battery is getting low. Switch to Survival from the dormouse page if you want.",
-                        "Pil azalıyor. İstersen dormouse sayfasından Hayatta kalma'ya geç."
+                        "Battery is getting low. Switch to Survival from the Battery page if you want.",
+                        "Pil azalıyor. İstersen Pil sayfasından Hayatta kalma'ya geç."
                     )
                     .into(),
                 ));

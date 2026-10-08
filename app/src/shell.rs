@@ -1,6 +1,6 @@
 //! Başlat menüsü: hive ve kurulu her araç için bir kısayol. Araç kısayolu hive'ı
 //! o aracın sekmesinde açar (`--sekme`), simgesi aracın kendi simgesidir; Windows aramasında
-//! "lyrebird" yazınca normal bir uygulama gibi çıkar.
+//! "Pil" yazınca normal bir uygulama gibi çıkar.
 
 use std::path::{Path, PathBuf};
 
@@ -48,8 +48,25 @@ fn create(link: &Path, exe: &str, args: &str, icon: Option<&Path>, description: 
     }
 }
 
+/// Kısayolun dosya adı: Başlat menüsünde "Pil · hive" (adlar genel olduğundan başka
+/// programlarınkiyle karışmasın).
+fn link_name(name: &str) -> String {
+    format!("{name} · hive.lnk")
+}
+
 fn tool_link(i: usize) -> Option<PathBuf> {
-    programs_dir().map(|d| d.join(format!("{}.lnk", TOOLS[i].name)))
+    programs_dir().map(|d| d.join(link_name(TOOLS[i].name())))
+}
+
+/// Aracın eski ya da öbür dildeki kısayolları (kod adıyla yazılanlar dahil).
+fn stale_links(dir: &Path, i: usize) -> Vec<PathBuf> {
+    let t = &TOOLS[i];
+    let current = link_name(t.name());
+    [format!("{}.lnk", t.id), link_name(t.names[0]), link_name(t.names[1])]
+        .into_iter()
+        .filter(|n| *n != current)
+        .map(|n| dir.join(n))
+        .collect()
 }
 
 fn tool_ico(i: usize) -> PathBuf {
@@ -61,12 +78,18 @@ pub fn remove_tool(i: usize) {
     if let Some(l) = tool_link(i) {
         let _ = std::fs::remove_file(l);
     }
+    if let Some(d) = programs_dir() {
+        for l in stale_links(&d, i) {
+            let _ = std::fs::remove_file(l);
+        }
+    }
     let _ = std::fs::remove_file(tool_ico(i));
 }
 
 /// Aracın Başlat menüsünde kalan izleri.
 pub fn tool_leftovers(i: usize) -> Vec<String> {
-    tool_link(i).into_iter().chain([tool_ico(i)]).filter(|p| p.exists()).map(|p| p.display().to_string()).collect()
+    let stale = programs_dir().map(|d| stale_links(&d, i)).unwrap_or_default();
+    tool_link(i).into_iter().chain(stale).chain([tool_ico(i)]).filter(|p| p.exists()).map(|p| p.display().to_string()).collect()
 }
 
 /// Kısayolları kurulu araçlara göre yazar, kaldırılanlarınkini siler. Geliştirme kopyası (WSL'den)
@@ -80,8 +103,11 @@ pub fn sync_shortcuts(installed: &[bool]) {
     }
     let icons = util::data_dir().join("ikonlar");
     let _ = std::fs::create_dir_all(&icons);
-    for (tool, &on) in TOOLS.iter().zip(installed) {
-        let link = dir.join(format!("{}.lnk", tool.name));
+    for (i, (tool, &on)) in TOOLS.iter().zip(installed).enumerate() {
+        for l in stale_links(&dir, i) {
+            let _ = std::fs::remove_file(l);
+        }
+        let link = dir.join(link_name(tool.name()));
         if !on {
             let _ = std::fs::remove_file(&link);
             continue;
@@ -92,7 +118,7 @@ pub fn sync_shortcuts(installed: &[bool]) {
             continue;
         }
         if let Err(e) = create(&link, &exe, &format!("--tab {}", tool.id), Some(&ico), tool.tagline()) {
-            log!("{} kısayolu yazılamadı: {e}", tool.name);
+            log!("{} kısayolu yazılamadı: {e}", tool.name());
         }
     }
 }

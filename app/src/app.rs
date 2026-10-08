@@ -126,7 +126,7 @@ impl Page {
 
     fn label(self) -> &'static str {
         match self {
-            Page::Tool(i) => TOOLS[i].name,
+            Page::Tool(i) => TOOLS[i].name(),
             Page::Store => t!("Tools", "Araçlar"),
             Page::Settings => t!("Settings", "Ayarlar"),
         }
@@ -426,7 +426,7 @@ impl App {
                 "Tünel kapanır; hizmet, ağ bağdaştırıcısı ve sunucu bağlantın silinir."
             ),
         };
-        let name = TOOLS[i].name;
+        let name = TOOLS[i].name();
         let text = wide(&t!(
             format!("Remove {name}?\n\n{detail}\n\nNo trace of it is left on this computer."),
             format!("{name} kaldırılsın mı?\n\n{detail}\n\nBilgisayarda hiçbir izi kalmaz.")
@@ -471,13 +471,13 @@ impl App {
             self.busy[i] = None;
             match r {
                 Ok(()) => {
-                    log!("{} {}", TOOLS[i].name, if install { "kuruldu" } else { "kaldırıldı" });
+                    log!("{} {}", TOOLS[i].name(), if install { "kuruldu" } else { "kaldırıldı" });
                     if install {
                         opened = Some(i);
                     }
                 }
                 Err(e) => {
-                    log!("{} {}: {e}", TOOLS[i].name, if install { "kurulamadı" } else { "kaldırılamadı" });
+                    log!("{} {}: {e}", TOOLS[i].name(), if install { "kurulamadı" } else { "kaldırılamadı" });
                     self.errors[i] = Some(e);
                 }
             }
@@ -524,7 +524,7 @@ impl App {
 
     /// Canlı araç sayfasının başlığında adın bittiği x (sayfanın kendi köşesine göre).
     fn head_x(&self, i: usize) -> f32 {
-        PAD + 40.0 + self.gfx.measure(TOOLS[i].name, &self.gfx.f.heading)
+        PAD + 40.0 + self.gfx.measure(TOOLS[i].name(), &self.gfx.f.heading)
     }
 
     /// Araç sayfasına boyutunu verir; kenar çubuğunun genişliğini döndürür.
@@ -574,7 +574,7 @@ impl App {
             return;
         }
         let tools: Vec<usize> = (0..TOOLS.len()).filter(|&i| self.installed(i)).collect();
-        let names: Vec<&str> = tools.iter().map(|&i| TOOLS[i].name).collect();
+        let names: Vec<&str> = tools.iter().map(|&i| TOOLS[i].name()).collect();
         let list = names.join(", ");
         let text = wide(&match (crate::i18n::turkish(), names.is_empty()) {
             (false, true) => "Remove hive?\n\nNo trace is left on this computer.".to_string(),
@@ -608,7 +608,7 @@ impl App {
         std::thread::spawn(move || {
             for i in tools {
                 if let Err(e) = tools::run(i, false) {
-                    errors.lock().unwrap().push(format!("{}: {e}", TOOLS[i].name));
+                    errors.lock().unwrap().push(format!("{}: {e}", TOOLS[i].name()));
                 }
             }
             if errors.lock().unwrap().is_empty() {
@@ -808,7 +808,7 @@ impl App {
         g.translate(sw, 0.0);
         g.image(self.icons[i], Rect::new(PAD, HEAD_CY - 14.0, PAD + 28.0, HEAD_CY + 14.0), 1.0);
         let name = Rect::new(PAD + 40.0, HEAD_CY - 18.0, PAD + 240.0, HEAD_CY + 18.0);
-        g.text(TOOLS[i].name, &g.f.heading, name, TEXT);
+        g.text(TOOLS[i].name(), &g.f.heading, name, TEXT);
         if let Some(p) = self.page_ref(i) {
             p.paint(g);
             if let Some((r, text)) = p.tip() {
@@ -851,8 +851,8 @@ impl App {
             let (primary, second) = self.card_buttons(i, w);
             let text_r = primary.l - 16.0;
             let x = c.l + 96.0;
-            let name_w = g.measure(tool.name, &g.f.heading);
-            g.text(tool.name, &g.f.heading, Rect::new(x, c.t + 16.0, text_r, c.t + 44.0), TEXT);
+            let name_w = g.measure(tool.name(), &g.f.heading);
+            g.text(tool.name(), &g.f.heading, Rect::new(x, c.t + 16.0, text_r, c.t + 44.0), TEXT);
             if installed {
                 status(g, x + name_w + 14.0, c.t + 31.0, GREEN, t!("Installed", "Kurulu"), MUTED, text_r);
             }
@@ -889,8 +889,8 @@ impl App {
         let sub = match dev {
             true => t!("Not available in a development copy", "Geliştirme kopyasında kullanılamaz"),
             false => t!(
-                "Starts quietly in the tray when you sign in; cheshire's wallpaper comes with it",
-                "Oturum açınca tepside sessizce başlar; cheshire'ın duvar kâğıdı da onunla gelir"
+                "Starts quietly in the tray when you sign in; your wallpaper comes with it",
+                "Oturum açınca tepside sessizce başlar; duvar kâğıdın da onunla gelir"
             ),
         };
         setting_row(g, r, t!("Start with Windows", "Windows ile başlat"), sub, 120.0);
@@ -911,7 +911,7 @@ impl App {
         }
 
         let r = self.settings_row(2, w);
-        let sub = t!("hive and the lyrebird and cheshire engines inside it", "hive ve içindeki lyrebird ile cheshire motorları");
+        let sub = t!("hive and the soundboard and wallpaper engines inside it", "hive ve içindeki soundboard ile duvar kâğıdı motorları");
         setting_row(g, r, t!("Version", "Sürüm"), sub, 120.0);
         g.text(VERSION, &g.f.small_right, Rect::new(r.r - 120.0, r.t, r.r, r.b), MUTED);
 

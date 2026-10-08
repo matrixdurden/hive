@@ -211,6 +211,9 @@ pub fn hide(icons: bool) {
 /// Görünür kalan görev çubuğu varsa saklar: Explorer otomatik gizlemeye geçerken ve bazı
 /// ayar değişikliklerinde çubuğu kendisi yeniden gösterir.
 pub fn ensure_hidden() {
+    if super::tray::is_open() {
+        return;
+    }
     for t in trays() {
         unsafe {
             if IsWindowVisible(t).as_bool() {
@@ -222,7 +225,7 @@ pub fn ensure_hidden() {
 
 /// Görev çubuğu yeniden göründüyse (Explorer bazen kendisi gösterir) saklar.
 pub fn rehide(hwnd: HWND) {
-    if is_tray(hwnd) {
+    if is_tray(hwnd) && !super::tray::is_open() {
         unsafe {
             let _ = ShowWindow(hwnd, SW_HIDE);
         }
@@ -235,6 +238,8 @@ pub fn rehide(hwnd: HWND) {
 pub fn restore(full: bool) {
     for t in trays() {
         unsafe {
+            // Gizli simgeler açıkken kapanmışsa çubuğun bölgesi boş kalmasın.
+            windows::Win32::Graphics::Gdi::SetWindowRgn(t, None, false);
             let _ = ShowWindow(t, SW_SHOWNA);
         }
     }

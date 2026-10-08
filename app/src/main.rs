@@ -77,15 +77,15 @@ fn main() {
             let mut clean = true;
             for (i, t) in tools::TOOLS.iter().enumerate() {
                 if tools::installed(i) {
-                    println!("{}: {}", t.name, t!("installed", "kurulu"));
+                    println!("{}: {}", t.name(), t!("installed", "kurulu"));
                     continue;
                 }
                 let left = tools::leftovers(i);
                 if left.is_empty() {
-                    println!("{}: {}", t.name, t!("not installed, no trace", "kurulu değil, iz yok"));
+                    println!("{}: {}", t.name(), t!("not installed, no trace", "kurulu değil, iz yok"));
                 } else {
                     clean = false;
-                    println!("{}: {}", t.name, t!("not installed, left behind:", "kurulu değil, kalanlar:"));
+                    println!("{}: {}", t.name(), t!("not installed, left behind:", "kurulu değil, kalanlar:"));
                     for l in left {
                         println!("  {l}");
                     }

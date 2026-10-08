@@ -25,16 +25,16 @@ Yönetici izni gerekmez. Aynı komut hive'ı günceller.
 
 ## Araçlar
 
-hive bir başlatıcı: araçları **Araçlar** sayfasından eklenti gibi kurarsın, kurduğun her araç kenar çubuğunda ve Başlat menüsünde kendi adıyla görünür. "lyrebird" diye aratınca hive o araçta açılır.
+hive bir başlatıcı: araçları **Araçlar** sayfasından eklenti gibi kurarsın, kurduğun her araç kenar çubuğunda ve Başlat menüsünde kendi adıyla görünür. "Pil" diye aratınca hive o araçta açılır.
 
 | | | |
 |:---:|---|---|
-| <img src="app/assets/araclar/lyrebird-64.png" width="40"> | **lyrebird** | Sesi doğrudan mikrofona veren soundboard. Sanal mikrofon kurmaz; Discord, oyunlar, OBS, mikrofonu dinleyen her uygulama duyar. Myinstants'ta ses ara (kulaklıkta dinle, tek tıkla ekle); bilgisayarda az önce çalan son 10 saniyeyi kısayolla (`Ctrl+Alt+L`) listeye ekle. |
-| <img src="app/assets/araclar/cheshire-64.png" width="40"> | **cheshire** | Masaüstü ikonlarının arkasında GPU ile çizilen canlı duvar kâğıtları. Tam ekranda ve pilde kendiliğinden durur. |
-| <img src="app/assets/araclar/rabbithole-64.png" width="40"> | **rabbithole** | Bütün bilgisayarı ağ engellerinin ötesine geçiren tünel: kendi sunucun üzerinden ya da sunucusuz DPI modunda. [Ayrı depo](https://github.com/matrixdurden/rabbithole). |
-| <img src="app/assets/araclar/dormouse-64.png" width="40"> | **dormouse** | Dizüstü için üç vites: prizde, dışarıda bir iki saat, hayatta kalma. Şarj takılıp çıkınca kendi geçer, pildeyken ekran kartını uyutur, her vitesin gerçekte kaç saat gittiğini öğrenir. |
-| <img src="app/assets/araclar/tweedle-64.png" width="40"> | **tweedle** | Ses çıkışları ve girişleri tek listede: tıkladığın varsayılan olur. Tek tuşla sonraki çıkışa (`Ctrl+Alt+O`), sonraki girişe (`Ctrl+Alt+I`) geçer ya da mikrofonu susturur (`Ctrl+Alt+K`). Kulaklık kopunca da müzik laptop hoparlöründen devam etmez, durur. |
-| <img src="app/assets/araclar/hatter-64.png" width="40"> | **hatter** | Windows görev çubuğunun yerine, Windows 11 görünümünde bir dock: sabitlediğin ve açık uygulamalar yüzen tek bir çubukta, ucunda Wi-Fi, ses, pil ve saat. İmlecin altındaki simgeler büyür, dikkat isteyen uygulama zıplar, üstünde durunca pencerelerinin canlı önizlemesi açılır, sürükleyerek sıralarsın. Pencere üstüne gelince aşağı kayar (ya da istersen Mac gibi hep ekranda kalır), tam ekran oyunlarda hiç görünmez. Win+1…9 uygulamaları dock sırasıyla açar; "Dock'a sabitle" sağ tık menüsünde. Kaldırınca görev çubuğu, Başlat ve masaüstü eski haline döner. |
+| <img src="app/assets/araclar/lyrebird-64.png" width="40"> | **Soundboard** <sub>lyrebird</sub> | Sesi doğrudan mikrofona veren soundboard. Sanal mikrofon kurmaz; Discord, oyunlar, OBS, mikrofonu dinleyen her uygulama duyar. Myinstants'ta ses ara (kulaklıkta dinle, tek tıkla ekle); bilgisayarda az önce çalan son 10 saniyeyi kısayolla (`Ctrl+Alt+L`) listeye ekle. |
+| <img src="app/assets/araclar/cheshire-64.png" width="40"> | **Duvar kâğıdı** <sub>cheshire</sub> | Masaüstü ikonlarının arkasında GPU ile çizilen canlı duvar kâğıtları. Tam ekranda ve pilde kendiliğinden durur. |
+| <img src="app/assets/araclar/rabbithole-64.png" width="40"> | **Tünel** <sub>rabbithole</sub> | Bütün bilgisayarı ağ engellerinin ötesine geçiren tünel: kendi sunucun üzerinden ya da sunucusuz DPI modunda. [Ayrı depo](https://github.com/matrixdurden/rabbithole). |
+| <img src="app/assets/araclar/dormouse-64.png" width="40"> | **Pil** <sub>dormouse</sub> | Dizüstü için üç vites: prizde, dışarıda bir iki saat, hayatta kalma. Şarj takılıp çıkınca kendi geçer, pildeyken ekran kartını uyutur, her vitesin gerçekte kaç saat gittiğini öğrenir. |
+| <img src="app/assets/araclar/tweedle-64.png" width="40"> | **Ses aygıtları** <sub>tweedle</sub> | Ses çıkışları ve girişleri tek listede: tıkladığın varsayılan olur. Tek tuşla sonraki çıkışa (`Ctrl+Alt+O`), sonraki girişe (`Ctrl+Alt+I`) geçer ya da mikrofonu susturur (`Ctrl+Alt+K`). Kulaklık kopunca da müzik laptop hoparlöründen devam etmez, durur. |
+| <img src="app/assets/araclar/hatter-64.png" width="40"> | **Dock** <sub>hatter</sub> | Windows görev çubuğunun yerine, Windows 11 görünümünde bir dock: sabitlediğin ve açık uygulamalar yüzen tek bir çubukta, ucunda Wi-Fi, ses, pil ve saat. İmlecin altındaki simgeler büyür, dikkat isteyen uygulama zıplar, üstünde durunca pencerelerinin canlı önizlemesi açılır, sürükleyerek sıralarsın. Pencere üstüne gelince aşağı kayar (ya da istersen Mac gibi hep ekranda kalır), tam ekran oyunlarda hiç görünmez. Win+1…9 uygulamaları dock sırasıyla açar; "Dock'a sabitle" sağ tık menüsünde. Kaldırınca görev çubuğu, Başlat ve masaüstü eski haline döner. |
 
 <table>
   <tr>
