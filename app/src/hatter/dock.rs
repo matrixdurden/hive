@@ -50,6 +50,8 @@ const WM_COVER: u32 = WM_APP + 2;
 const WM_APPBAR: u32 = WM_APP + 3;
 /// Dock listesi dışarıdan (sağ tık menüsünden) değişti: yeniden oku.
 const WM_RELOAD: u32 = WM_APP + 15;
+/// Öndeki pencere değişti: dock her zaman üstteki pencerelerin de üstüne çıkar.
+const WM_RAISE: u32 = WM_APP + 16;
 /// Windows'un paneli açıldı (wParam: pencere, lParam: `QUICK` ya da `NOTICES`).
 const WM_FLYOUT: u32 = WM_APP + 8;
 const QUICK: isize = 1;
@@ -108,6 +110,7 @@ thread_local! {
     static KNOWN: RefCell<HashSet<isize>> = RefCell::new(HashSet::new());
     static HWND_DOCK: Cell<isize> = const { Cell::new(0) };
     static REFRESH_POSTED: Cell<bool> = const { Cell::new(false) };
+    static RAISE_POSTED: Cell<bool> = const { Cell::new(false) };
     static COVER_POSTED: Cell<bool> = const { Cell::new(false) };
     /// Durum simgesine az önce tıklandı: açılan Windows paneli dock'un üstüne taşınacak.
     static FLYOUT: Cell<Option<(Instant, isize)>> = const { Cell::new(None) };
@@ -165,6 +168,9 @@ unsafe extern "system" fn on_event(
                         let _ = PostMessageW(Some(HWND(h as *mut _)), WM_FLYOUT, WPARAM(hwnd.0 as usize), LPARAM(kind));
                     }
                 }
+            }
+            if event == EVENT_SYSTEM_FOREGROUND {
+                post_once(&RAISE_POSTED, WM_RAISE);
             }
             post_once(&REFRESH_POSTED, WM_REFRESH)
         }
@@ -827,6 +833,12 @@ impl Dock {
             let _ = GetWindowRect(fg, &mut wr);
         }
         let covers = wr.left <= m.left && wr.top <= m.top && wr.right >= m.right && wr.bottom >= m.bottom;
+        // Ekranı kaplayan görünmez katmanlar (HP Omen'in bildirim katmanı gibi saydam, araç ya da
+        // etkinleşmeyen pencereler) tam ekran uygulama değildir; dock'u da örtmez.
+        let ex = unsafe { GetWindowLongW(fg, GWL_EXSTYLE) } as u32;
+        if covers && ex & (WS_EX_LAYERED.0 | WS_EX_TRANSPARENT.0 | WS_EX_TOOLWINDOW.0 | WS_EX_NOACTIVATE.0) != 0 {
+            return Cover::Clear;
+        }
         let framed = unsafe { GetWindowLongW(fg, GWL_STYLE) } as u32 & (WS_CAPTION.0 | WS_THICKFRAME.0) != 0;
         if covers && (!unsafe { IsZoomed(fg).as_bool() } || !framed) {
             return Cover::Full;
@@ -1957,6 +1969,23 @@ unsafe extern "system" fn proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> 
         super::toasts::WM_TOAST => {
             let aumid = unsafe { Box::from_raw(lp.0 as *mut String) };
             with(|d| d.toast(&aumid));
+            return LRESULT(0);
+        }
+        WM_RAISE => {
+            RAISE_POSTED.set(false);
+            with(|d| {
+                let fg = unsafe { GetForegroundWindow() };
+                let mut pid = 0;
+                unsafe {
+                    GetWindowThreadProcessId(fg, Some(&mut pid));
+                }
+                // Kendi açılır pencerelerimiz (yığın, menü) dock'un üstünde kalsın.
+                if !d.hidden_window && d.cover != Cover::Full && pid != std::process::id() {
+                    unsafe {
+                        let _ = SetWindowPos(hwnd, Some(HWND_TOPMOST), 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+                    }
+                }
+            });
             return LRESULT(0);
         }
         WM_RELOAD => {
