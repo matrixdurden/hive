@@ -101,6 +101,9 @@ pub fn toggle(x: i32, bottom: i32) {
         };
         if let Some(h) = ovf {
             // Pencere içerik değişince boyunu ve yerini kendisi yeniler: kapanana dek yerinde tutulur.
+            // Explorer ipuçlarını pencerenin kendi koyduğu yere göre çizer; onlar da aynı kadar kaydırılır.
+            let mut delta = (0, 0);
+            let mut moved: Vec<(HWND, RECT)> = Vec::new();
             while visible(h) {
                 let mut r = RECT::default();
                 unsafe {
@@ -108,11 +111,15 @@ pub fn toggle(x: i32, bottom: i32) {
                 }
                 let (nx, ny) = (x - (r.right - r.left) / 2, bottom - (r.bottom - r.top));
                 if (r.left - nx).abs() > 1 || (r.top - ny).abs() > 1 {
+                    delta = (nx - r.left, ny - r.top);
                     unsafe {
                         let _ = SetWindowPos(h, None, nx, ny, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
                     }
                 }
-                std::thread::sleep(Duration::from_millis(30));
+                if delta != (0, 0) {
+                    follow_popups(h, delta, &mut moved);
+                }
+                std::thread::sleep(Duration::from_millis(15));
             }
             CLOSED_AT.store(now_ms(), Ordering::Relaxed);
         }
@@ -122,4 +129,49 @@ pub fn toggle(x: i32, bottom: i32) {
         }
         OPEN.store(false, Ordering::Relaxed);
     });
+}
+
+/// Taşma penceresinin açtığı ipucu pencereleri (Explorer'ın, görünür): yeni yerleştirildiyse
+/// (`moved`'daki yerinde değilse) `delta` kadar kaydırılır.
+fn follow_popups(ovf: HWND, delta: (i32, i32), moved: &mut Vec<(HWND, RECT)>) {
+    struct Ctx {
+        pid: u32,
+        ovf: HWND,
+        found: Vec<HWND>,
+    }
+    unsafe extern "system" fn each(hwnd: HWND, lp: LPARAM) -> windows::core::BOOL {
+        let c = unsafe { &mut *(lp.0 as *mut Ctx) };
+        let mut pid = 0;
+        unsafe {
+            GetWindowThreadProcessId(hwnd, Some(&mut pid));
+        }
+        if pid == c.pid && hwnd != c.ovf && visible(hwnd) {
+            let owned = unsafe { GetWindow(hwnd, GW_OWNER) }.is_ok_and(|o| o == c.ovf);
+            if owned || matches!(super::apps::class_name(hwnd).as_str(), "Xaml_WindowedPopupClass" | "tooltips_class32") {
+                c.found.push(hwnd);
+            }
+        }
+        true.into()
+    }
+    let mut c = Ctx { pid: 0, ovf, found: Vec::new() };
+    unsafe {
+        GetWindowThreadProcessId(ovf, Some(&mut c.pid));
+        let _ = EnumWindows(Some(each), LPARAM(&mut c as *mut _ as isize));
+    }
+    moved.retain(|(w, _)| c.found.contains(w));
+    for w in c.found {
+        let mut r = RECT::default();
+        unsafe {
+            let _ = GetWindowRect(w, &mut r);
+        }
+        if moved.iter().any(|(m, mr)| *m == w && *mr == r) {
+            continue;
+        }
+        let nr = RECT { left: r.left + delta.0, top: r.top + delta.1, right: r.right + delta.0, bottom: r.bottom + delta.1 };
+        unsafe {
+            let _ = SetWindowPos(w, None, nr.left, nr.top, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
+        }
+        moved.retain(|(m, _)| *m != w);
+        moved.push((w, nr));
+    }
 }

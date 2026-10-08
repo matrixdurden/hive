@@ -76,6 +76,9 @@ const TIMER_STACK_CLOSE: usize = 6;
 const STACK_DWELL_MS: u32 = 500;
 /// Saat dakika başında güncellenir.
 const TIMER_CLOCK: usize = 7;
+/// Okunamayan ikonlar bir süre sonra yeniden denenir.
+const TIMER_ICON_RETRY: usize = 8;
+const ICON_TRIES: u8 = 4;
 
 // Ölçüler (DIP). Simge boyu ayardan gelir.
 const GAP: f32 = 6.0;
@@ -386,6 +389,8 @@ struct Dock {
     icons: HashMap<String, Option<ID2D1Bitmap>>,
     /// Arka planda yüklenen ikonlar ve yükleme kuşağı (boyut değişince eski sonuçlar atılır).
     loading: HashSet<String>,
+    /// Okunamayan ikonlar: kaç kez denendi (açılışta kabuk meşgulken boş dönebiliyor).
+    failed: HashMap<String, u8>,
     icon_gen: u32,
     dpi: f32,
     monitor: RECT,
@@ -807,18 +812,33 @@ impl Dock {
         }
         let r = apps::frame(fg);
         let m = self.monitor;
-        // Tam ekran: büyütülmemiş ama ekranın tamamını kaplayan pencere (oyun, F11, video).
-        // Büyütülmüş pencereler (Chromium/Electron'unki başlıksız da olsa) tam ekran sayılmaz.
+        // Tam ekran: ekranın tamamını kaplayan pencere (oyun, F11, video). Büyütülmüş pencereler
+        // de (görev çubuğu otomatik gizlide) ekranı kaplar; çerçevesi (boyutlandırma kenarı ya da
+        // başlığı) olanlar sayılmaz: Chromium/Electron'unki başlıksız görünse de çerçevelidir.
+        // Kenarsız büyütülmüş pencere (çoğu oyun, WinForms/WPF tam ekranı) tam ekrandır.
         let mut wr = RECT::default();
         unsafe {
             let _ = GetWindowRect(fg, &mut wr);
         }
-        if !unsafe { IsZoomed(fg).as_bool() }
-            && wr.left <= m.left
-            && wr.top <= m.top
-            && wr.right >= m.right
-            && wr.bottom >= m.bottom
-        {
+        let covers = wr.left <= m.left && wr.top <= m.top && wr.right >= m.right && wr.bottom >= m.bottom;
+        let framed = unsafe { GetWindowLongW(fg, GWL_STYLE) } as u32 & (WS_CAPTION.0 | WS_THICKFRAME.0) != 0;
+        if covers && (!unsafe { IsZoomed(fg).as_bool() } || !framed) {
+            return Cover::Full;
+        }
+        // Windows'un kendi algısı: DirectX'in özel tam ekranı, sunum modu. Explorer'a soruluyor;
+        // pencere sürüklenirken her konum değişiminde sorulmasın diye öndeki pencere başına
+        // bir saniye saklanır.
+        thread_local!(static QUNS: std::cell::Cell<Option<(isize, Instant, bool)>> = const { std::cell::Cell::new(None) });
+        let rude = match QUNS.get() {
+            Some((h, t, v)) if h == fg.0 as isize && t.elapsed() < Duration::from_secs(1) => v,
+            _ => {
+                use windows::Win32::UI::Shell::*;
+                let v = matches!(unsafe { SHQueryUserNotificationState() }, Ok(QUNS_RUNNING_D3D_FULL_SCREEN | QUNS_PRESENTATION_MODE));
+                QUNS.set(Some((fg.0 as isize, Instant::now(), v)));
+                v
+            }
+        };
+        if rude {
             return Cover::Full;
         }
         let d = self.screen_rect();
@@ -994,6 +1014,7 @@ impl Dock {
     fn clear_icons(&mut self) {
         self.icons.clear();
         self.loading.clear();
+        self.failed.clear();
         self.icon_gen = self.icon_gen.wrapping_add(1);
     }
 
@@ -1045,6 +1066,17 @@ impl Dock {
             return;
         }
         self.loading.remove(&d.id);
+        if d.pixels.is_none() {
+            let n = self.failed.entry(d.id.clone()).or_insert(0);
+            *n += 1;
+            if *n < ICON_TRIES {
+                crate::log!("hatter: ikon okunamadı ({}), yeniden denenecek", d.id);
+                unsafe {
+                    SetTimer(Some(self.hwnd), TIMER_ICON_RETRY, 1500 * *n as u32, None);
+                }
+                return;
+            }
+        }
         let Some(t) = &self.target else { return };
         let b = d.pixels.and_then(|(w, h, buf)| unsafe {
             let props = D2D1_BITMAP_PROPERTIES {
@@ -1758,6 +1790,12 @@ unsafe extern "system" fn proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> 
                         }
                     });
                 }
+                TIMER_ICON_RETRY => {
+                    unsafe {
+                        let _ = KillTimer(Some(hwnd), TIMER_ICON_RETRY);
+                    }
+                    with(|d| d.render());
+                }
                 TIMER_CLOCK => {
                     with(|d| {
                         let next = d.status.read_time();
@@ -2133,6 +2171,7 @@ fn create(settings: Settings, lines: Vec<String>) -> windows::core::Result<Dock>
                 surface: None,
                 icons: HashMap::new(),
                 loading: HashSet::new(),
+                failed: HashMap::new(),
                 icon_gen: 0,
                 dpi: 96.0,
                 monitor: RECT::default(),
