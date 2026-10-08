@@ -30,7 +30,7 @@ pub const ACCENT: u32 = 0xfb923c;
 
 const ROW: f32 = 68.0;
 /// Simge boyu kaydırıcısının satırı (anahtarlardan sonra).
-const SIZE_ROW: usize = 6;
+const SIZE_ROW: usize = 3;
 const SIZES: (u32, u32, u32) = (36, 64, 4);
 
 pub fn dir() -> PathBuf {
@@ -51,15 +51,10 @@ pub fn installed() -> bool {
 
 #[derive(Clone, Copy, PartialEq)]
 pub struct Settings {
-    /// İmlecin altındaki simgeler büyür.
-    pub magnify: bool,
     /// Pencere üstüne gelince saklan; kapalıysa ekranın altında yer ayırır.
     pub autohide: bool,
-    pub hide_icons: bool,
     /// Simge boyu (DIP).
     pub size: u32,
-    /// Simgeler sürüklenerek yer değiştirebilir.
-    pub reorder: bool,
     /// Etkin köşeler: sol üst görev görünümü, sağ alt masaüstü.
     pub corner_tl: bool,
     pub corner_br: bool,
@@ -67,16 +62,13 @@ pub struct Settings {
 
 impl Settings {
     fn load() -> Self {
-        let mut s = Settings { magnify: true, autohide: true, hide_icons: true, size: 48, reorder: true, corner_tl: true, corner_br: true };
+        let mut s = Settings { autohide: true, size: 48, corner_tl: true, corner_br: true };
         let text = std::fs::read_to_string(ini()).unwrap_or_default();
         for line in text.lines() {
             let Some((k, v)) = line.split_once('=') else { continue };
             let (k, v) = (k.trim(), v.trim());
             match k {
-                "buyut" => s.magnify = v == "1",
                 "gizle" => s.autohide = v == "1",
-                "simgeler" => s.hide_icons = v == "1",
-                "sirala" => s.reorder = v == "1",
                 "kose_sol_ust" => s.corner_tl = v == "1",
                 "kose_sag_alt" => s.corner_br = v == "1",
                 "boyut" => {
@@ -96,12 +88,9 @@ impl Settings {
         std::fs::write(
             ini(),
             format!(
-                "buyut={}\ngizle={}\nsimgeler={}\nboyut={}\nsirala={}\nkose_sol_ust={}\nkose_sag_alt={}\n",
-                b(self.magnify),
+                "gizle={}\nboyut={}\nkose_sol_ust={}\nkose_sag_alt={}\n",
                 b(self.autohide),
-                b(self.hide_icons),
                 self.size,
-                b(self.reorder),
                 b(self.corner_tl),
                 b(self.corner_br)
             ),
@@ -284,7 +273,7 @@ impl Hatter {
     pub fn start(hwnd: HWND) -> Self {
         let settings = Settings::load();
         shell_verbs(true);
-        taskbar::hide(settings.hide_icons);
+        taskbar::hide();
         dock::start(settings, load_pins());
         Self { hwnd, settings, hover: Hit::None, pressed: Hit::None, dragging: false, w: 0.0, h: 0.0, head_x: 0.0, head_r: 0.0 }
     }
@@ -314,14 +303,14 @@ impl Hatter {
     }
 
     fn hit(&self, g: &Gfx, x: f32, y: f32) -> Hit {
-        let [a, b] = Self::mode_rects(g, self.row(1));
+        let [a, b] = Self::mode_rects(g, self.row(0));
         if a.contains(x, y) {
             return Hit::Mode(false);
         }
         if b.contains(x, y) {
             return Hit::Mode(true);
         }
-        for i in [0, 2, 3, 4, 5] {
+        for i in [1, 2] {
             let r = self.row(i);
             if toggle_rect(r.r, r.cy()).contains(x, y) || (r.contains(x, y) && x > r.r - 120.0) {
                 return Hit::Toggle(i);
@@ -364,12 +353,7 @@ impl Hatter {
         status(g, self.head_x + 16.0, HEAD_CY, GREEN, head, MUTED, self.head_r - 8.0);
 
         g.clip(Rect::new(0.0, HEADER, self.w, self.h), || {
-            let rows: [(&str, &str, bool); 6] = [
-                (
-                    t!("Magnify", "Büyüt"),
-                    t!("Icons under the cursor grow", "İmlecin altındaki simgeler büyür"),
-                    s.magnify,
-                ),
+            let rows: [(&str, &str, bool); 3] = [
                 (
                     "Dock",
                     if s.autohide {
@@ -384,22 +368,6 @@ impl Hatter {
                         )
                     },
                     s.autohide,
-                ),
-                (
-                    t!("Hide desktop icons", "Masaüstü simgelerini gizle"),
-                    t!(
-                        "A clean desktop · the right-click menu on the desktop still works",
-                        "Boş bir masaüstü · masaüstüne sağ tık yine çalışır"
-                    ),
-                    s.hide_icons,
-                ),
-                (
-                    t!("Drag to rearrange", "Sürükleyerek sırala"),
-                    t!(
-                        "Drag an icon sideways to move it · a running app you drag stays in the dock",
-                        "Simgeyi yana sürükleyip yerini değiştir · sürüklenen açık uygulama dock'ta kalır"
-                    ),
-                    s.reorder,
                 ),
                 (
                     t!("Top-left corner", "Sol üst köşe"),
@@ -420,7 +388,7 @@ impl Hatter {
             ];
             for (i, (title, sub, on)) in rows.iter().enumerate() {
                 let r = self.row(i);
-                if i == 1 {
+                if i == 0 {
                     let seg = Self::mode_rects(g, r);
                     setting_row(g, r, title, sub, r.r - seg[0].l + 16.0);
                     g.fill(Rect::new(seg[0].l - 3.0, seg[0].t - 3.0, seg[1].r + 3.0, seg[1].b + 3.0), 6.0, HOVER);
@@ -451,30 +419,6 @@ impl Hatter {
             let v = (s.size - lo) as f32 / (hi - lo) as f32;
             slider(g, a, b, r.cy(), v, accent(), self.dragging || self.hover == Hit::Size);
             g.text(&s.size.to_string(), &g.f.small_right, Rect::new(b + 8.0, r.t, r.r, r.b), MUTED);
-
-            let t = self.row(SIZE_ROW + 1).t + 18.0;
-            let tips = [
-                t!(
-                    "Click: open, bring to front, minimize · hover: live previews of its windows",
-                    "Tık: aç, öne getir, küçült · üstünde dur: pencerelerinin canlı önizlemesi"
-                ),
-                t!(
-                    "Right-click: keep in dock or remove, close · middle-click: a new window",
-                    "Sağ tık: dock'ta tut ya da kaldır, kapat · orta tık: yeni pencere"
-                ),
-                t!(
-                    "Win+1…9 opens the apps in dock order · \"Pin to dock\" is in Explorer's right-click menu",
-                    "Win+1…9 uygulamaları dock sırasıyla açar · \"Dock'a sabitle\" Gezgin'in sağ tık menüsünde"
-                ),
-                t!(
-                    "The Windows taskbar comes back when the dock is removed or hive closes",
-                    "Dock kaldırılınca ya da hive kapanınca Windows görev çubuğu geri gelir"
-                ),
-            ];
-            for (i, tip) in tips.iter().enumerate() {
-                let y = t + i as f32 * 22.0;
-                g.text(tip, &g.f.small, Rect::new(PAD, y, self.w - PAD, y + 20.0), if i == 3 { FAINT } else { MUTED });
-            }
         });
     }
 }
@@ -538,12 +482,8 @@ impl ToolPage for Hatter {
         if let Hit::Toggle(i) = pressed {
             let s = &mut self.settings;
             match i {
-                0 => s.magnify = !s.magnify,
-                1 => s.autohide = !s.autohide,
-                3 => s.reorder = !s.reorder,
-                4 => s.corner_tl = !s.corner_tl,
-                5 => s.corner_br = !s.corner_br,
-                _ => s.hide_icons = !s.hide_icons,
+                1 => s.corner_tl = !s.corner_tl,
+                _ => s.corner_br = !s.corner_br,
             }
             self.commit();
         }

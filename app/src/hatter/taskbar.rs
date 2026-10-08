@@ -1,13 +1,12 @@
-//! Windows'un görev çubuğunu ve masaüstü simgelerini gizler, bırakırken eski haline getirir.
+//! Windows'un görev çubuğunu gizler, bırakırken eski haline getirir.
 //!
 //! Görev çubuğu iki adımda kaybolur: otomatik gizlemeye alınır (pencereler ekranın altına
 //! kadar uzansın) ve penceresi saklanır (fare alta değince çıkmasın). Gizleme kalıcı bir ayar
 //! olduğu için ilk değiştirmeden önceki hali `geri.ini`'ye yazılır: hive çökse ya da bilgisayar
 //! kapansa da bir sonraki açılışta ve kaldırırken doğru hale dönülür. Pencereyi saklamak kalıcı
 //! değildir; Explorer yeniden başlarsa çubuk geri gelir, dock onu yeniden saklar.
-//!
-//! Masaüstü simgeleri, masaüstünün sağ tık menüsündeki "Masaüstü simgelerini göster" ile aynı
-//! komutla açılıp kapanır (Explorer ayarı kendisi kaydeder).
+//! Masaüstü simgelerine dokunulmaz (masaüstünün sağ tık menüsünden açılıp kapanır); eski
+//! sürümlerin `geri.ini`'ye yazdığı `simgeler_gizli` satırı yok sayılır.
 
 use std::path::PathBuf;
 
@@ -85,54 +84,6 @@ fn set_align(v: Option<u32>) {
     }
 }
 
-fn icons_hidden() -> bool {
-    let mut v = 0u32;
-    let mut len = 4u32;
-    unsafe {
-        RegGetValueW(
-            HKEY_CURRENT_USER,
-            w!(r"Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced"),
-            w!("HideIcons"),
-            RRF_RT_REG_DWORD,
-            None,
-            Some(&mut v as *mut _ as _),
-            Some(&mut len),
-        )
-        .is_ok()
-            && v != 0
-    }
-}
-
-/// Masaüstünün simge görünümü: Progman'ın ya da (duvar kâğıdı motoru varken) bir WorkerW'nin içinde.
-fn defview() -> Option<HWND> {
-    unsafe extern "system" fn each(hwnd: HWND, lp: LPARAM) -> windows::core::BOOL {
-        let found = unsafe { &mut *(lp.0 as *mut Option<HWND>) };
-        if let Ok(v) = unsafe { FindWindowExW(Some(hwnd), None, w!("SHELLDLL_DefView"), PCWSTR::null()) } {
-            *found = Some(v);
-            return false.into();
-        }
-        true.into()
-    }
-    let mut found = None;
-    unsafe {
-        let _ = EnumWindows(Some(each), LPARAM(&mut found as *mut _ as isize));
-    }
-    found
-}
-
-/// Masaüstü simgelerini gizler ya da gösterir.
-pub fn set_icons_hidden(hide: bool) {
-    if icons_hidden() == hide {
-        return;
-    }
-    if let Some(v) = defview() {
-        unsafe {
-            // "Masaüstü simgelerini göster" komutu.
-            let _ = SendMessageTimeoutW(v, WM_COMMAND, WPARAM(0x7402), LPARAM(0), SMTO_ABORTIFHUNG, 1000, None);
-        }
-    }
-}
-
 /// Değiştirmeden önceki hal yazılır: her ayar, dosyada yoksa (henüz değiştirilmeden) bir kez.
 /// Başlat hizası hive kapanınca değil, yalnızca kaldırınca geri alındığından o satır dosyada
 /// kalabilir; diğerleri ondan bağımsız eklenir.
@@ -142,9 +93,6 @@ fn save_state() {
     let mut add = String::new();
     if !has("otomatik_gizle") {
         add += &format!("otomatik_gizle={}\n", appbar(None) as u8);
-    }
-    if !has("simgeler_gizli") {
-        add += &format!("simgeler_gizli={}\n", icons_hidden() as u8);
     }
     if !has("hizalama") {
         add += &format!("hizalama={}\n", dword(w!("TaskbarAl")).map_or("yok".to_string(), |v| v.to_string()));
@@ -187,9 +135,8 @@ fn restart_explorer(wait: bool) {
     }
 }
 
-/// Görev çubuğunu gizler, masaüstü simgelerini ayara göre ayarlar. Explorer yeniden başlayınca
-/// da çağrılır.
-pub fn hide(icons: bool) {
+/// Görev çubuğunu gizler. Explorer yeniden başlayınca da çağrılır.
+pub fn hide() {
     save_state();
     if !appbar(None) {
         appbar(Some(true));
@@ -199,7 +146,6 @@ pub fn hide(icons: bool) {
             let _ = ShowWindow(t, SW_HIDE);
         }
     }
-    set_icons_hidden(icons);
     // Başlat menüsü dock'un üstünden, ortadan açılsın. Explorer hizayı yalnızca açılışta
     // okuduğundan değişince bir kez yeniden başlatılır (kurulumda).
     if dword(w!("TaskbarAl")) != Some(1) {
@@ -247,9 +193,6 @@ pub fn restore(full: bool) {
     let get = |k: &str| text.lines().find_map(|l| l.strip_prefix(k)?.strip_prefix('=')).map(|v| v.trim() == "1");
     if let Some(on) = get("otomatik_gizle") {
         appbar(Some(on));
-    }
-    if let Some(hidden) = get("simgeler_gizli") {
-        set_icons_hidden(hidden);
     }
     let align = text.lines().find(|l| l.starts_with("hizalama=")).map(str::to_string);
     if full {

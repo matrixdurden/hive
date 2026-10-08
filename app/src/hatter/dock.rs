@@ -445,7 +445,7 @@ impl Dock {
     }
 
     fn max_mag(&self) -> f32 {
-        if self.settings.magnify { MAG } else { 1.0 }
+        MAG
     }
 
     fn pill_h(&self) -> f32 {
@@ -460,7 +460,7 @@ impl Dock {
     fn size_dip(&self) -> (f32, f32) {
         let icon = self.icon_size();
         let base = self.base_width();
-        let extra = if self.settings.magnify { icon * (MAG - 1.0) * REACH } else { 0.0 };
+        let extra = icon * (MAG - 1.0) * REACH;
         let w = base + 2.0 * extra + 24.0;
         let h = MARGIN + PAD_B + icon * self.max_mag() + LABEL_GAP + LABEL_H + 6.0;
         (w.max(160.0), h)
@@ -951,7 +951,7 @@ impl Dock {
     }
 
     fn needs_anim(&self) -> bool {
-        let mag = if self.settings.magnify && self.over_items { 1.0 } else { 0.0 };
+        let mag = if self.over_items { 1.0 } else { 0.0 };
         self.dirty || self.shown != self.target_shown() || self.mag != mag || self.launching()
     }
 
@@ -961,7 +961,7 @@ impl Dock {
         self.tick = now;
         let up = self.target_shown() > self.shown;
         self.shown = approach(self.shown, self.target_shown(), dt, if up { 0.055 } else { 0.07 });
-        let mag = if self.settings.magnify && self.over_items { 1.0 } else { 0.0 };
+        let mag = if self.over_items { 1.0 } else { 0.0 };
         self.mag = approach(self.mag, mag, dt, 0.06);
         let items = &self.items;
         self.launched
@@ -1655,11 +1655,8 @@ impl Dock {
 
     fn apply(&mut self, s: Settings) {
         let old = std::mem::replace(&mut self.settings, s);
-        if old.size != s.size || old.magnify != s.magnify {
+        if old.size != s.size {
             self.clear_icons();
-        }
-        if old.hide_icons != s.hide_icons {
-            taskbar::set_icons_hidden(s.hide_icons);
         }
         self.set_appbar(!s.autohide);
         super::keys::set_corners(s.corner_tl, s.corner_br);
@@ -1874,7 +1871,7 @@ unsafe extern "system" fn proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> 
                 // Tıklamak önizlemeyi kapatır (Windows görev çubuğundaki gibi).
                 d.dismiss_popups();
                 d.pressed = d.hover;
-                if let (Some(i), true, Some((x, _))) = (d.hover, d.settings.reorder, d.mouse) {
+                if let (Some(i), Some((x, _))) = (d.hover, d.mouse) {
                     d.drag = Some(Drag { item: i, start_x: x, x, active: false, target: i });
                     unsafe {
                         SetCapture(hwnd);
@@ -2087,7 +2084,7 @@ unsafe extern "system" fn proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> 
             if msg != 0 && msg == created {
                 // Explorer yeniden başladı: görev çubuğu geri geldi, appbar kaydı gitti.
                 with(|d| {
-                    taskbar::hide(d.settings.hide_icons);
+                    taskbar::hide();
                     unsafe {
                         SetTimer(Some(d.hwnd), TIMER_TRAY, 1500, None);
                     }
