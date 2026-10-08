@@ -34,8 +34,9 @@ const PKEY_AUMID: PROPERTYKEY =
 /// ikonu ve adı pencerenin kendisinden gelir (Minecraft'ın penceresi javaw.exe'nindir).
 const HOSTS: [&str; 5] = ["javaw.exe", "java.exe", "pythonw.exe", "python.exe", "applicationframehost.exe"];
 
-/// Görev çubuğunun da göstermediği kabuk pencereleri.
-const SHELL_CLASSES: [&str; 5] = ["Progman", "WorkerW", "Shell_TrayWnd", "Shell_SecondaryTrayWnd", "hive-hatter"];
+/// Görev çubuğunun da göstermediği kabuk pencereleri: masaüstü, görev çubuğu, dock ve görev
+/// görünümü (Win+Tab; ekranı kaplar ama tam ekran uygulama değildir).
+const SHELL_CLASSES: [&str; 6] = ["Progman", "WorkerW", "Shell_TrayWnd", "Shell_SecondaryTrayWnd", "hive-hatter", "XamlExplorerHostIslandWindow"];
 
 pub fn class_name(hwnd: HWND) -> String {
     let mut buf = [0u16; 128];

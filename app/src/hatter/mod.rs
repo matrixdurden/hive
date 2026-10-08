@@ -29,6 +29,8 @@ use crate::util;
 pub const ACCENT: u32 = 0xfb923c;
 
 const ROW: f32 = 68.0;
+/// Simge boyu kaydırıcısının satırı (anahtarlardan sonra).
+const SIZE_ROW: usize = 6;
 const SIZES: (u32, u32, u32) = (36, 64, 4);
 
 pub fn dir() -> PathBuf {
@@ -58,11 +60,14 @@ pub struct Settings {
     pub size: u32,
     /// Simgeler sürüklenerek yer değiştirebilir.
     pub reorder: bool,
+    /// Etkin köşeler: sol üst görev görünümü, sağ alt masaüstü.
+    pub corner_tl: bool,
+    pub corner_br: bool,
 }
 
 impl Settings {
     fn load() -> Self {
-        let mut s = Settings { magnify: true, autohide: true, hide_icons: true, size: 48, reorder: true };
+        let mut s = Settings { magnify: true, autohide: true, hide_icons: true, size: 48, reorder: true, corner_tl: true, corner_br: true };
         let text = std::fs::read_to_string(ini()).unwrap_or_default();
         for line in text.lines() {
             let Some((k, v)) = line.split_once('=') else { continue };
@@ -72,6 +77,8 @@ impl Settings {
                 "gizle" => s.autohide = v == "1",
                 "simgeler" => s.hide_icons = v == "1",
                 "sirala" => s.reorder = v == "1",
+                "kose_sol_ust" => s.corner_tl = v == "1",
+                "kose_sag_alt" => s.corner_br = v == "1",
                 "boyut" => {
                     if let Ok(n) = v.parse::<u32>() {
                         s.size = n.clamp(SIZES.0, SIZES.1);
@@ -89,12 +96,14 @@ impl Settings {
         std::fs::write(
             ini(),
             format!(
-                "buyut={}\ngizle={}\nsimgeler={}\nboyut={}\nsirala={}\n",
+                "buyut={}\ngizle={}\nsimgeler={}\nboyut={}\nsirala={}\nkose_sol_ust={}\nkose_sag_alt={}\n",
                 b(self.magnify),
                 b(self.autohide),
                 b(self.hide_icons),
                 self.size,
-                b(self.reorder)
+                b(self.reorder),
+                b(self.corner_tl),
+                b(self.corner_br)
             ),
         )
     }
@@ -292,7 +301,7 @@ impl Hatter {
     }
 
     fn slider_x(&self) -> (f32, f32) {
-        let r = self.row(4);
+        let r = self.row(SIZE_ROW);
         (r.r - 220.0, r.r - 52.0)
     }
 
@@ -312,13 +321,13 @@ impl Hatter {
         if b.contains(x, y) {
             return Hit::Mode(true);
         }
-        for i in [0, 2, 3] {
+        for i in [0, 2, 3, 4, 5] {
             let r = self.row(i);
             if toggle_rect(r.r, r.cy()).contains(x, y) || (r.contains(x, y) && x > r.r - 120.0) {
                 return Hit::Toggle(i);
             }
         }
-        let r = self.row(4);
+        let r = self.row(SIZE_ROW);
         let (a, b) = self.slider_x();
         if Rect::new(a - 10.0, r.t + 14.0, b + 10.0, r.b - 14.0).contains(x, y) {
             return Hit::Size;
@@ -355,7 +364,7 @@ impl Hatter {
         status(g, self.head_x + 16.0, HEAD_CY, GREEN, head, MUTED, self.head_r - 8.0);
 
         g.clip(Rect::new(0.0, HEADER, self.w, self.h), || {
-            let rows: [(&str, &str, bool); 4] = [
+            let rows: [(&str, &str, bool); 6] = [
                 (
                     t!("Magnify", "Büyüt"),
                     t!("Icons under the cursor grow", "İmlecin altındaki simgeler büyür"),
@@ -392,6 +401,22 @@ impl Hatter {
                     ),
                     s.reorder,
                 ),
+                (
+                    t!("Top-left corner", "Sol üst köşe"),
+                    t!(
+                        "Push the cursor into the corner to see all windows (Win+Tab)",
+                        "İmleci köşeye götürünce bütün pencereler görünür (Win+Tab)"
+                    ),
+                    s.corner_tl,
+                ),
+                (
+                    t!("Bottom-right corner", "Sağ alt köşe"),
+                    t!(
+                        "Push the cursor into the corner to show the desktop, again to come back (Win+D)",
+                        "İmleci köşeye götürünce masaüstü, tekrar götürünce geri döner (Win+D)"
+                    ),
+                    s.corner_br,
+                ),
             ];
             for (i, (title, sub, on)) in rows.iter().enumerate() {
                 let r = self.row(i);
@@ -419,7 +444,7 @@ impl Hatter {
                 toggle(g, toggle_rect(r.r, r.cy()), *on, accent(), true);
             }
 
-            let r = self.row(4);
+            let r = self.row(SIZE_ROW);
             setting_row(g, r, t!("Icon size", "Simge boyu"), "", 240.0);
             let (a, b) = self.slider_x();
             let (lo, hi, _) = SIZES;
@@ -427,7 +452,7 @@ impl Hatter {
             slider(g, a, b, r.cy(), v, accent(), self.dragging || self.hover == Hit::Size);
             g.text(&s.size.to_string(), &g.f.small_right, Rect::new(b + 8.0, r.t, r.r, r.b), MUTED);
 
-            let t = self.row(5).t + 18.0;
+            let t = self.row(SIZE_ROW + 1).t + 18.0;
             let tips = [
                 t!(
                     "Click: open, bring to front, minimize · hover: live previews of its windows",
@@ -516,6 +541,8 @@ impl ToolPage for Hatter {
                 0 => s.magnify = !s.magnify,
                 1 => s.autohide = !s.autohide,
                 3 => s.reorder = !s.reorder,
+                4 => s.corner_tl = !s.corner_tl,
+                5 => s.corner_br = !s.corner_br,
                 _ => s.hide_icons = !s.hide_icons,
             }
             self.commit();

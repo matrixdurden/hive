@@ -803,6 +803,12 @@ impl Dock {
     }
 
     fn compute_cover(&self) -> Cover {
+        let c = self.cover_now();
+        super::keys::FULLSCREEN.store(c == Cover::Full, std::sync::atomic::Ordering::Relaxed);
+        c
+    }
+
+    fn cover_now(&self) -> Cover {
         let fg = unsafe { GetForegroundWindow() };
         if fg.is_invalid() || fg == self.hwnd || apps::is_shell_window(fg) || unsafe { IsIconic(fg).as_bool() } {
             return Cover::Clear;
@@ -1656,6 +1662,7 @@ impl Dock {
             taskbar::set_icons_hidden(s.hide_icons);
         }
         self.set_appbar(!s.autohide);
+        super::keys::set_corners(s.corner_tl, s.corner_br);
         self.cover = self.compute_cover();
         self.relayout();
         self.kick();
@@ -2227,6 +2234,7 @@ pub fn start(settings: Settings, lines: Vec<String>) {
     dock.live = true;
     dock.status = Status::new(dock.hwnd, true);
     super::keys::register(dock.hwnd);
+    super::keys::set_corners(settings.corner_tl, settings.corner_br);
     super::toasts::start(dock.hwnd);
     HWND_DOCK.set(dock.hwnd.0 as isize);
     unsafe {
