@@ -6,22 +6,22 @@
 mod i18n;
 
 mod app;
-mod cheshire;
+mod wallpaper;
 mod config;
-mod dormouse;
+mod battery;
 mod gfx;
-mod hatter;
+mod dock;
 mod music;
 mod log;
-mod lyrebird;
+mod soundboard;
 mod myinstants;
 mod net;
 mod osd;
-mod rabbithole;
+mod tunnel;
 mod shell;
 mod tools;
 mod tray;
-mod tweedle;
+mod audio;
 mod ui;
 mod util;
 
@@ -33,16 +33,16 @@ use windows::core::w;
 
 // kullanım (Türkçe adlar da geçer: --sekme, --gizli, --kur, --kaldir, --kalinti):
 //   hive                  pencereyi aç (son sekmede)
-//   hive --tab <ad>       o sekmede aç: lyrebird, cheshire, rabbithole, tools, settings
+//   hive --tab <ad>       o sekmede aç: soundboard, wallpaper, tunnel, tools, settings
 //   hive --hidden         tepside başlat
 //   hive --install        kendini %LOCALAPPDATA%\Programs\hive'a kur ve başlat (güncelleme de)
 //   hive --uninstall      hive'ı ve kurulu araçları iz bırakmadan kaldır
 //   hive --leftovers      kurulu olmayan araçlardan kalan iz var mı, listele
-//   hive --lyrebird-test  her mikrofona test sesi gönder, geri geliyor mu ölç
-//   hive --dormouse-test  dormouse'un okuduğu pil, ekran ve ekran kartı bilgilerini yazdır
-//   hive --tweedle-test   tweedle'ın gördüğü ses çıkışlarını ve medya oturumlarını yazdır
-//   hive --hatter-test    hatter'ın gördüğü pencereleri ve dock'taki öğeleri yazdır
-//   hive --hatter-pin <yol>  dock'a sabitle (sağ tık menüsünden)
+//   hive --soundboard-test  her mikrofona test sesi gönder, geri geliyor mu ölç
+//   hive --battery-test  battery'un okuduğu pil, ekran ve ekran kartı bilgilerini yazdır
+//   hive --audio-test   audio'ın gördüğü ses çıkışlarını ve medya oturumlarını yazdır
+//   hive --dock-test    dock'ın gördüğü pencereleri ve dock'taki öğeleri yazdır
+//   hive --dock-pin <yol>  dock'a sabitle (sağ tık menüsünden)
 //   hive --music-test [klasör]  medya oturumlarını yazdır; klasöre widget önizlemesi çiz
 
 /// Bayrak İngilizce ya da Türkçe adıyla verilmiş mi.
@@ -51,15 +51,15 @@ fn flag(args: &[String], en: &str, tr: &str) -> bool {
 }
 
 fn main() {
-    // lyrebird motoru da hive'ın log dosyasına yazsın.
-    lyrebird_motor::log::set_sink(|args| log::write(args));
+    // soundboard motoru da hive'ın log dosyasına yazsın.
+    soundboard_engine::log::set_sink(|args| log::write(args));
     let args: Vec<String> = std::env::args().skip(1).collect();
     i18n::set_turkish(config::Config::load().turkish);
     // Araçların yükseltilmiş kurulum adımları ve komut satırı araçları: pencere açmadan çıkar.
     match args.first().map(String::as_str) {
-        Some(lyrebird::ARG_INSTALL) | Some(lyrebird::ARG_UNINSTALL) => {
+        Some(soundboard::ARG_INSTALL) | Some(soundboard::ARG_UNINSTALL) => {
             log::init("kurulum.log");
-            std::process::exit(lyrebird::setup(args[0] == lyrebird::ARG_INSTALL));
+            std::process::exit(soundboard::setup(args[0] == soundboard::ARG_INSTALL));
         }
         Some("--install" | "--kur") => {
             log::init("kurulum.log");
@@ -95,28 +95,28 @@ fn main() {
             }
             std::process::exit(if clean { 0 } else { 1 });
         }
-        Some("--dormouse-test" | "--dormouse-dene") => {
+        Some("--battery-test" | "--battery-dene") => {
             unsafe {
                 let _ = AttachConsole(ATTACH_PARENT_PROCESS);
                 let _ = windows::Win32::System::Com::CoInitializeEx(None, windows::Win32::System::Com::COINIT_APARTMENTTHREADED);
             }
-            print!("{}", dormouse::probe());
+            print!("{}", battery::probe());
             std::process::exit(0);
         }
-        Some("--tweedle-test" | "--tweedle-dene") => {
+        Some("--audio-test" | "--audio-dene") => {
             unsafe {
                 let _ = AttachConsole(ATTACH_PARENT_PROCESS);
                 let _ = windows::Win32::System::Com::CoInitializeEx(None, windows::Win32::System::Com::COINIT_MULTITHREADED);
             }
-            print!("{}", tweedle::probe());
+            print!("{}", audio::probe());
             std::process::exit(0);
         }
-        Some("--hatter-test" | "--hatter-dene") => {
+        Some("--dock-test" | "--dock-dene") => {
             unsafe {
                 let _ = AttachConsole(ATTACH_PARENT_PROCESS);
                 let _ = windows::Win32::System::Com::CoInitializeEx(None, windows::Win32::System::Com::COINIT_APARTMENTTHREADED);
             }
-            print!("{}", hatter::probe());
+            print!("{}", dock::probe());
             std::process::exit(0);
         }
         Some("--music-test" | "--muzik-dene") => {
@@ -128,18 +128,18 @@ fn main() {
             print!("{}", music::probe(args.get(1).map(String::as_str)));
             std::process::exit(0);
         }
-        Some("--hatter-pin") => {
+        Some("--dock-pin" | "--hatter-pin") => {
             unsafe {
                 let _ = windows::Win32::System::Com::CoInitializeEx(None, windows::Win32::System::Com::COINIT_APARTMENTTHREADED);
             }
-            hatter::pin_from_cli(args.get(1).map(String::as_str).unwrap_or(""));
+            dock::pin_from_cli(args.get(1).map(String::as_str).unwrap_or(""));
             std::process::exit(0);
         }
-        Some("--lyrebird-test" | "--lyrebird-dene") => {
+        Some("--soundboard-test" | "--soundboard-dene") => {
             unsafe {
                 let _ = AttachConsole(ATTACH_PARENT_PROCESS);
             }
-            std::process::exit(match lyrebird::probe::run() {
+            std::process::exit(match soundboard::probe::run() {
                 Ok(true) => 0,
                 Ok(false) => 1,
                 Err(e) => {

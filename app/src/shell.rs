@@ -298,7 +298,7 @@ pub fn remove_self_later() {
 }
 
 /// Çalışan hive'ı kapatır: önce kibarca (WM_EXIT), 5 saniyede kapanmazsa (eski sürüm mesajı
-/// tanımıyorsa) süreci sonlandırır. cheshire motoru hive'ın gittiğini görüp kendisi kapanır.
+/// tanımıyorsa) süreci sonlandırır. wallpaper motoru hive'ın gittiğini görüp kendisi kapanır.
 fn stop_running() {
     use windows::Win32::Foundation::{CloseHandle, LPARAM, WPARAM};
     use windows::Win32::System::Threading::{OpenProcess, PROCESS_TERMINATE, TerminateProcess};

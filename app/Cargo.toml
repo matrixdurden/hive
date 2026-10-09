@@ -2,15 +2,15 @@
 name = "hive"
 version = "0.3.0"
 edition = "2024"
-description = "hive: matrixdurden'in Windows araçları tek yerde (lyrebird, cheshire, rabbithole, dormouse, tweedle, hatter, mockturtle)"
+description = "hive: matrixdurden'in Windows araçları tek yerde: soundboard, duvar kâğıdı, tünel, pil, ses aygıtları, dock, müzik"
 license = "MIT"
 
 [dependencies]
 windows-numerics = "0.3"
-# tweedle'ın ses olayı dinleyicisi (#[implement]).
+# Ses aygıtları aracının ses olayı dinleyicisi (#[implement]).
 windows-core = "0.62"
-# lyrebird motoru (../lyrebird): hive sürecinde çalışır, sayfası src/lyrebird.rs.
-lyrebird_motor = { package = "lyrebird", path = "../lyrebird" }
+# soundboard motoru (../soundboard): hive sürecinde çalışır, sayfası src/soundboard.rs.
+soundboard_engine = { package = "soundboard", path = "../soundboard" }
 
 [dependencies.windows]
 version = "0.62"

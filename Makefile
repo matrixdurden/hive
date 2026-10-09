@@ -6,10 +6,10 @@ VERSION          := $(shell grep -m1 '^version' app/Cargo.toml | cut -d'"' -f2)
 
 .PHONY: build install stop log ikon release
 
-# hive.exe'nin içine gömülenler önce: lyrebird'ün mikrofon efekti DLL'i ve cheshire motoru.
+# hive.exe'nin içine gömülenler önce: soundboard'un mikrofon efekti DLL'i ve duvar kâğıdı motoru.
 build:
-	cargo build --release -p lyrebird-apo
-	cargo build --release -p cheshire
+	cargo build --release -p soundboard-apo
+	cargo build --release -p wallpaper
 	cargo build --release -p hive
 
 # Windows tarafına kopyala ve başlat (çalışan kopya kapatılır).

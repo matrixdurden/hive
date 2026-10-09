@@ -1,13 +1,13 @@
 //! Araç kataloğu ve eklenti gibi kurma / kaldırma. Kurulum işleri arka plan iş parçacığında
 //! çalışır (yönetici izni, indirme, motoru durdurma beklemesi arayüzü kilitlemesin).
 //!
-//! - lyrebird: motoru hive'ın içinde; kurmak mikrofon efektini bağlamaktır (yönetici).
-//! - cheshire: motoru hive'ın içinde gömülü; kurmak exe'yi yazmaktır.
-//! - rabbithole: GitHub'daki son sürüm indirilir, SHA-256'sı doğrulanır, kendi kurulumu çalışır.
-//! - dormouse: motoru hive'ın içinde; kurmak mevcut güç ayarlarını yedekleyip uygulamaların GPU tercihini yazmaktır.
-//! - tweedle: motoru hive'ın içinde; kurmak yalnızca kısayol dosyasını yazmaktır.
-//! - hatter: motoru (dock) hive'ın içinde; kurmak ayarları ve dock'un ilk listesini yazmaktır.
-//! - mockturtle: motoru (widget) hive'ın içinde; kurmak yalnızca ayar dosyasını yazmaktır.
+//! - soundboard: motoru hive'ın içinde; kurmak mikrofon efektini bağlamaktır (yönetici).
+//! - wallpaper: motoru hive'ın içinde gömülü; kurmak exe'yi yazmaktır.
+//! - tunnel: GitHub'daki son sürüm indirilir, SHA-256'sı doğrulanır, kendi kurulumu çalışır.
+//! - battery: motoru hive'ın içinde; kurmak mevcut güç ayarlarını yedekleyip uygulamaların GPU tercihini yazmaktır.
+//! - audio: motoru hive'ın içinde; kurmak yalnızca kısayol dosyasını yazmaktır.
+//! - dock: motoru (dock) hive'ın içinde; kurmak ayarları ve dock'un ilk listesini yazmaktır.
+//! - music: motoru (widget) hive'ın içinde; kurmak yalnızca ayar dosyasını yazmaktır.
 
 use std::os::windows::process::CommandExt;
 use std::process::{Command, Stdio};
@@ -20,14 +20,14 @@ use windows::Win32::System::Threading::{OpenProcess, PROCESS_TERMINATE, Terminat
 use windows::Win32::UI::WindowsAndMessaging::{FindWindowW, GetWindowThreadProcessId};
 use windows::core::{PCWSTR, w};
 
-use crate::{cheshire, dormouse, hatter, log, lyrebird, music, net, rabbithole, shell, tweedle, util};
+use crate::{wallpaper, battery, dock, log, soundboard, music, net, tunnel, shell, audio, util};
 
-pub const LYREBIRD: usize = 0;
-pub const CHESHIRE: usize = 1;
-pub const RABBITHOLE: usize = 2;
-pub const DORMOUSE: usize = 3;
-pub const TWEEDLE: usize = 4;
-pub const HATTER: usize = 5;
+pub const SOUNDBOARD: usize = 0;
+pub const WALLPAPER: usize = 1;
+pub const TUNNEL: usize = 2;
+pub const BATTERY: usize = 3;
+pub const AUDIO: usize = 4;
+pub const DOCK: usize = 5;
 pub const MUSIC: usize = 6;
 pub const COUNT: usize = 7;
 
@@ -35,7 +35,6 @@ pub struct Tool {
     pub id: &'static str,
     /// Görünen ad (İngilizce, Türkçe): aracın ne işe yaradığı. Kod adı `id`'de kalır.
     pub names: [&'static str; 2],
-    pub accent: u32,
     /// [İngilizce, Türkçe]; `tagline()` seçili dildekini verir.
     tagline: [&'static str; 2],
     /// Araçlar sayfasında kurulumun ne getirdiği: [İngilizce, Türkçe].
@@ -73,66 +72,78 @@ macro_rules! icons {
 
 pub static TOOLS: [Tool; COUNT] = [
     Tool {
-        id: "lyrebird",
+        id: "soundboard",
         names: ["Soundboard", "Soundboard"],
-        accent: 0xfbbf24,
         tagline: ["A soundboard that plays straight into your microphone", "Sesi doğrudan mikrofona veren soundboard"],
         note: ["Adds an effect to your microphone · needs admin", "Mikrofonuna bir ses efekti takar · yönetici izni ister"],
-        icons: icons!("lyrebird"),
+        icons: icons!("soundboard"),
     },
     Tool {
-        id: "cheshire",
+        id: "wallpaper",
         names: ["Wallpaper", "Duvar kâğıdı"],
-        accent: 0xf472b6,
         tagline: ["Live wallpapers drawn by your GPU", "GPU ile çizilen canlı duvar kâğıdı"],
-        note: ["Comes with hive · no internet needed", "hive ile birlikte gelir · internet gerekmez"],
-        icons: icons!("cheshire"),
+        note: ["No internet needed", "İnternet gerekmez"],
+        icons: icons!("wallpaper"),
     },
     Tool {
-        id: "rabbithole",
+        id: "tunnel",
         names: ["Tunnel", "Tünel"],
-        accent: 0xa78bfa,
         tagline: ["Tunnels your whole computer past network blocks", "Bütün bilgisayarı ağ engellerinin ötesine geçiren tünel"],
-        note: ["Downloaded from GitHub (~40 MB) · needs admin", "GitHub'dan indirilir (~40 MB) · yönetici izni ister"],
-        icons: icons!("rabbithole"),
+        note: ["Downloaded from GitHub when turned on (~40 MB) · needs admin", "Açınca GitHub'dan indirilir (~40 MB) · yönetici izni ister"],
+        icons: icons!("tunnel"),
     },
     Tool {
-        id: "dormouse",
+        id: "battery",
         names: ["Battery", "Pil"],
-        accent: 0x34d399,
         tagline: ["Three gears for your laptop's battery", "Dizüstünün pili için üç vites"],
-        note: ["Comes with hive · laptops only", "hive ile birlikte gelir · yalnızca dizüstü"],
-        icons: icons!("dormouse"),
+        note: ["Laptops only", "Yalnızca dizüstü"],
+        icons: icons!("battery"),
     },
     Tool {
-        id: "tweedle",
+        id: "audio",
         names: ["Audio devices", "Ses aygıtları"],
-        accent: 0x38bdf8,
         tagline: ["Audio outputs and inputs, one key away", "Ses çıkışları ve girişleri, tek tuş uzağında"],
-        note: ["Comes with hive · no internet needed", "hive ile birlikte gelir · internet gerekmez"],
-        icons: icons!("tweedle"),
+        note: ["No internet needed", "İnternet gerekmez"],
+        icons: icons!("audio"),
     },
     Tool {
-        id: "hatter",
+        id: "dock",
         names: ["Dock", "Dock"],
-        accent: hatter::ACCENT,
         tagline: ["A dock in place of the taskbar", "Görev çubuğunun yerine bir dock"],
-        note: ["Comes with hive · the taskbar comes back when removed", "hive ile birlikte gelir · kaldırınca görev çubuğu geri gelir"],
-        icons: icons!("hatter"),
+        note: ["Replaces the taskbar · turn it off and the taskbar is back", "Görev çubuğunun yerine geçer · kapatınca görev çubuğu geri gelir"],
+        icons: icons!("dock"),
     },
     Tool {
-        id: "mockturtle",
+        id: "music",
         names: ["Music widget", "Müzik widget'ı"],
-        accent: music::ACCENT,
-        tagline: ["What Spotify is playing, on a glass card on your desktop", "Spotify'da çalan, masaüstünde cam bir kartta"],
-        note: ["Comes with hive · no Spotify login needed", "hive ile birlikte gelir · Spotify'a giriş gerekmez"],
-        icons: icons!("mockturtle"),
+        tagline: ["What Spotify is playing, right next to the dock", "Spotify'da çalan, dock'un hemen yanında"],
+        note: ["No Spotify login needed", "Spotify'a giriş gerekmez"],
+        icons: icons!("music"),
     },
 ];
 
-/// Eski kod adlı veri klasörleri yeni adlarına taşınır (araçların ayarları kaybolmasın).
+/// Araçların eski kod adları ve bugünkü kimlikleri: kayıtlı sekme, eski kısayollar ve veri
+/// klasörleri bunlarla taşınır.
+const RENAMED: [(&str, &str); 7] = [
+    ("lyrebird", "soundboard"),
+    ("cheshire", "wallpaper"),
+    ("rabbithole", "tunnel"),
+    ("dormouse", "battery"),
+    ("tweedle", "audio"),
+    ("hatter", "dock"),
+    ("mockturtle", "music"),
+];
+
+/// Kimliği (ya da eski kod adı) bu olan araç.
+pub fn find(id: &str) -> Option<usize> {
+    let id = RENAMED.iter().find(|(old, _)| old.eq_ignore_ascii_case(id)).map_or(id, |(_, new)| new);
+    TOOLS.iter().position(|t| t.id.eq_ignore_ascii_case(id))
+}
+
+/// Eski kod adlı veri klasörleri yeni adlarına taşınır (araçların ayarları kaybolmasın), eski
+/// adlı kısayol simgeleri silinir (yenileri kısayollarla yazılır).
 pub fn migrate() {
-    for (old, new) in [("mockturtle", "music")] {
+    for (old, new) in RENAMED {
         let (o, n) = (util::data_dir().join(old), util::data_dir().join(new));
         if o.is_dir() && !n.exists() {
             match std::fs::rename(&o, &n) {
@@ -140,39 +151,56 @@ pub fn migrate() {
                 Err(e) => log!("{old} → {new} taşınamadı: {e}"),
             }
         }
+        let _ = std::fs::remove_file(util::data_dir().join("ikonlar").join(format!("{old}.ico")));
+    }
+}
+
+/// Aracın motorunu ve sayfasını başlatır (araç açıkken hive'ın açılışında ya da açılınca).
+pub fn start(i: usize, hwnd: windows::Win32::Foundation::HWND) -> Box<dyn crate::ui::ToolPage> {
+    match i {
+        SOUNDBOARD => {
+            retire_standalone_lyrebird();
+            Box::new(soundboard::Soundboard::start(hwnd))
+        }
+        WALLPAPER => Box::new(wallpaper::Wallpaper::start(hwnd)),
+        BATTERY => Box::new(battery::Battery::start(hwnd)),
+        AUDIO => Box::new(audio::Audio::start(hwnd)),
+        DOCK => Box::new(dock::Dock::start(hwnd)),
+        MUSIC => Box::new(music::Music::start(hwnd)),
+        _ => Box::new(tunnel::Tunnel::start(hwnd)),
     }
 }
 
 /// Araç bu bilgisayarda kurulu mu.
 pub fn installed(i: usize) -> bool {
     match i {
-        LYREBIRD => lyrebird::installed(),
-        CHESHIRE => cheshire::installed(),
-        DORMOUSE => dormouse::installed(),
-        TWEEDLE => tweedle::installed(),
-        HATTER => hatter::installed(),
+        SOUNDBOARD => soundboard::installed(),
+        WALLPAPER => wallpaper::installed(),
+        BATTERY => battery::installed(),
+        AUDIO => audio::installed(),
+        DOCK => dock::installed(),
         MUSIC => music::installed(),
-        _ => rabbithole::installed(),
+        _ => tunnel::installed(),
     }
 }
 
 /// Kurulum ya da kaldırma sırasında düğmede görünen yazı.
 pub fn busy_label(i: usize, install: bool) -> &'static str {
     match (i, install) {
-        (RABBITHOLE, true) => t!("Downloading…", "İndiriliyor…"),
-        (_, true) => t!("Installing…", "Kuruluyor…"),
-        _ => t!("Removing…", "Kaldırılıyor…"),
+        (TUNNEL, true) => t!("Downloading…", "İndiriliyor…"),
+        (_, true) => t!("Turning on…", "Açılıyor…"),
+        _ => t!("Turning off…", "Kapatılıyor…"),
     }
 }
 
 /// Arka planda çalışır. Kaldırma, aracın bıraktığı her izi silip denetlemeden başarılı sayılmaz.
 pub fn run(i: usize, install: bool) -> Result<(), String> {
     match (i, install) {
-        (LYREBIRD, true) => lyrebird_setup(true),
-        (CHESHIRE, true) => cheshire::install(),
-        (DORMOUSE, true) => dormouse::install(),
-        (TWEEDLE, true) => tweedle::install(),
-        (HATTER, true) => hatter::install(),
+        (SOUNDBOARD, true) => soundboard_setup(true),
+        (WALLPAPER, true) => wallpaper::install(),
+        (BATTERY, true) => battery::install(),
+        (AUDIO, true) => audio::install(),
+        (DOCK, true) => dock::install(),
         (MUSIC, true) => music::install(),
         (_, true) => rabbithole_install(),
         (_, false) => uninstall(i),
@@ -181,26 +209,26 @@ pub fn run(i: usize, install: bool) -> Result<(), String> {
 
 fn uninstall(i: usize) -> Result<(), String> {
     match i {
-        LYREBIRD => {
-            lyrebird_setup(false)?;
+        SOUNDBOARD => {
+            soundboard_setup(false)?;
             // Kullanıcı tarafı: ses listesi, eski tek başına sürüm, onun Windows ile başlaması.
-            let _ = std::fs::remove_dir_all(lyrebird::data_dir());
+            let _ = std::fs::remove_dir_all(soundboard::data_dir());
             let _ = std::fs::remove_dir_all(util::local_programs().join("lyrebird"));
             unsafe {
                 let _ = RegDeleteKeyValueW(HKEY_CURRENT_USER, w!(r"Software\Microsoft\Windows\CurrentVersion\Run"), w!("lyrebird"));
             }
         }
-        CHESHIRE => cheshire::uninstall()?,
-        DORMOUSE => dormouse::uninstall()?,
-        TWEEDLE => tweedle::uninstall()?,
-        HATTER => hatter::uninstall()?,
+        WALLPAPER => wallpaper::uninstall()?,
+        BATTERY => battery::uninstall()?,
+        AUDIO => audio::uninstall()?,
+        DOCK => dock::uninstall()?,
         MUSIC => music::uninstall()?,
         _ => {
-            rabbithole::run(&["remove"])?;
-            // Program Files'taki exe kendini silemez: rabbithole arkasında birkaç saniye içinde
+            tunnel::run(&["remove"])?;
+            // Program Files'taki exe kendini silemez: tunnel arkasında birkaç saniye içinde
             // klasörü silen bir komut bırakır.
             let start = Instant::now();
-            while rabbithole::install_dir().exists() && start.elapsed() < Duration::from_secs(40) {
+            while tunnel::install_dir().exists() && start.elapsed() < Duration::from_secs(40) {
                 std::thread::sleep(Duration::from_millis(500));
             }
         }
@@ -218,27 +246,27 @@ fn uninstall(i: usize) -> Result<(), String> {
 const RUN: &str = r"Software\Microsoft\Windows\CurrentVersion\Run";
 
 /// Aracın bu bilgisayarda bıraktığı her iz; kurulu değilken boş olmalı. COM başlatılmış iş
-/// parçacığında çağrılmalı (lyrebird mikrofonları dolaşır).
+/// parçacığında çağrılmalı (soundboard mikrofonları dolaşır).
 pub fn leftovers(i: usize) -> Vec<String> {
     let exists = |p: std::path::PathBuf| p.exists().then(|| p.display().to_string());
     let mut left = match i {
-        LYREBIRD => {
-            let mut l = lyrebird::install::leftovers();
-            l.extend([lyrebird::data_dir(), util::local_programs().join("lyrebird")].into_iter().filter_map(exists));
+        SOUNDBOARD => {
+            let mut l = soundboard::install::leftovers();
+            l.extend([soundboard::data_dir(), util::local_programs().join("lyrebird")].into_iter().filter_map(exists));
             if util::reg_value_exists(HKEY_CURRENT_USER, RUN, "lyrebird") {
                 l.push(format!(r"HKCU\{RUN}\lyrebird"));
             }
             l
         }
-        CHESHIRE => cheshire::leftovers(),
-        DORMOUSE => dormouse::leftovers(),
-        TWEEDLE => tweedle::leftovers(),
-        HATTER => hatter::leftovers(),
+        WALLPAPER => wallpaper::leftovers(),
+        BATTERY => battery::leftovers(),
+        AUDIO => audio::leftovers(),
+        DOCK => dock::leftovers(),
         MUSIC => music::leftovers(),
         _ => {
             let mut l: Vec<String> =
-                [rabbithole::install_dir(), rabbithole::data_dir()].into_iter().filter_map(exists).collect();
-            if rabbithole::installed() {
+                [tunnel::install_dir(), tunnel::data_dir()].into_iter().filter_map(exists).collect();
+            if tunnel::installed() {
                 l.push(t!("rabbithole service", "rabbithole hizmeti").into());
             }
             let env = r"SYSTEM\CurrentControlSet\Control\Session Manager\Environment";
@@ -253,20 +281,20 @@ pub fn leftovers(i: usize) -> Vec<String> {
     left
 }
 
-fn lyrebird_setup(install: bool) -> Result<(), String> {
+fn soundboard_setup(install: bool) -> Result<(), String> {
     unsafe {
         let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
     }
-    let arg = if install { lyrebird::ARG_INSTALL } else { lyrebird::ARG_UNINSTALL };
-    match lyrebird::install::run_elevated(arg) {
+    let arg = if install { soundboard::ARG_INSTALL } else { soundboard::ARG_UNINSTALL };
+    match soundboard::install::run_elevated(arg) {
         Ok(true) => Ok(()),
         Ok(false) => Err(t!("the microphone effect could not be set up · see the log", "mikrofon efekti ayarlanamadı · ayrıntılar logda").into()),
         Err(_) => Err(t!("administrator permission was not given", "yönetici izni verilmedi").into()),
     }
 }
 
-/// Son sürümü indirir, doğrular ve `rabbithole dpi` ile kurar: hizmet kurulur, sunucusuz modda
-/// açılır (rabbithole'un kendi kurulumu da bağlantı verilmezse böyle yapar).
+/// Son sürümü indirir, doğrular ve `tunnel dpi` ile kurar: hizmet kurulur, sunucusuz modda
+/// açılır (tunnel'un kendi kurulumu da bağlantı verilmezse böyle yapar).
 fn rabbithole_install() -> Result<(), String> {
     let asset = "rabbithole-windows-amd64.exe";
     let base = "https://github.com/matrixdurden/rabbithole/releases/latest/download/";
@@ -303,7 +331,7 @@ fn rabbithole_install() -> Result<(), String> {
     }
 }
 
-/// lyrebird artık hive içinde çalışıyor: ayrı kopya açıksa kapatılır (ortak belleğe aynı anda
+/// soundboard artık hive içinde çalışıyor: ayrı kopya açıksa kapatılır (ortak belleğe aynı anda
 /// iki yazar olamaz), Windows ile başlaması kaldırılır.
 pub fn retire_standalone_lyrebird() {
     unsafe {
@@ -313,7 +341,7 @@ pub fn retire_standalone_lyrebird() {
             if let Ok(h) = OpenProcess(PROCESS_TERMINATE, false, pid) {
                 let _ = TerminateProcess(h, 0);
                 let _ = CloseHandle(h);
-                log!("ayrı lyrebird kapatıldı (pid {pid})");
+                log!("ayrı soundboard kapatıldı (pid {pid})");
             }
         }
         let _ = RegDeleteKeyValueW(HKEY_CURRENT_USER, w!(r"Software\Microsoft\Windows\CurrentVersion\Run"), w!("lyrebird"));

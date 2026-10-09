@@ -111,7 +111,7 @@ impl Media {
                 let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
             }
             if let Err(e) = run(rx, tx2, now2, hwnd, others) {
-                crate::log!("mockturtle: medya denetimi açılamadı: {e}");
+                crate::log!("music: medya denetimi açılamadı: {e}");
             }
         });
         Self { tx, now }
@@ -297,7 +297,7 @@ fn read(s: &Session, id: &str, prev: &Now, art_key: &mut String) -> windows::cor
                 Ok(b) if !b.is_empty() => Some(b),
                 Ok(_) => None,
                 Err(e) => {
-                    crate::log!("mockturtle: kapak okunamadı ({title}): {e}");
+                    crate::log!("music: kapak okunamadı ({title}): {e}");
                     None
                 }
             },
@@ -362,11 +362,11 @@ fn command(s: Option<&Session>, c: Cmd) {
         }
     };
     if let Err(e) = r {
-        crate::log!("mockturtle: {c:?} olmadı: {e}");
+        crate::log!("music: {c:?} olmadı: {e}");
     }
 }
 
-/// `hive --mockturtle-test`: görülen oturumlar ve gösterilecek olanın durumu.
+/// `hive --music-test`: görülen oturumlar ve gösterilecek olanın durumu.
 pub fn probe() -> (String, Option<Now>) {
     let mut shown = None;
     let r = (|| -> windows::core::Result<String> {

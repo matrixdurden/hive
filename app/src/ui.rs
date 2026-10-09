@@ -3,6 +3,9 @@
 //! rengindedir. Araçların kendi renkleri yalnızca ikonlarda kalır.
 
 use std::cell::Cell;
+use std::path::PathBuf;
+
+use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
 
 use crate::gfx::{Color, Gfx, Rect};
 
@@ -98,7 +101,7 @@ const WINDOWS: Palette = Palette {
 fn windows(mica: bool) -> Palette {
     // Vurgu rengi gri seçilmişse (doygunluk yok) düğmeler arka plandan ayrılmıyor: Windows'un
     // varsayılan mavisi.
-    let sys = crate::hatter::theme::current().accent.0;
+    let sys = crate::dock::theme::current().accent.0;
     let ch = |s: u32| ((sys >> s) & 0xff) as f32 / 255.0;
     let (r, g, b) = (ch(16), ch(8), ch(0));
     let sat = r.max(g).max(b) - r.min(g).min(b);
@@ -130,7 +133,7 @@ pub fn pal() -> Palette {
         p.get().unwrap_or_else(|| {
             let v = match theme() {
                 Theme::Claude => CLAUDE,
-                Theme::Windows => windows(crate::hatter::theme::mica()),
+                Theme::Windows => windows(crate::dock::theme::mica()),
             };
             p.set(Some(v));
             v
@@ -168,7 +171,6 @@ pub const ICON_PLAY: &str = "\u{E768}";
 pub const ICON_PAUSE: &str = "\u{E769}";
 pub const ICON_SETTINGS: &str = "\u{E713}";
 pub const ICON_MENU: &str = "\u{E700}";
-pub const ICON_DOWNLOAD: &str = "\u{E896}";
 pub const ICON_REFRESH: &str = "\u{E72C}";
 pub const ICON_FOLDER: &str = "\u{E8B7}";
 
@@ -309,4 +311,29 @@ pub trait ToolPage {
     }
     /// Sayfa ekrana geldi ya da gitti.
     fn set_visible(&mut self, visible: bool);
+    /// hive'ın penceresine gelen, aracın kendi mesajı (WM_APP + n), zamanlayıcısı ya da
+    /// kısayolu: işlediyse dönüş değeri. Her araç yalnızca kendi kimliklerine bakar.
+    fn message(&mut self, _g: &mut Gfx, _msg: u32, _wp: WPARAM, _lp: LPARAM) -> Option<LRESULT> {
+        None
+    }
+    /// Kısayol atanıyor: Alt ile gelen menü ve bip sesi olmasın.
+    fn binding(&self) -> bool {
+        false
+    }
+    /// hive'ın penceresi odağı kaybetti.
+    fn kill_focus(&mut self) {}
+    /// Sürüklenen ya da seçilen dosyalar.
+    fn add_files(&mut self, _paths: Vec<PathBuf>) {}
+    /// Dosya penceresi istendi: pencere kendi mesaj döngüsünü açtığından uygulama borcu
+    /// dışında açılır, seçilenler `add_files`'a gelir.
+    fn take_file_dialog(&mut self) -> Option<FileDialog> {
+        None
+    }
+    /// Tepside gösterilecek bildirim (başlık, yazı).
+    fn take_notice(&mut self) -> Option<(String, String)> {
+        None
+    }
 }
+
+/// Dosya seçme penceresi: seçilen yollar.
+pub type FileDialog = fn(HWND) -> Result<Vec<PathBuf>, String>;

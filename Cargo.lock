@@ -80,18 +80,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f079e83a288787bcd14a6aea84cee5c87a67c5a3e660c30f557a3d24761b3527"
 
 [[package]]
-name = "cheshire"
-version = "0.1.1"
-dependencies = [
- "bytemuck",
- "naga",
- "pollster",
- "raw-window-handle",
- "wgpu",
- "windows",
-]
-
-[[package]]
 name = "codespan-reporting"
 version = "0.13.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -202,7 +190,7 @@ dependencies = [
 name = "hive"
 version = "0.3.0"
 dependencies = [
- "lyrebird",
+ "soundboard",
  "windows",
  "windows-core",
  "windows-numerics",
@@ -271,20 +259,6 @@ name = "log"
 version = "0.4.34"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f9f8bd3e56ce4dfc153cf470fffbfa98c7620958b312ca5c3a4b8d5181fd13c6"
-
-[[package]]
-name = "lyrebird"
-version = "0.1.0"
-dependencies = [
- "windows",
-]
-
-[[package]]
-name = "lyrebird-apo"
-version = "0.1.0"
-dependencies = [
- "windows",
-]
 
 [[package]]
 name = "naga"
@@ -526,6 +500,20 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f9395f0f0eee849a9b707b2f06bb92a6a422090e2123bb2ef8e87a0e61892a8e"
 
 [[package]]
+name = "soundboard"
+version = "0.1.0"
+dependencies = [
+ "windows",
+]
+
+[[package]]
+name = "soundboard-apo"
+version = "0.1.0"
+dependencies = [
+ "windows",
+]
+
+[[package]]
 name = "static_assertions"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -608,6 +596,18 @@ name = "unicode-xid"
 version = "0.2.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ebc1c04c71510c7f702b52b7c350734c9ff1295c464a03335b00bb84fc54f853"
+
+[[package]]
+name = "wallpaper"
+version = "0.1.1"
+dependencies = [
+ "bytemuck",
+ "naga",
+ "pollster",
+ "raw-window-handle",
+ "wgpu",
+ "windows",
+]
 
 [[package]]
 name = "wasm-bindgen"

@@ -1,15 +1,15 @@
-// assets/icon.ico'yu exe'ye gömer (kaynak 1: pencere, görev çubuğu, tepsi) ve cheshire motorunun
-// yolunu verir: hive onu içinde taşır, cheshire kurulurken yazar. Motor önce derlenmeli (`make build`).
+// assets/icon.ico'yu exe'ye gömer (kaynak 1: pencere, görev çubuğu, tepsi) ve duvar kâğıdı motorunun
+// yolunu verir: hive onu içinde taşır, duvar kâğıdı açılınca diske yazar. Motor önce derlenmeli (`make build`).
 use std::path::{Path, PathBuf};
 
 fn main() {
     println!("cargo:rerun-if-changed=assets/icon.ico");
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     let target = std::env::var("TARGET").unwrap();
-    let engine = manifest_dir.join(format!("../target/{target}/release/cheshire.exe"));
+    let engine = manifest_dir.join(format!("../target/{target}/release/wallpaper.exe"));
     println!("cargo:rerun-if-changed={}", engine.display());
-    assert!(engine.exists(), "{} yok: önce cheshire derlenmeli (`make build`)", engine.display());
-    println!("cargo:rustc-env=CHESHIRE_EXE={}", engine.display());
+    assert!(engine.exists(), "{} yok: önce duvar kâğıdı motoru derlenmeli (`make build`)", engine.display());
+    println!("cargo:rustc-env=WALLPAPER_EXE={}", engine.display());
     if std::env::var("CARGO_CFG_TARGET_OS").as_deref() != Ok("windows") {
         return;
     }

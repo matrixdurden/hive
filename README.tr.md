@@ -25,26 +25,26 @@ Yönetici izni gerekmez. Aynı komut hive'ı günceller.
 
 ## Araçlar
 
-hive bir başlatıcı: araçları **Araçlar** sayfasından eklenti gibi kurarsın, kurduğun her araç kenar çubuğunda ve Başlat menüsünde kendi adıyla görünür. "Pil" diye aratınca hive o araçta açılır.
+Bütün araçlar hive ile gelir: **Araçlar** sayfasından istediğini açarsın, açtığın her araç kenar çubuğunda ve Başlat menüsünde kendi adıyla görünür. "Pil" diye aratınca hive o araçta açılır.
 
 | | | |
 |:---:|---|---|
-| <img src="app/assets/araclar/lyrebird-64.png" width="40"> | **Soundboard** <sub>lyrebird</sub> | Sesi doğrudan mikrofona veren soundboard. Sanal mikrofon kurmaz; Discord, oyunlar, OBS, mikrofonu dinleyen her uygulama duyar. Myinstants'ta ses ara (kulaklıkta dinle, tek tıkla ekle); bilgisayarda az önce çalan son 10 saniyeyi kısayolla (`Ctrl+Alt+L`) listeye ekle. |
-| <img src="app/assets/araclar/cheshire-64.png" width="40"> | **Duvar kâğıdı** <sub>cheshire</sub> | Masaüstü ikonlarının arkasında GPU ile çizilen canlı duvar kâğıtları. Tam ekranda ve pilde kendiliğinden durur. |
-| <img src="app/assets/araclar/rabbithole-64.png" width="40"> | **Tünel** <sub>rabbithole</sub> | Bütün bilgisayarı ağ engellerinin ötesine geçiren tünel: kendi sunucun üzerinden ya da sunucusuz DPI modunda. [Ayrı depo](https://github.com/matrixdurden/rabbithole). |
-| <img src="app/assets/araclar/dormouse-64.png" width="40"> | **Pil** <sub>dormouse</sub> | Dizüstü için üç vites: prizde, dışarıda bir iki saat, hayatta kalma. Şarj takılıp çıkınca kendi geçer, pildeyken ekran kartını uyutur, her vitesin gerçekte kaç saat gittiğini öğrenir. |
-| <img src="app/assets/araclar/tweedle-64.png" width="40"> | **Ses aygıtları** <sub>tweedle</sub> | Ses çıkışları ve girişleri tek listede: tıkladığın varsayılan olur. Tek tuşla sonraki çıkışa (`Ctrl+Alt+O`), sonraki girişe (`Ctrl+Alt+I`) geçer ya da mikrofonu susturur (`Ctrl+Alt+K`). Kulaklık kopunca da müzik laptop hoparlöründen devam etmez, durur. |
-| <img src="app/assets/araclar/hatter-64.png" width="40"> | **Dock** <sub>hatter</sub> | Windows görev çubuğunun yerine, Windows 11 görünümünde bir dock: sabitlediğin ve açık uygulamalar yüzen tek bir çubukta, ucunda Wi-Fi, ses, pil ve saat. İmlecin altındaki simgeler büyür, dikkat isteyen uygulama zıplar, üstünde durunca pencerelerinin canlı önizlemesi açılır, sürükleyerek sıralarsın. Pencere üstüne gelince aşağı kayar (ya da istersen Mac gibi hep ekranda kalır), tam ekran oyunlarda hiç görünmez. İmleci sol üst köşeye sertçe götürünce bütün pencereler (Win+Tab), sağ alt köşeye götürünce masaüstü açılır (ikisi de kapatılabilir). Win+1…9 uygulamaları dock sırasıyla açar; "Dock'a sabitle" sağ tık menüsünde. Kaldırınca görev çubuğu ve Başlat eski haline döner. |
-| <img src="app/assets/araclar/mockturtle-64.png" width="40"> | **Müzik widget'ı** <sub>mockturtle</sub> | Spotify'da çalan, masaüstünde sıvı cam bir kartta: kapak, şarkı, sanatçı, önceki / çal / sonraki ve tıklayıp atlayabildiğin ilerleme çubuğu. Cam arkasındakini (canlı duvar kâğıdını da) bulanıklaştırıp kenarlarında kırar; açık duvar kâğıdında yazı koyulaşır. Spotify uygulamasıyla da tarayıcıdan kurulan Spotify web uygulamasıyla da çalışır; Spotify'a giriş gerekmez. Pencerelerin arkasında durur, Win+D ile öne gelir, sürükleyip istediğin yere koyarsın. İstersen diğer oynatıcılar (tarayıcıda YouTube, ...) da görünür. |
+| <img src="app/assets/araclar/soundboard-64.png" width="40"> | **Soundboard** | Sesi doğrudan mikrofona veren soundboard. Sanal mikrofon kurmaz; Discord, oyunlar, OBS, mikrofonu dinleyen her uygulama duyar. Myinstants'ta ses ara (kulaklıkta dinle, tek tıkla ekle); bilgisayarda az önce çalan son 10 saniyeyi kısayolla (`Ctrl+Alt+L`) listeye ekle. |
+| <img src="app/assets/araclar/wallpaper-64.png" width="40"> | **Duvar kâğıdı** | Masaüstü ikonlarının arkasında GPU ile çizilen canlı duvar kâğıtları. Tam ekranda ve pilde kendiliğinden durur. |
+| <img src="app/assets/araclar/tunnel-64.png" width="40"> | **Tünel** | Bütün bilgisayarı ağ engellerinin ötesine geçiren tünel: kendi sunucun üzerinden ya da sunucusuz DPI modunda. [Ayrı depo](https://github.com/matrixdurden/rabbithole). |
+| <img src="app/assets/araclar/battery-64.png" width="40"> | **Pil** | Dizüstü için üç vites: prizde, dışarıda bir iki saat, hayatta kalma. Şarj takılıp çıkınca kendi geçer, pildeyken ekran kartını uyutur, her vitesin gerçekte kaç saat gittiğini öğrenir. |
+| <img src="app/assets/araclar/audio-64.png" width="40"> | **Ses aygıtları** | Ses çıkışları ve girişleri tek listede: tıkladığın varsayılan olur. Tek tuşla sonraki çıkışa (`Ctrl+Alt+O`), sonraki girişe (`Ctrl+Alt+I`) geçer ya da mikrofonu susturur (`Ctrl+Alt+K`). Kulaklık kopunca da müzik laptop hoparlöründen devam etmez, durur. |
+| <img src="app/assets/araclar/dock-64.png" width="40"> | **Dock** | Windows görev çubuğunun yerine, Windows 11 görünümünde bir dock: sabitlediğin ve açık uygulamalar yüzen tek bir çubukta, ucunda Wi-Fi, ses, pil ve saat. İmlecin altındaki simgeler büyür, dikkat isteyen uygulama zıplar, üstünde durunca pencerelerinin canlı önizlemesi açılır, sürükleyerek sıralarsın. Hep ekranda durur, büyütülen pencereler onun üstünde biter; tam ekran oyunlarda hiç görünmez. İmleci sol üst köşeye sertçe götürünce bütün pencereler (Win+Tab), sağ alt köşeye götürünce masaüstü açılır (ikisi de kapatılabilir). Win+1…9 uygulamaları dock sırasıyla açar; "Dock'a sabitle" sağ tık menüsünde. Kaldırınca görev çubuğu ve Başlat eski haline döner. |
+| <img src="app/assets/araclar/music-64.png" width="40"> | **Müzik** | Spotify'da çalan, dock'un solunda dock boyunda bir şeritte: kapak, şarkı, sanatçı, önceki / çal / sonraki ve tıklayıp atlayabildiğin ince bir ilerleme çizgisi. Karta tıklayınca açık Spotify penceresi öne gelir. Arka planı kapağın bulanık hali, kapağın rengi ya da dock gibi düz. Spotify uygulamasıyla da tarayıcıdan kurulan Spotify web uygulamasıyla da çalışır; Spotify'a giriş gerekmez. İstersen diğer oynatıcılar (tarayıcıda YouTube, ...) da görünür. |
 
 <table>
   <tr>
     <td width="50%"><img src="docs/tr/tools.png" alt="Araçlar sayfası"></td>
-    <td width="50%"><img src="docs/tr/cheshire.png" alt="cheshire sayfası"></td>
+    <td width="50%"><img src="docs/tr/wallpaper.png" alt="Duvar kâğıdı sayfası"></td>
   </tr>
   <tr>
-    <td align="center"><sub>Araçlar: kur, aç, kaldır</sub></td>
-    <td align="center"><sub>cheshire: duvar kâğıtları ve ayarları</sub></td>
+    <td align="center"><sub>Araçlar: aç, kapat</sub></td>
+    <td align="center"><sub>Duvar kâğıdı: duvar kâğıtları ve ayarları</sub></td>
   </tr>
 </table>
 
@@ -52,12 +52,12 @@ hive İngilizce ve Türkçe konuşur; Windows'un görüntü dilini izler, Ayarla
 
 ## İz bırakmaz
 
-Bir aracı kaldırınca kurulurken yaptığı her şey geri alınır: dosyalar, kayıt defteri, mikrofon ayarları, hizmetler, PATH, kısayollar. Kaldırmanın sonunda hive bunları tek tek denetler; bir şey kalmışsa kaldırma başarılı sayılmaz ve neyin kaldığını söyler.
+Bir aracı kapatınca açılırken yaptığı her şey geri alınır: dosyalar, kayıt defteri, mikrofon ayarları, hizmetler, PATH, kısayollar. Kapatmanın sonunda hive bunları tek tek denetler; bir şey kalmışsa kapatma başarılı sayılmaz ve neyin kaldığını söyler.
 
-hive'ı kaldırmak (Ayarlar'dan ya da Windows'un **Uygulamalar** listesinden) önce kurulu bütün araçları aynı şekilde kaldırır, sonra kendini.
+hive'ı kaldırmak (Ayarlar'dan ya da Windows'un **Uygulamalar** listesinden) önce açık bütün araçları aynı şekilde kapatır, sonra kendini.
 
 ```powershell
-hive --leftovers    # kurulu olmayan araçlardan kalan iz var mı
+hive --leftovers    # kapalı araçlardan kalan iz var mı
 ```
 
 ## Derleme
@@ -72,9 +72,9 @@ make release    # app/Cargo.toml'daki sürümle GitHub'da yayın
 
 | Klasör | |
 |---|---|
-| [`app/`](app) | hive.exe: pencere, araç sayfaları, kurulum ve kaldırma |
-| [`lyrebird/`](lyrebird) | lyrebird motoru ve mikrofon efekti (`apo/`) |
-| [`cheshire/`](cheshire) | cheshire motoru ve [`.cheshire` formatı](cheshire/README.md#the-cheshire-format) |
+| [`app/`](app) | hive.exe: pencere, araç sayfaları, araçları açıp kapatma |
+| [`soundboard/`](soundboard) | Soundboard motoru ve mikrofon efekti (`apo/`) |
+| [`wallpaper/`](wallpaper) | Duvar kâğıdı motoru ve [`.cheshire` formatı](wallpaper/README.md#the-cheshire-format) |
 
 ## Lisans
 

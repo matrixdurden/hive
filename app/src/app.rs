@@ -1,4 +1,4 @@
-//! Pencere: solda daraltılabilir kenar çubuğu (kurulu araçlar, Araçlar, Ayarlar), sağda seçili
+//! Pencere: solda daraltılabilir kenar çubuğu (açık araçlar, Araçlar, Ayarlar), sağda seçili
 //! sayfa. Başlık çubuğu yok: pencere düğmelerini ve sürükleme bandını kendimiz çiziyoruz.
 //! Tek iş parçacığı; yalnızca bir şey değişince çizilir. Kapatınca tepside kalır, araçların
 //! motorları çalışmaya devam eder.
@@ -24,16 +24,9 @@ use windows::Win32::UI::Shell::{DragAcceptFiles, DragFinish, DragQueryFileW, HDR
 use windows::Win32::UI::WindowsAndMessaging::*;
 use windows::core::{BOOL, PCWSTR, w};
 
-use crate::cheshire::{self, Cheshire};
 use crate::config::Config;
-use crate::dormouse::{self, Dormouse};
-use crate::tweedle::{self, Tweedle};
-use crate::music::{self, Music};
-use crate::hatter::Hatter;
 use crate::gfx::{Color, Gfx, ImageId, Rect};
 use crate::log;
-use crate::lyrebird::{self, Lyrebird};
-use crate::rabbithole::{self, Rabbithole};
 use crate::tools::{self, TOOLS};
 use crate::tray::Tray;
 use crate::ui::*;
@@ -122,7 +115,7 @@ impl Page {
         if s.eq_ignore_ascii_case("settings") || s.eq_ignore_ascii_case("ayarlar") {
             return Some(Page::Settings);
         }
-        TOOLS.iter().position(|t| t.id.eq_ignore_ascii_case(s)).map(Page::Tool)
+        tools::find(s).map(Page::Tool)
     }
 
     fn label(self) -> &'static str {
@@ -141,8 +134,9 @@ enum Hit {
     Nav(Page),
     /// Aracın kendi sayfası (araç kendisi işler).
     Content,
-    Install(usize),
-    Remove(usize),
+    /// Aracın aç / kapa anahtarı.
+    Switch(usize),
+    /// Açık aracın kartı: sayfasına gider.
     Open(usize),
     Autostart,
     /// Dil: `true` Türkçe.
@@ -166,13 +160,8 @@ struct App {
     /// Araçlar sayfasının kaydırması (kartlar küçük pencereye sığmayınca).
     store_scroll: f32,
     autostart: bool,
-    lyrebird: Option<Lyrebird>,
-    rabbit: Option<Rabbithole>,
-    cheshire: Option<Cheshire>,
-    dormouse: Option<Dormouse>,
-    tweedle: Option<Tweedle>,
-    hatter: Option<Hatter>,
-    music: Option<Music>,
+    /// Açık araçların sayfaları ve motorları, TOOLS sırasıyla.
+    tools: Vec<Option<Box<dyn ToolPage>>>,
     /// Süren kurulum (`true`) ya da kaldırma (`false`), araç başına.
     busy: [Option<bool>; tools::COUNT],
     /// Son kurulum / kaldırma hatası, araç kartında görünür.
@@ -233,29 +222,6 @@ fn set_autostart(on: bool) {
     }
 }
 
-/// Canlı araç sayfası (alanlar ayrı ödünç alınsın diye serbest işlev).
-fn page_mut<'a>(
-    lyrebird: &'a mut Option<Lyrebird>,
-    rabbit: &'a mut Option<Rabbithole>,
-    cheshire: &'a mut Option<Cheshire>,
-    dormouse: &'a mut Option<Dormouse>,
-    tweedle: &'a mut Option<Tweedle>,
-    hatter: &'a mut Option<Hatter>,
-    music: &'a mut Option<Music>,
-    i: usize,
-) -> Option<&'a mut dyn ToolPage> {
-    match i {
-        tools::LYREBIRD => lyrebird.as_mut().map(|l| l as &mut dyn ToolPage),
-        tools::CHESHIRE => cheshire.as_mut().map(|c| c as &mut dyn ToolPage),
-        tools::DORMOUSE => dormouse.as_mut().map(|d| d as &mut dyn ToolPage),
-        tools::TWEEDLE => tweedle.as_mut().map(|t| t as &mut dyn ToolPage),
-        tools::HATTER => hatter.as_mut().map(|h| h as &mut dyn ToolPage),
-        tools::MUSIC => music.as_mut().map(|m| m as &mut dyn ToolPage),
-        tools::RABBITHOLE => rabbit.as_mut().map(|r| r as &mut dyn ToolPage),
-        _ => None,
-    }
-}
-
 impl App {
     fn size(&self) -> (f32, f32) {
         let mut rc = RECT::default();
@@ -284,31 +250,18 @@ impl App {
     }
 
     fn installed(&self, i: usize) -> bool {
-        match i {
-            tools::LYREBIRD => self.lyrebird.is_some(),
-            tools::CHESHIRE => self.cheshire.is_some(),
-            tools::DORMOUSE => self.dormouse.is_some(),
-            tools::TWEEDLE => self.tweedle.is_some(),
-            tools::HATTER => self.hatter.is_some(),
-            tools::MUSIC => self.music.is_some(),
-            _ => self.rabbit.is_some(),
-        }
+        self.tools[i].is_some()
     }
 
     fn page_ref(&self, i: usize) -> Option<&dyn ToolPage> {
-        match i {
-            tools::LYREBIRD => self.lyrebird.as_ref().map(|l| l as &dyn ToolPage),
-            tools::CHESHIRE => self.cheshire.as_ref().map(|c| c as &dyn ToolPage),
-            tools::RABBITHOLE => self.rabbit.as_ref().map(|r| r as &dyn ToolPage),
-            tools::DORMOUSE => self.dormouse.as_ref().map(|d| d as &dyn ToolPage),
-            tools::TWEEDLE => self.tweedle.as_ref().map(|t| t as &dyn ToolPage),
-            tools::HATTER => self.hatter.as_ref().map(|h| h as &dyn ToolPage),
-            tools::MUSIC => self.music.as_ref().map(|m| m as &dyn ToolPage),
-            _ => None,
-        }
+        self.tools[i].as_deref()
     }
 
-    /// Kenar çubuğu sırasıyla sayfalar: kurulu araçlar, Araçlar, Ayarlar.
+    fn page_mut(&mut self, i: usize) -> Option<&mut (dyn ToolPage + 'static)> {
+        self.tools[i].as_deref_mut()
+    }
+
+    /// Kenar çubuğu sırasıyla sayfalar: açık araçlar, Araçlar, Ayarlar.
     fn pages(&self) -> Vec<Page> {
         (0..TOOLS.len())
             .filter(|&i| self.installed(i))
@@ -337,26 +290,10 @@ impl App {
     fn sync_visible(&mut self) {
         let on = self.visible();
         let page = self.page;
-        if let Some(l) = self.lyrebird.as_mut() {
-            l.set_visible(on && page == Page::Tool(tools::LYREBIRD));
-        }
-        if let Some(c) = self.cheshire.as_mut() {
-            c.set_visible(on && page == Page::Tool(tools::CHESHIRE));
-        }
-        if let Some(r) = self.rabbit.as_mut() {
-            r.set_visible(on && page == Page::Tool(tools::RABBITHOLE));
-        }
-        if let Some(d) = self.dormouse.as_mut() {
-            d.set_visible(on && page == Page::Tool(tools::DORMOUSE));
-        }
-        if let Some(t) = self.tweedle.as_mut() {
-            t.set_visible(on && page == Page::Tool(tools::TWEEDLE));
-        }
-        if let Some(h) = self.hatter.as_mut() {
-            h.set_visible(on && page == Page::Tool(tools::HATTER));
-        }
-        if let Some(m) = self.music.as_mut() {
-            m.set_visible(on && page == Page::Tool(tools::MUSIC));
+        for (i, t) in self.tools.iter_mut().enumerate() {
+            if let Some(t) = t {
+                t.set_visible(on && page == Page::Tool(i));
+            }
         }
     }
 
@@ -373,7 +310,7 @@ impl App {
 
     // --- Araçlar: kur, kaldır, motorları başlat ---
 
-    /// Motorları kurulu araçlarla eşler: kurulu olup çalışmayanı başlatır, kaldırılanı düşürür.
+    /// Motorları açık araçlarla eşler: açık olup çalışmayanı başlatır, kapatılanı düşürür.
     fn sync_tools(&mut self) {
         for i in 0..TOOLS.len() {
             if self.busy[i].is_some() {
@@ -383,26 +320,7 @@ impl App {
             if on == self.installed(i) {
                 continue;
             }
-            let hwnd = self.hwnd;
-            match (i, on) {
-                (tools::LYREBIRD, true) => {
-                    tools::retire_standalone_lyrebird();
-                    self.lyrebird = Some(Lyrebird::start(hwnd));
-                }
-                (tools::LYREBIRD, false) => self.lyrebird = None,
-                (tools::CHESHIRE, true) => self.cheshire = Some(Cheshire::start(hwnd)),
-                (tools::CHESHIRE, false) => self.cheshire = None,
-                (tools::DORMOUSE, true) => self.dormouse = Some(Dormouse::start(hwnd)),
-                (tools::DORMOUSE, false) => self.dormouse = None,
-                (tools::TWEEDLE, true) => self.tweedle = Some(Tweedle::start(hwnd)),
-                (tools::TWEEDLE, false) => self.tweedle = None,
-                (tools::HATTER, true) => self.hatter = Some(Hatter::start(hwnd)),
-                (tools::HATTER, false) => self.hatter = None,
-                (tools::MUSIC, true) => self.music = Some(Music::start(hwnd)),
-                (tools::MUSIC, false) => self.music = None,
-                (_, true) => self.rabbit = Some(Rabbithole::start(hwnd)),
-                (_, false) => self.rabbit = None,
-            }
+            self.tools[i] = on.then(|| tools::start(i, self.hwnd));
         }
         self.page = self.valid(self.page);
         self.sync_visible();
@@ -413,23 +331,23 @@ impl App {
 
     fn confirm_remove(&self, i: usize) -> bool {
         let detail = match i {
-            tools::LYREBIRD => t!(
+            tools::SOUNDBOARD => t!(
                 "Your microphones go back to their previous settings and the audio service restarts for a second. Your sound list is deleted too.",
                 "Mikrofonların eski ayarlarına döner, ses hizmeti bir saniyeliğine yeniden başlar. Ses listen de silinir."
             ),
-            tools::CHESHIRE => t!(
+            tools::WALLPAPER => t!(
                 "Your wallpaper goes back to the Windows one. Wallpapers you added and their settings are deleted too.",
                 "Duvar kâğıdı Windows'unkine döner. Eklediğin duvar kâğıtları ve ayarları da silinir."
             ),
-            tools::DORMOUSE => t!(
+            tools::BATTERY => t!(
                 "Screen, power and lid settings go back to what they were; the GPU preferences it wrote and its measurements are deleted.",
                 "Ekran, güç ve kapak ayarları eski haline döner; yazdığı GPU tercihleri ve ölçümleri silinir."
             ),
-            tools::TWEEDLE => t!(
+            tools::AUDIO => t!(
                 "Its shortcuts are released, and music keeps playing from the speakers again when your headphones drop.",
                 "Kısayolları bırakılır; kulaklık kopunca müzik yine hoparlörden çalmaya devam eder."
             ),
-            tools::HATTER => t!(
+            tools::DOCK => t!(
                 "The dock closes; the Windows taskbar and your desktop icons come back as they were.",
                 "Dock kapanır; Windows görev çubuğu ve masaüstü simgelerin eski haline döner."
             ),
@@ -444,8 +362,8 @@ impl App {
         };
         let name = TOOLS[i].name();
         let text = wide(&t!(
-            format!("Remove {name}?\n\n{detail}\n\nNo trace of it is left on this computer."),
-            format!("{name} kaldırılsın mı?\n\n{detail}\n\nBilgisayarda hiçbir izi kalmaz.")
+            format!("Turn off {name}?\n\n{detail}\n\nNo trace of it is left on this computer; you can turn it on again any time."),
+            format!("{name} kapatılsın mı?\n\n{detail}\n\nBilgisayarda hiçbir izi kalmaz; istediğin zaman yeniden açabilirsin.")
         ));
         unsafe { MessageBoxW(Some(self.hwnd), PCWSTR(text.as_ptr()), w!("hive"), MB_YESNO | MB_ICONQUESTION) == IDYES }
     }
@@ -456,16 +374,8 @@ impl App {
             return;
         }
         if !install {
-            // Motor önce durur: cheshire'ın exe'si silinebilsin, lyrebird kısayolları bıraksın.
-            match i {
-                tools::LYREBIRD => self.lyrebird = None,
-                tools::CHESHIRE => self.cheshire = None,
-                tools::DORMOUSE => self.dormouse = None,
-                tools::TWEEDLE => self.tweedle = None,
-                tools::HATTER => self.hatter = None,
-                tools::MUSIC => self.music = None,
-                _ => self.rabbit = None,
-            }
+            // Motor önce durur: wallpaper'ın exe'si silinebilsin, soundboard kısayolları bıraksın.
+            self.tools[i] = None;
             self.page = self.valid(self.page);
         }
         self.busy[i] = Some(install);
@@ -483,31 +393,23 @@ impl App {
 
     fn setup_done(&mut self) {
         let done = std::mem::take(&mut *self.results.lock().unwrap());
-        let mut opened = None;
         for (i, install, r) in done {
             self.busy[i] = None;
             match r {
-                Ok(()) => {
-                    log!("{} {}", TOOLS[i].name(), if install { "kuruldu" } else { "kaldırıldı" });
-                    if install {
-                        opened = Some(i);
-                    }
-                }
+                Ok(()) => log!("{} {}", TOOLS[i].name(), if install { "açıldı" } else { "kapatıldı" }),
                 Err(e) => {
-                    log!("{} {}: {e}", TOOLS[i].name(), if install { "kurulamadı" } else { "kaldırılamadı" });
+                    log!("{} {}: {e}", TOOLS[i].name(), if install { "açılamadı" } else { "kapatılamadı" });
                     self.errors[i] = Some(e);
                 }
             }
         }
         self.sync_tools();
-        if let Some(i) = opened.filter(|&i| self.installed(i)) {
-            self.select(Page::Tool(i));
-        }
     }
 
-    /// dormouse'un bekleyen bildirimi varsa tepsiden balon olarak gösterir.
-    fn dormouse_notice(&mut self) {
-        if let Some((title, text)) = self.dormouse.as_mut().and_then(|d| d.take_notice()) {
+    /// Araçların tepsi bildirimleri (pil vitesi değişti, ...).
+    fn notices(&mut self) {
+        let notes: Vec<_> = self.tools.iter_mut().flatten().filter_map(|t| t.take_notice()).collect();
+        for (title, text) in notes {
             self.tray.notify(&title, &text);
         }
     }
@@ -550,7 +452,7 @@ impl App {
         if let Some(i) = self.tool_live() {
             let hx = self.head_x(i);
             let hr = w - sw - CAPTIONS - 12.0;
-            if let Some(p) = page_mut(&mut self.lyrebird, &mut self.rabbit, &mut self.cheshire, &mut self.dormouse, &mut self.tweedle, &mut self.hatter, &mut self.music, i) {
+            if let Some(p) = self.page_mut(i) {
                 p.layout(w - sw, h, hx, hr);
             }
         }
@@ -568,20 +470,10 @@ impl App {
         (HEADER + 52.0 + TOOLS.len() as f32 * (CARD_H + 12.0) + 12.0 - h).max(0.0)
     }
 
-    /// Kartın düğmeleri: (ana, ikinci). Kurulu: Aç + Kaldır, değil: Kur, sürüyor: durum yazısı.
-    fn card_buttons(&self, i: usize, w: f32) -> (Rect, Option<Rect>) {
+    /// Kartın aç / kapa anahtarı (sağda).
+    fn switch_rect(&self, i: usize, w: f32) -> Rect {
         let c = self.card(i, w);
-        let t = c.cy() - 17.0;
-        let g = &self.gfx;
-        if let Some(install) = self.busy[i] {
-            return (button_rect_right(g, c.r - 20.0, t, tools::busy_label(i, install), false), None);
-        }
-        if self.installed(i) {
-            let remove = button_rect_right(g, c.r - 20.0, t, t!("Remove", "Kaldır"), false);
-            (button_rect_right(g, remove.l - 8.0, t, t!("Open", "Aç"), false), Some(remove))
-        } else {
-            (button_rect_right(g, c.r - 20.0, t, t!("Install", "Kur"), true), None)
-        }
+        toggle_rect(c.r - 20.0, c.cy())
     }
 
     /// hive'ı kaldır: önce kurulu bütün araçlar (her biri kendi kalıntı denetimiyle), sonra
@@ -596,13 +488,13 @@ impl App {
         let text = wide(&match (crate::i18n::turkish(), names.is_empty()) {
             (false, true) => "Remove hive?\n\nNo trace is left on this computer.".to_string(),
             (false, false) => format!(
-                "Remove hive and the installed tools ({list})?\n\nTheir settings and data are deleted too; no trace is \
-                 left on this computer. lyrebird and rabbithole ask for administrator permission."
+                "Remove hive and the tools that are on ({list})?\n\nTheir settings and data are deleted too; no trace is \
+                 left on this computer. The soundboard and the tunnel ask for administrator permission."
             ),
             (true, true) => "hive kaldırılsın mı?\n\nBilgisayarda hiçbir iz kalmaz.".to_string(),
             (true, false) => format!(
-                "hive ve kurulu araçlar ({list}) kaldırılsın mı?\n\nAraçların ayarları ve verileri de silinir; \
-                 bilgisayarda hiçbir iz kalmaz. lyrebird ve rabbithole için yönetici izni istenir."
+                "hive ve açık araçlar ({list}) kaldırılsın mı?\n\nAraçların ayarları ve verileri de silinir; \
+                 bilgisayarda hiçbir iz kalmaz. Soundboard ve Tünel için yönetici izni istenir."
             ),
         });
         let yes = unsafe {
@@ -612,13 +504,7 @@ impl App {
             return;
         }
         log!("hive kaldırılıyor: {names:?}");
-        self.lyrebird = None;
-        self.cheshire = None;
-        self.rabbit = None;
-        self.dormouse = None;
-        self.tweedle = None;
-        self.hatter = None;
-        self.music = None;
+        self.tools.iter_mut().for_each(|t| *t = None);
         self.page = Page::Settings;
         self.removing_self = true;
         self.redraw();
@@ -731,12 +617,13 @@ impl App {
                     if self.busy[i].is_some() {
                         continue;
                     }
-                    let (primary, second) = self.card_buttons(i, w);
-                    if primary.contains(x, y) {
-                        return if self.installed(i) { Hit::Open(i) } else { Hit::Install(i) };
+                    let c = self.card(i, w);
+                    let sw = self.switch_rect(i, w);
+                    if Rect::new(sw.l - 12.0, c.t, c.r, c.b).contains(x, y) {
+                        return Hit::Switch(i);
                     }
-                    if second.is_some_and(|r| r.contains(x, y)) {
-                        return Hit::Remove(i);
+                    if self.installed(i) && c.contains(x, y) {
+                        return Hit::Open(i);
                     }
                 }
                 Hit::None
@@ -781,8 +668,7 @@ impl App {
                 self.redraw();
             }
             Hit::Nav(p) => self.select(p),
-            Hit::Install(i) => self.start_setup(i, true),
-            Hit::Remove(i) => self.start_setup(i, false),
+            Hit::Switch(i) => self.start_setup(i, !self.installed(i)),
             Hit::Open(i) => self.select(Page::Tool(i)),
             Hit::Autostart => {
                 if util::installed_copy().is_some() {
@@ -885,43 +771,40 @@ impl App {
             w,
             t!("Tools", "Araçlar"),
             t!(
-                "Tools you install show up in the sidebar; remove them any time.",
-                "Kurduğun araçlar kenar çubuğunda görünür; istediğin zaman kaldırabilirsin."
+                "All of them come with hive: turn on what you want. Turned off, a tool leaves no trace.",
+                "Hepsi hive ile gelir: istediğini aç. Kapattığın araç bilgisayarda iz bırakmaz."
             ),
         );
         g.clip(Rect::new(self.side_w(w), HEADER + 40.0, w, h), || {
         for (i, tool) in TOOLS.iter().enumerate() {
             let c = self.card(i, w);
-            let installed = self.installed(i);
-            g.fill(c, 8.0, pal().panel);
+            let on = self.installed(i);
+            // Açık aracın kartı sayfasına götürür: üstüne gelince belirginleşir.
+            g.fill(c, 8.0, if self.hover == Hit::Open(i) { pal().sel } else { pal().panel });
             g.stroke(c, 8.0, pal().line, 1.0);
             g.image(self.icons[i], Rect::new(c.l + 20.0, c.cy() - 28.0, c.l + 76.0, c.cy() + 28.0), 1.0);
 
-            let (primary, second) = self.card_buttons(i, w);
-            let text_r = primary.l - 16.0;
+            let sw = self.switch_rect(i, w);
+            let text_r = sw.l - 96.0;
             let x = c.l + 96.0;
-            let name_w = g.measure(tool.name(), &g.f.heading);
             g.text(tool.name(), &g.f.heading, Rect::new(x, c.t + 16.0, text_r, c.t + 44.0), pal().text);
-            if installed {
-                status(g, x + name_w + 14.0, c.t + 31.0, pal().green, t!("Installed", "Kurulu"), pal().muted, text_r);
-            }
             g.text(tool.tagline(), &g.f.text, Rect::new(x, c.t + 46.0, text_r, c.t + 66.0), pal().muted);
             match &self.errors[i] {
                 Some(e) => g.text(e, &g.f.small, Rect::new(x, c.t + 68.0, text_r, c.t + 88.0), pal().red),
                 None => g.text(tool.note(), &g.f.small, Rect::new(x, c.t + 68.0, text_r, c.t + 88.0), pal().faint),
             }
 
-            let accent = Color::rgb(tool.accent);
-            match (self.busy[i], installed) {
-                (Some(install), _) => button(g, primary, tools::busy_label(i, install), None, None, false),
-                (None, true) => button(g, primary, t!("Open", "Aç"), None, Some(accent), self.hover == Hit::Open(i)),
-                (None, false) => {
-                    let label = t!("Install", "Kur");
-                    button(g, primary, label, Some(ICON_DOWNLOAD), Some(accent), self.hover == Hit::Install(i))
+            match self.busy[i] {
+                Some(install) => {
+                    let label = tools::busy_label(i, install);
+                    g.text(label, &g.f.small_right, Rect::new(sw.l - 120.0, c.t, sw.r, c.b), pal().muted);
                 }
-            }
-            if let Some(r) = second {
-                button(g, r, t!("Remove", "Kaldır"), None, None, self.hover == Hit::Remove(i));
+                None => {
+                    let label = if on { t!("On", "Açık") } else { t!("Off", "Kapalı") };
+                    let lr = Rect::new(sw.l - 80.0, c.t, sw.l - 10.0, c.b);
+                    g.text(label, &g.f.small_right, lr, if on { pal().text } else { pal().faint });
+                    toggle(g, sw, on, accent(), true);
+                }
             }
         }
         });
@@ -995,8 +878,8 @@ impl App {
             setting_row(g, r, title, sub, 120.0);
         } else {
             let sub = t!(
-                "Together with the installed tools; no trace is left on this computer",
-                "Kurulu araçlarla birlikte; bilgisayarda hiçbir iz kalmaz"
+                "Together with the tools that are on; no trace is left on this computer",
+                "Açık araçlarla birlikte; bilgisayarda hiçbir iz kalmaz"
             );
             setting_row(g, r, title, sub, 120.0);
             let label = t!("Remove", "Kaldır");
@@ -1265,7 +1148,7 @@ impl App {
                 let hit = self.hit(mx, my);
                 if hit != self.hover {
                     if self.hover == Hit::Content
-                        && let Some(p) = live.and_then(|i| page_mut(&mut self.lyrebird, &mut self.rabbit, &mut self.cheshire, &mut self.dormouse, &mut self.tweedle, &mut self.hatter, &mut self.music, i))
+                        && let Some(p) = live.and_then(|i| self.tools[i].as_deref_mut())
                     {
                         p.mouse_leave();
                     }
@@ -1283,13 +1166,13 @@ impl App {
                 }
                 // Kaydırıcı sürüklenirken imleç kenar çubuğuna kaysa da sayfa izlemeli.
                 if (hit == Hit::Content || self.pressed == Hit::Content)
-                    && let Some(p) = live.and_then(|i| page_mut(&mut self.lyrebird, &mut self.rabbit, &mut self.cheshire, &mut self.dormouse, &mut self.tweedle, &mut self.hatter, &mut self.music, i))
+                    && let Some(p) = live.and_then(|i| self.tools[i].as_deref_mut())
                 {
                     p.mouse_move(&self.gfx, mx - sw, my);
                 }
             }
             WM_MOUSELEAVE => {
-                if let Some(p) = live.and_then(|i| page_mut(&mut self.lyrebird, &mut self.rabbit, &mut self.cheshire, &mut self.dormouse, &mut self.tweedle, &mut self.hatter, &mut self.music, i)) {
+                if let Some(p) = live.and_then(|i| self.tools[i].as_deref_mut()) {
                     p.mouse_leave();
                 }
                 self.hover = Hit::None;
@@ -1301,7 +1184,7 @@ impl App {
                 self.pressed = self.hit(mx, my);
                 unsafe { SetCapture(self.hwnd) };
                 if self.pressed == Hit::Content
-                    && let Some(p) = live.and_then(|i| page_mut(&mut self.lyrebird, &mut self.rabbit, &mut self.cheshire, &mut self.dormouse, &mut self.tweedle, &mut self.hatter, &mut self.music, i))
+                    && let Some(p) = live.and_then(|i| self.tools[i].as_deref_mut())
                 {
                     p.mouse_down(&self.gfx, mx - sw, my);
                 }
@@ -1314,7 +1197,7 @@ impl App {
                 let sw = self.layout_tool(w, h);
                 let pressed = std::mem::replace(&mut self.pressed, Hit::None);
                 if pressed == Hit::Content {
-                    if let Some(p) = live.and_then(|i| page_mut(&mut self.lyrebird, &mut self.rabbit, &mut self.cheshire, &mut self.dormouse, &mut self.tweedle, &mut self.hatter, &mut self.music, i)) {
+                    if let Some(p) = live.and_then(|i| self.tools[i].as_deref_mut()) {
                         p.mouse_up(&self.gfx, mx - sw, my);
                     }
                 } else if self.hit(mx, my) == pressed {
@@ -1331,7 +1214,7 @@ impl App {
                 let (w, h) = self.size();
                 let sw = self.layout_tool(w, h);
                 if x >= sw
-                    && let Some(p) = live.and_then(|i| page_mut(&mut self.lyrebird, &mut self.rabbit, &mut self.cheshire, &mut self.dormouse, &mut self.tweedle, &mut self.hatter, &mut self.music, i))
+                    && let Some(p) = live.and_then(|i| self.tools[i].as_deref_mut())
                 {
                     p.wheel(&self.gfx, x - sw, y, delta);
                 } else if x >= sw && live.is_none() && self.page == Page::Store {
@@ -1342,14 +1225,14 @@ impl App {
             }
             WM_CHAR => {
                 let c = char::from_u32(wp.0 as u32)?;
-                let p = live.and_then(|i| page_mut(&mut self.lyrebird, &mut self.rabbit, &mut self.cheshire, &mut self.dormouse, &mut self.tweedle, &mut self.hatter, &mut self.music, i))?;
+                let p = live.and_then(|i| self.tools[i].as_deref_mut())?;
                 if !p.char(c) {
                     return None;
                 }
             }
             WM_KEYDOWN | WM_SYSKEYDOWN => {
                 let vk = VIRTUAL_KEY(wp.0 as u16);
-                if let Some(p) = live.and_then(|i| page_mut(&mut self.lyrebird, &mut self.rabbit, &mut self.cheshire, &mut self.dormouse, &mut self.tweedle, &mut self.hatter, &mut self.music, i))
+                if let Some(p) = live.and_then(|i| self.tools[i].as_deref_mut())
                     && p.key(vk.0)
                 {
                     return Some(LRESULT(0));
@@ -1367,125 +1250,8 @@ impl App {
                 }
             }
             // Kısayol atarken Alt ile gelen menü ve bip sesi olmasın.
-            WM_SYSCHAR | WM_SYSKEYUP
-                if self.lyrebird.as_ref().is_some_and(|l| l.binding())
-                    || self.tweedle.as_ref().is_some_and(|t| t.binding()) => {}
-            WM_KILLFOCUS => {
-                if let Some(l) = self.lyrebird.as_mut() {
-                    l.kill_focus();
-                }
-                if let Some(t) = self.tweedle.as_mut() {
-                    t.kill_focus();
-                }
-            }
-            WM_HOTKEY => {
-                let id = wp.0 as i32;
-                if id >= tweedle::HK_BASE {
-                    if let Some(t) = self.tweedle.as_mut() {
-                        t.hotkey(id);
-                    }
-                } else if let Some(l) = self.lyrebird.as_mut() {
-                    l.hotkey(id);
-                }
-            }
-            WM_TIMER => match wp.0 {
-                lyrebird::TIMER_ANIM | lyrebird::TIMER_STATUS | lyrebird::TIMER_SEARCH => {
-                    if let Some(l) = self.lyrebird.as_mut() {
-                        l.timer(wp.0);
-                    }
-                }
-                rabbithole::TIMER_POLL | rabbithole::TIMER_PING => {
-                    if let Some(r) = self.rabbit.as_mut() {
-                        r.timer(wp.0);
-                    }
-                }
-                dormouse::TIMER_TICK | dormouse::TIMER_UI => {
-                    if let Some(d) = self.dormouse.as_mut() {
-                        d.timer(wp.0);
-                    }
-                    self.dormouse_notice();
-                }
-                tweedle::TIMER_RECHECK => {
-                    if let Some(t) = self.tweedle.as_mut() {
-                        t.timer(wp.0);
-                    }
-                }
-                _ => return None,
-            },
-            lyrebird::WM_PLAYER => {
-                if let Some(l) = self.lyrebird.as_mut() {
-                    l.player_changed();
-                }
-            }
-            lyrebird::WM_SEARCHED => {
-                if let Some(l) = self.lyrebird.as_mut() {
-                    l.searched();
-                }
-            }
-            lyrebird::WM_FETCHED => {
-                if let Some(l) = self.lyrebird.as_mut() {
-                    l.fetched();
-                }
-            }
-            lyrebird::MM_MCINOTIFY => {
-                if let Some(l) = self.lyrebird.as_mut() {
-                    l.preview_done(wp.0);
-                }
-            }
-            lyrebird::WM_INSTALLED => {
-                if let Some(l) = self.lyrebird.as_mut() {
-                    l.setup_done(wp.0);
-                }
-            }
-            cheshire::WM_STATE => {
-                if let Some(c) = self.cheshire.as_mut() {
-                    c.state_changed();
-                }
-            }
-            cheshire::WM_THUMB => {
-                if let Some(c) = self.cheshire.as_mut() {
-                    c.load_thumbs(&mut self.gfx);
-                }
-            }
-            cheshire::WM_RELAUNCH => {
-                if let Some(c) = self.cheshire.as_ref() {
-                    c.launch();
-                }
-            }
-            rabbithole::WM_DONE => {
-                if let Some(r) = self.rabbit.as_mut() {
-                    r.done();
-                }
-            }
-            rabbithole::WM_LINE => {
-                if let Some(r) = self.rabbit.as_mut() {
-                    r.doctor_line();
-                }
-            }
-            WM_POWERBROADCAST => {
-                if wp.0 as u32 == PBT_POWERSETTINGCHANGE
-                    && let Some(d) = self.dormouse.as_mut()
-                {
-                    d.power_broadcast(lp);
-                    self.dormouse_notice();
-                }
-                return Some(LRESULT(1));
-            }
-            music::WM_MEDIA => {
-                if let Some(m) = self.music.as_mut() {
-                    m.media_changed();
-                }
-            }
-            tweedle::WM_DEVICE => {
-                if let Some(t) = self.tweedle.as_mut() {
-                    t.device_changed();
-                }
-            }
-            tweedle::WM_MIC => {
-                if let Some(t) = self.tweedle.as_mut() {
-                    t.mic_changed();
-                }
-            }
+            WM_SYSCHAR | WM_SYSKEYUP if self.tools.iter().flatten().any(|t| t.binding()) => {}
+            WM_KILLFOCUS => self.tools.iter_mut().flatten().for_each(|t| t.kill_focus()),
             WM_TOOL_SETUP => self.setup_done(),
             WM_SELF_DONE => self.self_remove_done(),
             WM_EXIT => unsafe {
@@ -1502,11 +1268,9 @@ impl App {
                     }
                     DragFinish(drop);
                 }
-                match live {
-                    Some(tools::LYREBIRD) => self.lyrebird.as_mut().map(|l| l.add(paths)),
-                    Some(tools::CHESHIRE) => self.cheshire.as_mut().map(|c| c.add(paths)),
-                    _ => None,
-                };
+                if let Some(p) = live.and_then(|i| self.tools[i].as_deref_mut()) {
+                    p.add_files(paths);
+                }
             }
             WM_ACTIVATE => {
                 self.active = (wp.0 & 0xFFFF) as u32 != WA_INACTIVE;
@@ -1538,7 +1302,13 @@ impl App {
             },
             WM_CLOSE => self.hide(),
             m if m != 0 && m == self.taskbar_created => self.tray.add(),
-            _ => return None,
+            // Araçların kendi mesajları, zamanlayıcıları, kısayolları.
+            _ => {
+                let gfx = &mut self.gfx;
+                let r = self.tools.iter_mut().flatten().find_map(|t| t.message(gfx, msg, wp, lp));
+                self.notices();
+                return if msg == WM_POWERBROADCAST { Some(LRESULT(1)) } else { r };
+            }
         }
         Some(LRESULT(0))
     }
@@ -1592,25 +1362,24 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
     }
     let handled = with_app(|app| {
         let r = app.on(msg, wp, lp);
-        (r, app.lyrebird.as_mut().and_then(|l| l.take_modal()), app.cheshire.as_mut().and_then(|c| c.take_modal()))
+        let dialog = app.tools.iter_mut().enumerate().find_map(|(i, t)| Some((i, t.as_mut()?.take_file_dialog()?)));
+        (r, dialog)
     });
     match handled {
-        Some((result, lmodal, cmodal)) => {
+        Some((result, dialog)) => {
             // Dosya pencereleri kendi mesaj döngüsünü açar: uygulama borcu dışında çalışmalı.
-            if let Some(m) = lmodal {
-                lyrebird::run_modal(hwnd, m, |apply| {
-                    with_app(|app| app.lyrebird.as_mut().map(apply));
-                });
-            }
-            if let Some(m) = cmodal {
-                cheshire::run_modal(hwnd, m, |apply| {
-                    with_app(|app| app.cheshire.as_mut().map(apply));
-                });
+            if let Some((i, open)) = dialog {
+                match open(hwnd) {
+                    Ok(paths) => {
+                        with_app(|app| app.page_mut(i).map(|p| p.add_files(paths)));
+                    }
+                    Err(e) => log!("dosya penceresi: {e}"),
+                }
             }
             result.unwrap_or_else(|| unsafe { DefWindowProcW(hwnd, msg, wp, lp) })
         }
         None if msg == WM_COPYDATA => {
-            // Uygulama o an meşgul (örneğin cheshire'a komut gönderirken gelen istek): veriyi
+            // Uygulama o an meşgul (örneğin wallpaper'a komut gönderirken gelen istek): veriyi
             // sakla, kendi kuyruğumuzdan sonra uygula.
             let cds = unsafe { &*(lp.0 as *const COPYDATASTRUCT) };
             if cds.dwData != COPY_TAB {
@@ -1701,13 +1470,7 @@ pub fn run(hidden: bool, tab: Option<String>) -> Res<()> {
             narrow_pref: cfg.narrow,
             store_scroll: 0.0,
             autostart: autostart(),
-            lyrebird: None,
-            rabbit: None,
-            cheshire: None,
-            dormouse: None,
-            tweedle: None,
-            hatter: None,
-            music: None,
+            tools: (0..tools::COUNT).map(|_| None).collect(),
             busy: [None; tools::COUNT],
             errors: Default::default(),
             results: Arc::default(),
