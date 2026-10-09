@@ -7,6 +7,7 @@
 //! - dormouse: motoru hive'ın içinde; kurmak mevcut güç ayarlarını yedekleyip uygulamaların GPU tercihini yazmaktır.
 //! - tweedle: motoru hive'ın içinde; kurmak yalnızca kısayol dosyasını yazmaktır.
 //! - hatter: motoru (dock) hive'ın içinde; kurmak ayarları ve dock'un ilk listesini yazmaktır.
+//! - mockturtle: motoru (widget) hive'ın içinde; kurmak yalnızca ayar dosyasını yazmaktır.
 
 use std::os::windows::process::CommandExt;
 use std::process::{Command, Stdio};
@@ -19,7 +20,7 @@ use windows::Win32::System::Threading::{OpenProcess, PROCESS_TERMINATE, Terminat
 use windows::Win32::UI::WindowsAndMessaging::{FindWindowW, GetWindowThreadProcessId};
 use windows::core::{PCWSTR, w};
 
-use crate::{cheshire, dormouse, hatter, log, lyrebird, net, rabbithole, shell, tweedle, util};
+use crate::{cheshire, dormouse, hatter, log, lyrebird, music, net, rabbithole, shell, tweedle, util};
 
 pub const LYREBIRD: usize = 0;
 pub const CHESHIRE: usize = 1;
@@ -27,7 +28,8 @@ pub const RABBITHOLE: usize = 2;
 pub const DORMOUSE: usize = 3;
 pub const TWEEDLE: usize = 4;
 pub const HATTER: usize = 5;
-pub const COUNT: usize = 6;
+pub const MUSIC: usize = 6;
+pub const COUNT: usize = 7;
 
 pub struct Tool {
     pub id: &'static str,
@@ -118,7 +120,28 @@ pub static TOOLS: [Tool; COUNT] = [
         note: ["Comes with hive · the taskbar comes back when removed", "hive ile birlikte gelir · kaldırınca görev çubuğu geri gelir"],
         icons: icons!("hatter"),
     },
+    Tool {
+        id: "mockturtle",
+        names: ["Music widget", "Müzik widget'ı"],
+        accent: music::ACCENT,
+        tagline: ["What Spotify is playing, on a glass card on your desktop", "Spotify'da çalan, masaüstünde cam bir kartta"],
+        note: ["Comes with hive · no Spotify login needed", "hive ile birlikte gelir · Spotify'a giriş gerekmez"],
+        icons: icons!("mockturtle"),
+    },
 ];
+
+/// Eski kod adlı veri klasörleri yeni adlarına taşınır (araçların ayarları kaybolmasın).
+pub fn migrate() {
+    for (old, new) in [("mockturtle", "music")] {
+        let (o, n) = (util::data_dir().join(old), util::data_dir().join(new));
+        if o.is_dir() && !n.exists() {
+            match std::fs::rename(&o, &n) {
+                Ok(()) => log!("{old} → {new} taşındı"),
+                Err(e) => log!("{old} → {new} taşınamadı: {e}"),
+            }
+        }
+    }
+}
 
 /// Araç bu bilgisayarda kurulu mu.
 pub fn installed(i: usize) -> bool {
@@ -128,6 +151,7 @@ pub fn installed(i: usize) -> bool {
         DORMOUSE => dormouse::installed(),
         TWEEDLE => tweedle::installed(),
         HATTER => hatter::installed(),
+        MUSIC => music::installed(),
         _ => rabbithole::installed(),
     }
 }
@@ -149,6 +173,7 @@ pub fn run(i: usize, install: bool) -> Result<(), String> {
         (DORMOUSE, true) => dormouse::install(),
         (TWEEDLE, true) => tweedle::install(),
         (HATTER, true) => hatter::install(),
+        (MUSIC, true) => music::install(),
         (_, true) => rabbithole_install(),
         (_, false) => uninstall(i),
     }
@@ -169,6 +194,7 @@ fn uninstall(i: usize) -> Result<(), String> {
         DORMOUSE => dormouse::uninstall()?,
         TWEEDLE => tweedle::uninstall()?,
         HATTER => hatter::uninstall()?,
+        MUSIC => music::uninstall()?,
         _ => {
             rabbithole::run(&["remove"])?;
             // Program Files'taki exe kendini silemez: rabbithole arkasında birkaç saniye içinde
@@ -208,6 +234,7 @@ pub fn leftovers(i: usize) -> Vec<String> {
         DORMOUSE => dormouse::leftovers(),
         TWEEDLE => tweedle::leftovers(),
         HATTER => hatter::leftovers(),
+        MUSIC => music::leftovers(),
         _ => {
             let mut l: Vec<String> =
                 [rabbithole::install_dir(), rabbithole::data_dir()].into_iter().filter_map(exists).collect();

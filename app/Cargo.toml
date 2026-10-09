@@ -2,7 +2,7 @@
 name = "hive"
 version = "0.3.0"
 edition = "2024"
-description = "hive: matrixdurden'in Windows araçları tek yerde (lyrebird, cheshire, rabbithole, dormouse, tweedle, hatter)"
+description = "hive: matrixdurden'in Windows araçları tek yerde (lyrebird, cheshire, rabbithole, dormouse, tweedle, hatter, mockturtle)"
 license = "MIT"
 
 [dependencies]
@@ -20,6 +20,7 @@ features = [
     "UI_Notifications",
     "UI_Notifications_Management",
     "Media_Control",
+    "Storage_Streams",
     "Win32_Foundation",
     "Win32_Devices_FunctionDiscovery",
     "Win32_Graphics_Direct2D",

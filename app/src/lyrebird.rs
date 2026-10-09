@@ -616,10 +616,10 @@ impl Lyrebird {
     fn chip_colors(&self, binding: bool, conflict: bool, unset: bool, hovered: bool) -> (Color, Color) {
         match () {
             _ if binding => (accent(), accent()),
-            _ if conflict => (RED, LINE),
-            _ if unset => (FAINT, LINE),
-            _ if hovered => (TEXT, FAINT),
-            _ => (MUTED, LINE),
+            _ if conflict => (pal().red, pal().line),
+            _ if unset => (pal().faint, pal().line),
+            _ if hovered => (pal().text, pal().faint),
+            _ => (pal().muted, pal().line),
         }
     }
 
@@ -858,7 +858,7 @@ impl Lyrebird {
         }
 
         // Alt çubuk: mikrofon ve kulaklık düzeyi.
-        g.fill(Rect::new(0.0, h - BOTTOM, w, h - BOTTOM + 1.0), 0.0, LINE);
+        g.fill(Rect::new(0.0, h - BOTTOM, w, h - BOTTOM + 1.0), 0.0, pal().line);
         for k in 0..2 {
             let (r, a, b) = self.slider(k);
             let active = self.drag == Some(k) || self.hover == Hit::Slider(k);
@@ -866,14 +866,14 @@ impl Lyrebird {
                 if k == 0 { ICON_MIC } else { ICON_EAR },
                 &g.f.icon,
                 Rect::new(r.l, r.t, r.l + 20.0, r.b),
-                if active { TEXT } else { MUTED },
+                if active { pal().text } else { pal().muted },
             );
             slider(g, a, b, r.cy(), self.level[k] as f32 / 100.0, accent(), active);
             g.text(
                 &self.level[k].to_string(),
                 &g.f.small_right,
                 Rect::new(b + 6.0, r.t, r.r, r.b),
-                if active { TEXT } else { MUTED },
+                if active { pal().text } else { pal().muted },
             );
         }
     }
@@ -888,18 +888,18 @@ impl Lyrebird {
                 g.fill(p, 13.0, accent().alpha(if hovered { 0.88 } else { 1.0 }));
                 g.text(label, &g.f.button, p, on_accent());
             } else {
-                g.fill(p, 13.0, HOVER);
+                g.fill(p, 13.0, pal().hover);
                 let dot = match &self.mic {
-                    MicState::Attached(_) if self.active => GREEN,
+                    MicState::Attached(_) if self.active => pal().green,
                     MicState::Busy => accent(),
-                    _ => FAINT,
+                    _ => pal().faint,
                 };
                 g.circle(p.l + 14.0, p.cy(), 3.5, dot);
-                g.text(label, &g.f.small, Rect::new(p.l + 24.0, p.t, p.r, p.b), if hovered { TEXT } else { MUTED });
+                g.text(label, &g.f.small, Rect::new(p.l + 24.0, p.t, p.r, p.b), if hovered { pal().text } else { pal().muted });
             }
         }
         let playing_any = !self.playing.is_empty();
-        icon_button(g, self.stop_rect(), ICON_MUTE, if playing_any { accent() } else { MUTED }, self.hover == Hit::Stop);
+        icon_button(g, self.stop_rect(), ICON_MUTE, if playing_any { accent() } else { pal().muted }, self.hover == Hit::Stop);
         let binding = self.bind == Some(Bind::Stop);
         if self.stop.is_some() || binding || matches!(self.hover, Hit::Stop | Hit::StopKey) {
             let (c, b) = self.chip_colors(binding, self.stop_conflict, self.stop.is_none(), false);
@@ -910,13 +910,13 @@ impl Lyrebird {
     /// Sekmeler ve seçili sekmenin düğmeleri.
     fn paint_tabs(&self, g: &Gfx) {
         let [mine, find] = self.tab_rects(g);
-        g.fill(Rect::new(mine.l - 3.0, mine.t - 3.0, find.r + 3.0, find.b + 3.0), 8.0, HOVER);
+        g.fill(Rect::new(mine.l - 3.0, mine.t - 3.0, find.r + 3.0, find.b + 3.0), 8.0, pal().hover);
         for (r, t) in [(mine, Tab::Mine), (find, Tab::Find)] {
             let selected = self.tab == t;
             if selected {
-                g.fill(r, 6.0, SEL);
+                g.fill(r, 6.0, pal().sel);
             }
-            let fg = if selected || self.hover == Hit::Tab(t) { TEXT } else { MUTED };
+            let fg = if selected || self.hover == Hit::Tab(t) { pal().text } else { pal().muted };
             g.text(&self.tab_label(t), &g.f.button, r, fg);
             if selected {
                 g.fill(Rect::new(r.l + 12.0, r.b - 2.0, r.r - 12.0, r.b), 1.0, accent());
@@ -940,14 +940,14 @@ impl Lyrebird {
         let list = self.body();
         if self.items.is_empty() {
             let cy = list.cy();
-            g.text(ICON_AUDIO, &g.f.icon_large, Rect::new(0.0, cy - 62.0, w, cy - 22.0), FAINT);
+            g.text(ICON_AUDIO, &g.f.icon_large, Rect::new(0.0, cy - 62.0, w, cy - 22.0), pal().faint);
             let title = t!("No sounds yet", "Henüz ses yok");
-            text_center(g, title, &g.f.strong, w / 2.0, cy - 14.0, cy + 8.0, TEXT);
+            text_center(g, title, &g.f.strong, w / 2.0, cy - 14.0, cy + 8.0, pal().text);
             let kinds = t!(
                 "drop sound files here, or find some on Myinstants",
                 "ses dosyalarını buraya sürükle ya da Myinstants'ta bul"
             );
-            g.text(kinds, &g.f.small_center, Rect::new(0.0, cy + 8.0, w, cy + 26.0), MUTED);
+            g.text(kinds, &g.f.small_center, Rect::new(0.0, cy + 8.0, w, cy + 26.0), pal().muted);
             let (add, find) = self.empty_rects(g);
             button(g, add, t!("Add files", "Dosya ekle"), Some(ICON_ADD), Some(accent()), self.hover == Hit::AddFiles);
             button(g, find, t!("Find sounds", "Ses bul"), Some(ICON_SEARCH), None, self.hover == Hit::EmptyFind);
@@ -964,7 +964,7 @@ impl Lyrebird {
                 if playing.is_some() {
                     g.fill(r, 8.0, accent().alpha(if hovered { 0.12 } else { 0.08 }));
                 } else if hovered {
-                    g.fill(r, 8.0, HOVER);
+                    g.fill(r, 8.0, pal().hover);
                 }
                 let binding = self.bind == Some(Bind::Sound(n));
                 let key = self.row_key_rect(g, n);
@@ -973,13 +973,13 @@ impl Lyrebird {
                 let (icon, icon_color) = if playing.is_some() {
                     (ICON_PAUSE, accent())
                 } else {
-                    (ICON_PLAY, if hovered { MUTED } else { FAINT })
+                    (ICON_PLAY, if hovered { pal().muted } else { pal().faint })
                 };
                 g.text(icon, &g.f.icon_small, Rect::new(r.l + 8.0, r.t, r.l + 28.0, r.b), icon_color);
                 let name_color = match () {
-                    _ if item.missing => FAINT,
+                    _ if item.missing => pal().faint,
                     _ if playing.is_some() => accent(),
-                    _ => TEXT,
+                    _ => pal().text,
                 };
                 g.text(&item.name, &g.f.text, Rect::new(r.l + 36.0, r.t, name_right, r.b), name_color);
                 if show_chip {
@@ -991,9 +991,9 @@ impl Lyrebird {
                     let rm = self.remove_rect(n);
                     let over = self.hover == Hit::RowRemove(n);
                     if over {
-                        g.fill(rm, 6.0, LINE);
+                        g.fill(rm, 6.0, pal().line);
                     }
-                    g.text(ICON_REMOVE, &g.f.icon_small, rm, if over { TEXT } else { FAINT });
+                    g.text(ICON_REMOVE, &g.f.icon_small, rm, if over { pal().text } else { pal().faint });
                 }
                 if let Some(p) = playing
                     && p.duration > 0.0
@@ -1011,9 +1011,9 @@ impl Lyrebird {
 
         // Arama kutusu: yazılan her şey buraya gelir.
         let b = self.search_rect();
-        g.fill(b, 8.0, HOVER);
+        g.fill(b, 8.0, pal().hover);
         g.stroke(b, 8.0, accent().alpha(0.6), 1.0);
-        g.text(ICON_SEARCH, &g.f.icon_small, Rect::new(b.l + 12.0, b.t, b.l + 32.0, b.b), MUTED);
+        g.text(ICON_SEARCH, &g.f.icon_small, Rect::new(b.l + 12.0, b.t, b.l + 32.0, b.b), pal().muted);
         let tx = b.l + 40.0;
         let text_r = if self.query.is_empty() { b.r - 12.0 } else { self.search_clear_rect().l - 6.0 };
         let tw = g.measure(&self.query, &g.f.text);
@@ -1022,7 +1022,7 @@ impl Lyrebird {
                 t!("Search Myinstants…", "Myinstants'ta ara…"),
                 &g.f.text,
                 Rect::new(tx + 4.0, b.t, text_r, b.b),
-                FAINT,
+                pal().faint,
             );
         } else {
             if self.selected {
@@ -1032,9 +1032,9 @@ impl Lyrebird {
                     accent().alpha(0.35),
                 );
             }
-            g.text(&self.query, &g.f.text, Rect::new(tx, b.t, text_r, b.b), TEXT);
+            g.text(&self.query, &g.f.text, Rect::new(tx, b.t, text_r, b.b), pal().text);
             let c = self.search_clear_rect();
-            icon_button(g, c, ICON_REMOVE, FAINT, self.hover == Hit::SearchClear);
+            icon_button(g, c, ICON_REMOVE, pal().faint, self.hover == Hit::SearchClear);
         }
         if !self.selected {
             let cx = (tx + tw + 1.0).min(text_r);
@@ -1044,9 +1044,9 @@ impl Lyrebird {
         // Sonuçlar ya da durum.
         let area = Rect::new(0.0, self.found_top() - 2.0, w, h - BOTTOM);
         let message = match &self.find_state {
-            FindState::Error(e) => Some((e.as_str(), RED)),
-            FindState::Loading if self.found.is_empty() => Some((t!("Searching…", "Aranıyor…"), MUTED)),
-            FindState::Done if self.found.is_empty() => Some((t!("Nothing found", "Bir şey bulunamadı"), MUTED)),
+            FindState::Error(e) => Some((e.as_str(), pal().red)),
+            FindState::Loading if self.found.is_empty() => Some((t!("Searching…", "Aranıyor…"), pal().muted)),
+            FindState::Done if self.found.is_empty() => Some((t!("Nothing found", "Bir şey bulunamadı"), pal().muted)),
             _ => None,
         };
         if let Some((text, color)) = message {
@@ -1067,15 +1067,15 @@ impl Lyrebird {
                 if playing {
                     g.fill(r, 8.0, accent().alpha(0.08));
                 } else if hovered {
-                    g.fill(r, 8.0, HOVER);
+                    g.fill(r, 8.0, pal().hover);
                 }
                 let left = Rect::new(r.l + 8.0, r.t, r.l + 28.0, r.b);
                 if waiting {
-                    g.text("…", &g.f.small_center, left, MUTED);
+                    g.text("…", &g.f.small_center, left, pal().muted);
                 } else if playing {
                     g.text(ICON_STOP, &g.f.icon_small, left, accent());
                 } else if hovered {
-                    g.text(ICON_PLAY, &g.f.icon_small, left, MUTED);
+                    g.text(ICON_PLAY, &g.f.icon_small, left, pal().muted);
                 }
                 let add = self.found_add_rect(g, n);
                 let name_r = if f.added || f.loading || hovered { add.l - 10.0 } else { r.r - 10.0 };
@@ -1083,13 +1083,13 @@ impl Lyrebird {
                     &f.name,
                     &g.f.text,
                     Rect::new(r.l + 36.0, r.t, name_r, r.b),
-                    if playing { accent() } else { TEXT },
+                    if playing { accent() } else { pal().text },
                 );
                 if f.added {
                     g.text(ICON_CHECK, &g.f.icon_small, Rect::new(add.l, add.t, add.l + 20.0, add.b), accent());
                     g.text(t!("Added", "Eklendi"), &g.f.small, Rect::new(add.l + 24.0, add.t, add.r, add.b), accent());
                 } else if f.loading && !waiting {
-                    g.text(t!("Adding…", "Ekleniyor…"), &g.f.small, add, MUTED);
+                    g.text(t!("Adding…", "Ekleniyor…"), &g.f.small, add, pal().muted);
                 } else if hovered {
                     button(g, add, t!("Add", "Ekle"), Some(ICON_ADD), None, self.hover == Hit::FoundAdd(n));
                 }

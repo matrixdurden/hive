@@ -849,27 +849,27 @@ impl Dormouse {
     // --- Çizim ---
 
     fn panel(g: &Gfx, r: Rect, title: &str, sub: &str) {
-        g.fill(r, 12.0, PANEL);
-        g.stroke(r, 12.0, LINE, 1.0);
+        g.fill(r, 12.0, pal().panel);
+        g.stroke(r, 12.0, pal().line, 1.0);
         let t = Rect::new(r.l + 20.0, r.t + 10.0, r.r - 20.0, r.t + 34.0);
-        g.text(title, &g.f.strong, t, TEXT);
-        g.text(sub, &g.f.small, Rect::new(t.l, t.b - 2.0, t.r, t.b + 16.0), MUTED);
+        g.text(title, &g.f.strong, t, pal().text);
+        g.text(sub, &g.f.small, Rect::new(t.l, t.b - 2.0, t.r, t.b + 16.0), pal().muted);
     }
 
     fn paint_segments(&self, g: &Gfx, r: Rect, labels: &[String], selected: usize, hover: impl Fn(usize) -> bool) {
         let segs = Self::segments(g, r, labels);
         if let (Some(first), Some(last)) = (segs.first(), segs.last()) {
-            g.fill(Rect::new(first.l - 3.0, first.t - 3.0, last.r + 3.0, last.b + 3.0), 8.0, HOVER);
+            g.fill(Rect::new(first.l - 3.0, first.t - 3.0, last.r + 3.0, last.b + 3.0), 8.0, pal().hover);
         }
         for (j, (s, label)) in segs.iter().zip(labels).enumerate() {
             let c = if j == selected {
                 g.fill(*s, 6.0, accent());
                 on_accent()
             } else if hover(j) {
-                g.fill(*s, 6.0, SEL);
-                TEXT
+                g.fill(*s, 6.0, pal().sel);
+                pal().text
             } else {
-                MUTED
+                pal().muted
             };
             g.text(label, &g.f.button, *s, c);
         }
@@ -878,63 +878,63 @@ impl Dormouse {
     pub fn paint(&self, g: &Gfx) {
         let w = self.w;
         let dot = if self.ac {
-            GREEN
+            pal().green
         } else if self.awake.is_empty() {
             accent()
         } else {
-            RED
+            pal().red
         };
-        status(g, self.head_x + 16.0, HEAD_CY, dot, &self.status_text(), MUTED, self.folder_rect().l - 8.0);
-        icon_button(g, self.folder_rect(), ICON_FOLDER, MUTED, self.hover == Hit::Folder);
+        status(g, self.head_x + 16.0, HEAD_CY, dot, &self.status_text(), pal().muted, self.folder_rect().l - 8.0);
+        icon_button(g, self.folder_rect(), ICON_FOLDER, pal().muted, self.hover == Hit::Folder);
 
         let l = self.layout_all();
         g.clip(Rect::new(0.0, HEADER, w, self.h), || {
             let top = HEADER + 16.0 - self.scroll;
-            g.text(t!("Gear", "Vites"), &g.f.strong, Rect::new(PAD, top, w / 2.0, top + 24.0), TEXT);
+            g.text(t!("Gear", "Vites"), &g.f.strong, Rect::new(PAD, top, w / 2.0, top + 24.0), pal().text);
             let how = if self.cfg.auto && !self.manual { t!("automatic", "otomatik") } else { t!("chosen by you", "elle seçildi") };
-            g.text(how, &g.f.small_right, Rect::new(w / 2.0, top + 2.0, w - PAD, top + 22.0), FAINT);
+            g.text(how, &g.f.small_right, Rect::new(w / 2.0, top + 2.0, w - PAD, top + 22.0), pal().faint);
 
             for (i, c) in l.cards.iter().enumerate() {
                 let m = MODES[i];
                 let selected = self.mode == m;
                 let hovered = self.hover == Hit::Card(m);
-                g.fill(*c, 12.0, if hovered && !selected { HOVER } else { PANEL });
+                g.fill(*c, 12.0, if hovered && !selected { pal().hover } else { pal().panel });
                 if selected {
                     g.stroke(*c, 12.0, accent(), 2.0);
                 } else {
-                    g.stroke(*c, 12.0, LINE, 1.0);
+                    g.stroke(*c, 12.0, pal().line, 1.0);
                 }
                 let x = c.l + 16.0;
-                let fg = if selected { accent() } else { TEXT };
-                g.text(mode_icon(m), &g.f.icon, Rect::new(x, c.t + 14.0, x + 26.0, c.t + 40.0), if selected { accent() } else { MUTED });
+                let fg = if selected { accent() } else { pal().text };
+                g.text(mode_icon(m), &g.f.icon, Rect::new(x, c.t + 14.0, x + 26.0, c.t + 40.0), if selected { accent() } else { pal().muted });
                 g.text(mode_name(m), &g.f.strong, Rect::new(x + 34.0, c.t + 14.0, c.r - 16.0, c.t + 40.0), fg);
                 let est = self.full_text(m);
-                let ec = if self.rate_for(m).is_some() { TEXT } else { FAINT };
+                let ec = if self.rate_for(m).is_some() { pal().text } else { pal().faint };
                 g.text(&est, &g.f.small, Rect::new(x, c.b - 32.0, c.r - 16.0, c.b - 10.0), ec);
             }
 
             // İki satırlı ayar satırı: başlık ve altında kısa açıklama; sağda kontrol.
             let setting = |r: Rect, title: &str, sub: &str, right: f32| {
-                g.text(title, &g.f.text, Rect::new(r.l, r.t + 4.0, r.r - right, r.cy() + 4.0), TEXT);
-                g.text(sub, &g.f.small, Rect::new(r.l, r.cy() - 2.0, r.r - right, r.b), MUTED);
+                g.text(title, &g.f.text, Rect::new(r.l, r.t + 4.0, r.r - right, r.cy() + 4.0), pal().text);
+                g.text(sub, &g.f.small, Rect::new(r.l, r.cy() - 2.0, r.r - right, r.b), pal().muted);
             };
             Self::panel(g, l.panel1, t!("Automatic", "Otomatik"), "");
             let r = l.auto_row;
             setting(r, t!("Follow the charger", "Şarja göre geç"), t!("unplugged → Out, plugged in → Plugged in", "çıkınca Dışarıda, takılınca Prizde"), 60.0);
             toggle(g, toggle_rect(r.r, r.cy()), self.cfg.auto, accent(), true);
             let r = l.thr_row;
-            g.fill(Rect::new(r.l, r.t, r.r, r.t + 1.0), 0.0, HOVER);
+            g.fill(Rect::new(r.l, r.t, r.r, r.t + 1.0), 0.0, pal().hover);
             setting(r, t!("Low battery alert", "Pil uyarısı"), t!("a notification; switching stays yours", "bildirim gelir, geçiş sende"), 300.0);
             let sel = THRESHOLDS.iter().position(|&t| t == self.cfg.threshold).unwrap_or(0);
             self.paint_segments(g, r, &Self::threshold_labels(), sel, |k| self.hover == Hit::Threshold(k));
             let r = l.guard_row;
-            g.fill(Rect::new(r.l, r.t, r.r, r.t + 1.0), 0.0, HOVER);
+            g.fill(Rect::new(r.l, r.t, r.r, r.t + 1.0), 0.0, pal().hover);
             setting(r, t!("RTX watch", "RTX bekçisi"), t!("names the app that wakes the discrete GPU on battery", "pildeyken RTX'i uyandıran uygulamayı söyler"), 60.0);
             toggle(g, toggle_rect(r.r, r.cy()), self.cfg.guard, accent(), self.luid.is_some());
 
             if let Some(r) = l.hint {
                 let text = format!("{} · {}", t!("Worth closing", "Kapatman iyi olur"), self.suggest.join(", "));
-                g.text(&text, &g.f.small, r, MUTED);
+                g.text(&text, &g.f.small, r, pal().muted);
             }
         });
     }

@@ -756,28 +756,28 @@ impl Cheshire {
     fn paint_segments(&self, g: &Gfx, r: Rect, labels: &[String], selected: usize, hover: impl Fn(usize) -> bool) {
         let segs = Self::segments(g, r, labels);
         if let (Some(first), Some(last)) = (segs.first(), segs.last()) {
-            g.fill(Rect::new(first.l - 3.0, first.t - 3.0, last.r + 3.0, last.b + 3.0), 8.0, HOVER);
+            g.fill(Rect::new(first.l - 3.0, first.t - 3.0, last.r + 3.0, last.b + 3.0), 8.0, pal().hover);
         }
         for (j, (s, label)) in segs.iter().zip(labels).enumerate() {
             let c = if j == selected {
                 g.fill(*s, 6.0, accent());
                 on_accent()
             } else if hover(j) {
-                g.fill(*s, 6.0, SEL);
-                TEXT
+                g.fill(*s, 6.0, pal().sel);
+                pal().text
             } else {
-                MUTED
+                pal().muted
             };
             g.text(label, &g.f.button, *s, c);
         }
     }
 
     fn panel(g: &Gfx, r: Rect, title: &str, sub: &str) {
-        g.fill(r, 12.0, PANEL);
-        g.stroke(r, 12.0, LINE, 1.0);
+        g.fill(r, 12.0, pal().panel);
+        g.stroke(r, 12.0, pal().line, 1.0);
         let t = Rect::new(r.l + 20.0, r.t + 10.0, r.r - 180.0, r.t + 34.0);
-        g.text(title, &g.f.strong, t, TEXT);
-        g.text(sub, &g.f.small, Rect::new(t.l, t.b - 2.0, t.r, t.b + 16.0), MUTED);
+        g.text(title, &g.f.strong, t, pal().text);
+        g.text(sub, &g.f.small, Rect::new(t.l, t.b - 2.0, t.r, t.b + 16.0), pal().muted);
     }
 
     /// Başlıktaki durum, seçili dilde (motor yalnızca ham bilgiyi bildirir).
@@ -813,17 +813,17 @@ impl Cheshire {
 
         // Başlık: durum ve düğmeler.
         let status_text = self.status_text();
-        let dot = if paused { MUTED } else { GREEN };
-        status(g, self.head_x + 16.0, HEAD_CY, dot, &status_text, MUTED, self.pause_rect().l - 8.0);
+        let dot = if paused { pal().muted } else { pal().green };
+        status(g, self.head_x + 16.0, HEAD_CY, dot, &status_text, pal().muted, self.pause_rect().l - 8.0);
         let pause_icon = if st.user_paused { ICON_PLAY } else { ICON_PAUSE };
-        icon_button(g, self.pause_rect(), pause_icon, MUTED, self.hover == Hit::Pause);
-        icon_button(g, self.folder_rect(), ICON_FOLDER, MUTED, self.hover == Hit::Folder);
-        icon_button(g, self.add_rect(), ICON_ADD, MUTED, self.hover == Hit::Add);
+        icon_button(g, self.pause_rect(), pause_icon, pal().muted, self.hover == Hit::Pause);
+        icon_button(g, self.folder_rect(), ICON_FOLDER, pal().muted, self.hover == Hit::Folder);
+        icon_button(g, self.add_rect(), ICON_ADD, pal().muted, self.hover == Hit::Add);
 
         let l = self.layout_all(g);
         g.clip(Rect::new(0.0, HEADER, w, self.h), || {
             let top = HEADER + 16.0 - self.scroll;
-            g.text(t!("Wallpapers", "Duvar kâğıtları"), &g.f.strong, Rect::new(PAD, top, w - PAD, top + 24.0), TEXT);
+            g.text(t!("Wallpapers", "Duvar kâğıtları"), &g.f.strong, Rect::new(PAD, top, w - PAD, top + 24.0), pal().text);
 
             // Galeri.
             for (i, ((file, en, tr), c)) in st.walls.iter().zip(&l.cards).enumerate() {
@@ -834,23 +834,23 @@ impl Cheshire {
                 let selected = *file == st.selected;
                 let hovered = self.hover == Hit::Wall(i);
                 let img = Rect::new(c.l, c.t, c.r, c.b - 34.0);
-                g.fill(img, 8.0, HOVER);
+                g.fill(img, 8.0, pal().hover);
                 match self.thumbs.get(file).map(|&(_, id)| id) {
                     Some(id) => g.clip(img, || g.image(id, img, if hovered || selected { 1.0 } else { 0.8 })),
-                    None => g.text(t!("preparing preview…", "önizleme hazırlanıyor…"), &g.f.small_center, img, FAINT),
+                    None => g.text(t!("preparing preview…", "önizleme hazırlanıyor…"), &g.f.small_center, img, pal().faint),
                 }
                 if selected {
                     g.stroke(Rect::new(img.l - 3.0, img.t - 3.0, img.r + 3.0, img.b + 3.0), 10.0, accent(), 2.0);
                 } else if hovered {
-                    g.stroke(img, 8.0, LINE, 1.0);
+                    g.stroke(img, 8.0, pal().line, 1.0);
                 }
-                let lc = if selected { accent() } else if hovered { TEXT } else { MUTED };
+                let lc = if selected { accent() } else if hovered { pal().text } else { pal().muted };
                 g.text(name, &g.f.text, Rect::new(c.l + 2.0, c.b - 30.0, c.r, c.b - 4.0), lc);
             }
             if st.walls.is_empty() {
                 let t = top + 32.0;
                 let msg = t!("No wallpapers · drop a .cheshire file here", "Duvar kâğıdı yok · bir .cheshire dosyasını buraya sürükle");
-                g.text(msg, &g.f.small, Rect::new(PAD, t, w - PAD, t + 24.0), FAINT);
+                g.text(msg, &g.f.small, Rect::new(PAD, t, w - PAD, t + 24.0), pal().faint);
             }
 
             // Seçili duvar kâğıdının paneli.
@@ -862,32 +862,32 @@ impl Cheshire {
             if st.params.is_empty() {
                 let t = l.panel1.t + PANEL_HEAD;
                 let msg = t!("This wallpaper has no settings.", "Bu duvar kâğıdının ayarı yok.");
-                g.text(msg, &g.f.small, Rect::new(PAD + 20.0, t, w - PAD - 20.0, t + ROW), FAINT);
+                g.text(msg, &g.f.small, Rect::new(PAD + 20.0, t, w - PAD - 20.0, t + ROW), pal().faint);
             }
             for (k, &(n, r)) in l.rows.iter().enumerate() {
                 let p = &st.params[n];
                 if k > 0 {
-                    g.fill(Rect::new(r.l, r.t, r.r, r.t + 1.0), 0.0, HOVER);
+                    g.fill(Rect::new(r.l, r.t, r.r, r.t + 1.0), 0.0, pal().hover);
                 }
-                g.text(pick(&p.label[0], &p.label[1]), &g.f.text, Rect::new(r.l, r.t, r.l + LABEL_W - 16.0, r.b), TEXT);
+                g.text(pick(&p.label[0], &p.label[1]), &g.f.text, Rect::new(r.l, r.t, r.l + LABEL_W - 16.0, r.b), pal().text);
                 match &p.kind {
                     Kind::Slider { min, max, value, .. } => {
                         let (a, b) = Self::slider_track(r);
                         let active = self.drag == Some(n) || self.hover == Hit::Slider(n);
                         let v = if max > min { (value - min) / (max - min) } else { 0.0 };
                         slider(g, a, b, r.cy(), v, accent(), active);
-                        g.text(&format!("{value:.2}"), &g.f.small_right, Rect::new(b + 8.0, r.t, r.r, r.b), MUTED);
+                        g.text(&format!("{value:.2}"), &g.f.small_right, Rect::new(b + 8.0, r.t, r.r, r.b), pal().muted);
                     }
                     Kind::Choice { options, value, .. } if options.len() > MAX_SEGMENTS => {
                         let (prev, label, next) = Self::stepper(r);
                         let len = options.len();
-                        g.fill(Rect::new(prev.l - 3.0, prev.t - 3.0, next.r + 3.0, next.b + 3.0), 8.0, HOVER);
+                        g.fill(Rect::new(prev.l - 3.0, prev.t - 3.0, next.r + 3.0, next.b + 3.0), 8.0, pal().hover);
                         let hp = self.hover == Hit::Choice(n, (value + len - 1) % len);
                         let hn = self.hover == Hit::Choice(n, (value + 1) % len);
-                        icon_button(g, prev, "\u{E76B}", MUTED, hp);
-                        icon_button(g, next, "\u{E76C}", MUTED, hn);
+                        icon_button(g, prev, "\u{E76B}", pal().muted, hp);
+                        icon_button(g, next, "\u{E76C}", pal().muted, hn);
                         let current = options.get(*value).map(|o| choice_label(o)).unwrap_or_default();
-                        g.text(&current, &g.f.button, label, TEXT);
+                        g.text(&current, &g.f.button, label, pal().text);
                     }
                     Kind::Choice { options, value, .. } => {
                         self.paint_segments(g, r, &choice_labels(options), *value, |j| self.hover == Hit::Choice(n, j));
@@ -897,11 +897,11 @@ impl Cheshire {
                         let list = colors(default);
                         for (j, hex) in list.iter().enumerate() {
                             let s = Self::swatch(r, list.len(), j);
-                            g.circle((s.l + s.r) / 2.0, s.cy(), 8.0, hex_color(hex).unwrap_or(TEXT));
+                            g.circle((s.l + s.r) / 2.0, s.cy(), 8.0, hex_color(hex).unwrap_or(pal().text));
                             if hex.eq_ignore_ascii_case(value) {
-                                g.stroke(s, 11.0, TEXT, 2.0);
+                                g.stroke(s, 11.0, pal().text, 2.0);
                             } else if self.hover == Hit::Swatch(n, j) {
-                                g.stroke(s, 11.0, MUTED, 1.0);
+                                g.stroke(s, 11.0, pal().muted, 1.0);
                             }
                         }
                     }
@@ -911,17 +911,17 @@ impl Cheshire {
             // Motor paneli.
             Self::panel(g, l.panel2, t!("Engine", "Motor"), t!("For every wallpaper", "Bütün duvar kâğıtları için"));
             let r = l.fps_row;
-            g.text(t!("Frame rate", "Kare hızı"), &g.f.text, Rect::new(r.l, r.t, r.l + LABEL_W, r.b), TEXT);
+            g.text(t!("Frame rate", "Kare hızı"), &g.f.text, Rect::new(r.l, r.t, r.l + LABEL_W, r.b), pal().text);
             let sel = FPS.iter().position(|&f| f == st.fps).unwrap_or(usize::MAX);
             self.paint_segments(g, r, &Self::fps_labels(), sel, |k| self.hover == Hit::Fps(k));
             let r = l.battery_row;
-            g.fill(Rect::new(r.l, r.t, r.r, r.t + 1.0), 0.0, HOVER);
-            g.text(t!("Pause on battery", "Pildeyken duraklat"), &g.f.text, Rect::new(r.l, r.t, r.l + LABEL_W, r.b), TEXT);
+            g.fill(Rect::new(r.l, r.t, r.r, r.t + 1.0), 0.0, pal().hover);
+            g.text(t!("Pause on battery", "Pildeyken duraklat"), &g.f.text, Rect::new(r.l, r.t, r.l + LABEL_W, r.b), pal().text);
             toggle(g, toggle_rect(r.r, r.cy()), st.battery, accent(), true);
 
             if !st.error.is_empty() {
                 let t = l.panel2.b + 12.0;
-                g.text(&st.error, &g.f.small, Rect::new(PAD, t, w - PAD, t + 22.0), RED);
+                g.text(&st.error, &g.f.small, Rect::new(PAD, t, w - PAD, t + 22.0), pal().red);
             }
         });
     }

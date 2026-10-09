@@ -1,52 +1,155 @@
-//! Ortak renkler ve parçalar: kenar çubuğu ve bütün araç sayfaları aynı görünür. Windows 11
-//! teması (koyu): pencerenin zemini Mica, üstündeki her şey yarı saydam katmanlar; düğme, anahtar
-//! ve kaydırıcılar sistemin vurgu rengindedir. Araçların kendi renkleri yalnızca ikonlarda kalır.
+//! Ortak renkler ve parçalar: kenar çubuğu ve bütün araç sayfaları aynı görünür. Renkler
+//! `pal()`'dan gelir (Claude ya da Windows teması); düğme, anahtar ve kaydırıcılar temanın vurgu
+//! rengindedir. Araçların kendi renkleri yalnızca ikonlarda kalır.
 
 use std::cell::Cell;
 
 use crate::gfx::{Color, Gfx, Rect};
 
-/// Mica yoksa (Windows 10) pencerenin düz zemini.
-pub const BG: Color = Color::rgb(0x141414);
-pub const HOVER: Color = Color(0xffffff, 0.06);
-pub const SEL: Color = Color(0xffffff, 0.09);
-pub const LINE: Color = Color(0xffffff, 0.08);
-/// Kart ve panel zemini.
-pub const PANEL: Color = Color(0xffffff, 0.05);
-pub const TEXT: Color = Color::rgb(0xffffff);
-pub const MUTED: Color = Color(0xffffff, 0.786);
-pub const FAINT: Color = Color(0xffffff, 0.5);
-pub const GREEN: Color = Color::rgb(0x6ccb5f);
-pub const RED: Color = Color::rgb(0xff99a4);
-/// İpucu kutusu (opak, içeriğin üstünde okunsun).
-pub const TIP: Color = Color::rgb(0x262626);
-
-thread_local! {
-    static ACCENT: Cell<Option<Color>> = const { Cell::new(None) };
+/// Arayüzün renkleri. İki tema var: Claude (sıcak koyu, kil turuncusu vurgu, opak) ve Windows
+/// (Windows 11 Ayarlar uygulaması: Mica zemin, yarı saydam katmanlar, sistemin vurgu rengi).
+#[derive(Clone, Copy)]
+pub struct Palette {
+    /// Pencerenin zemini (kenar çubuğu); Mica'da saydam.
+    pub bg: Color,
+    /// İçerik alanının katmanı ve kenarlığı.
+    pub layer: Color,
+    pub layer_line: Color,
+    pub hover: Color,
+    pub sel: Color,
+    pub line: Color,
+    /// Kart ve panel zemini.
+    pub panel: Color,
+    pub text: Color,
+    pub muted: Color,
+    pub faint: Color,
+    pub green: Color,
+    pub red: Color,
+    /// İpucu kutusu (opak, içeriğin üstünde okunsun).
+    pub tip: Color,
+    /// Kaydırıcı tutamağının çevresi (opak).
+    pub knob: Color,
+    pub accent: Color,
+    pub on_accent: Color,
+    /// Zemin Windows'un Mica camı mı.
+    pub mica: bool,
 }
 
-/// Sistemin vurgu rengi (koyu temadaki açık tonu), bir kez okunur.
-pub fn accent() -> Color {
-    ACCENT.with(|a| {
-        a.get().unwrap_or_else(|| {
-            let c = crate::hatter::theme::current().accent;
-            a.set(Some(c));
-            c
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Theme {
+    Claude,
+    Windows,
+}
+
+impl Theme {
+    pub fn id(self) -> &'static str {
+        match self {
+            Theme::Claude => "claude",
+            Theme::Windows => "windows",
+        }
+    }
+
+    pub fn from_id(s: &str) -> Option<Self> {
+        [Theme::Claude, Theme::Windows].into_iter().find(|t| t.id() == s)
+    }
+}
+
+const CLAUDE: Palette = Palette {
+    bg: Color::rgb(0x1f1e1d),
+    layer: Color::rgb(0x262624),
+    layer_line: Color(0xdedcd1, 0.08),
+    hover: Color(0xf0eee6, 0.06),
+    sel: Color(0xf0eee6, 0.09),
+    line: Color(0xdedcd1, 0.12),
+    panel: Color(0xf0eee6, 0.045),
+    text: Color::rgb(0xfaf9f5),
+    muted: Color::rgb(0xc2c0b6),
+    faint: Color::rgb(0x8f8d86),
+    green: Color::rgb(0x7ec27a),
+    red: Color::rgb(0xf08a7e),
+    tip: Color::rgb(0x30302e),
+    knob: Color::rgb(0x3a3a37),
+    accent: Color::rgb(0xd97757),
+    on_accent: Color::rgb(0xffffff),
+    mica: false,
+};
+
+/// Windows 11 (WinUI) koyu tema değerleri; vurgu rengi sistemden okunup `windows()` içinde konur.
+const WINDOWS: Palette = Palette {
+    bg: Color::rgb(0x202020),
+    layer: Color(0x3a3a3a, 0.3),
+    layer_line: Color(0x000000, 0.1),
+    hover: Color(0xffffff, 0.06),
+    sel: Color(0xffffff, 0.09),
+    line: Color(0xffffff, 0.08),
+    panel: Color(0xffffff, 0.05),
+    text: Color::rgb(0xffffff),
+    muted: Color(0xffffff, 0.786),
+    faint: Color(0xffffff, 0.5),
+    green: Color::rgb(0x6ccb5f),
+    red: Color::rgb(0xff99a4),
+    tip: Color::rgb(0x2c2c2c),
+    knob: Color::rgb(0x454545),
+    accent: Color::rgb(0x60cdff),
+    on_accent: Color(0x000000, 0.9),
+    mica: false,
+};
+
+fn windows(mica: bool) -> Palette {
+    // Vurgu rengi gri seçilmişse (doygunluk yok) düğmeler arka plandan ayrılmıyor: Windows'un
+    // varsayılan mavisi.
+    let sys = crate::hatter::theme::current().accent.0;
+    let ch = |s: u32| ((sys >> s) & 0xff) as f32 / 255.0;
+    let (r, g, b) = (ch(16), ch(8), ch(0));
+    let sat = r.max(g).max(b) - r.min(g).min(b);
+    let accent = if sat < 0.15 { WINDOWS.accent } else { Color::rgb(sys) };
+    let lum = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+    let on_accent = if sat < 0.15 || lum > 0.5 { Color(0x000000, 0.9) } else { Color::rgb(0xffffff) };
+    Palette { bg: if mica { Color(0, 0.0) } else { WINDOWS.bg }, accent, on_accent, mica, ..WINDOWS }
+}
+
+thread_local! {
+    static THEME: Cell<Theme> = const { Cell::new(Theme::Claude) };
+    static PALETTE: Cell<Option<Palette>> = const { Cell::new(None) };
+}
+
+/// Geçerli tema.
+pub fn theme() -> Theme {
+    THEME.with(|t| t.get())
+}
+
+/// Temayı değiştirir; palet bir sonraki çizimde yeniden kurulur.
+pub fn set_theme(t: Theme) {
+    THEME.with(|c| c.set(t));
+    reset_accent();
+}
+
+/// Geçerli palet (ilk çağrıda kurulur).
+pub fn pal() -> Palette {
+    PALETTE.with(|p| {
+        p.get().unwrap_or_else(|| {
+            let v = match theme() {
+                Theme::Claude => CLAUDE,
+                Theme::Windows => windows(crate::hatter::theme::mica()),
+            };
+            p.set(Some(v));
+            v
         })
     })
 }
 
-/// Vurgu renginin üstündeki yazı: açık vurguda siyah, koyuda beyaz.
-pub fn on_accent() -> Color {
-    let c = accent().0;
-    let ch = |s: u32| ((c >> s) & 0xff) as f32 / 255.0;
-    let lum = 0.2126 * ch(16) + 0.7152 * ch(8) + 0.0722 * ch(0);
-    if lum > 0.5 { Color(0x000000, 0.9) } else { Color::rgb(0xffffff) }
+pub fn accent() -> Color {
+    pal().accent
 }
 
-/// Windows'ta vurgu rengi değişti: bir sonraki çizimde yeniden okunur.
+/// Vurgu renginin üstündeki yazı.
+pub fn on_accent() -> Color {
+    pal().on_accent
+}
+
+/// Windows'ta vurgu rengi ya da tema değişti: bir sonraki çizimde yeniden okunur.
 pub fn reset_accent() {
-    ACCENT.with(|a| a.set(None));
+    PALETTE.with(|p| p.set(None));
 }
 
 /// Araç sayfasının üst çubuğu ve kenar boşluğu.
@@ -90,9 +193,9 @@ pub fn button(g: &Gfx, r: Rect, label: &str, icon: Option<&str>, primary: Option
             on_accent()
         }
         None => {
-            g.fill(r, 4.0, if hovered { Color(0xffffff, 0.084) } else { Color(0xffffff, 0.061) });
-            g.stroke(r, 4.0, LINE, 1.0);
-            TEXT
+            g.fill(r, 4.0, if hovered { pal().hover.alpha(1.4) } else { pal().hover });
+            g.stroke(r, 4.0, pal().line, 1.0);
+            pal().text
         }
     };
     match icon {
@@ -107,9 +210,9 @@ pub fn button(g: &Gfx, r: Rect, label: &str, icon: Option<&str>, primary: Option
 /// Yalnızca ikon: üstüne gelince zemin belirir.
 pub fn icon_button(g: &Gfx, r: Rect, icon: &str, color: Color, hovered: bool) {
     if hovered {
-        g.fill(r, 4.0, HOVER);
+        g.fill(r, 4.0, pal().hover);
     }
-    g.text(icon, &g.f.icon, r, if hovered { TEXT } else { color });
+    g.text(icon, &g.f.icon, r, if hovered { pal().text } else { color });
 }
 
 /// Sağa yaslı aç/kapa, 40×22.
@@ -125,7 +228,7 @@ pub fn toggle(g: &Gfx, r: Rect, on: bool, _accent: Color, enabled: bool) {
         g.fill(r, r.h() / 2.0, accent());
         g.circle(r.r - 11.0, r.cy(), 6.0, on_accent());
     } else {
-        let c = if enabled { MUTED } else { FAINT };
+        let c = if enabled { pal().muted } else { pal().faint };
         g.stroke(r, r.h() / 2.0, c, 1.0);
         g.circle(r.l + 11.0, r.cy(), 5.0, c);
     }
@@ -135,21 +238,21 @@ pub fn toggle(g: &Gfx, r: Rect, on: bool, _accent: Color, enabled: bool) {
 /// Windows'un kaydırıcısı: ince iz, vurgu renginde dolu kısım, ortası vurgu renginde tutamak.
 pub fn slider(g: &Gfx, a: f32, b: f32, cy: f32, v: f32, _accent: Color, active: bool) {
     let x = a + (b - a) * v.clamp(0.0, 1.0);
-    g.fill(Rect::new(a, cy - 2.0, b, cy + 2.0), 2.0, Color(0xffffff, 0.54));
+    g.fill(Rect::new(a, cy - 2.0, b, cy + 2.0), 2.0, pal().faint);
     g.fill(Rect::new(a, cy - 2.0, x, cy + 2.0), 2.0, accent());
-    g.circle(x, cy, 10.0, Color::rgb(0x454545));
+    g.circle(x, cy, 10.0, pal().knob);
     g.circle(x, cy, if active { 7.0 } else { 6.0 }, accent());
 }
 
 /// Ayar satırı: başlık, altında açıklama, altında ince çizgi. Sağ taraf kontrol için boş kalır.
 pub fn setting_row(g: &Gfx, r: Rect, title: &str, sub: &str, right_space: f32) {
     if sub.is_empty() {
-        g.text(title, &g.f.strong, Rect::new(r.l, r.t, r.r - right_space, r.b), TEXT);
+        g.text(title, &g.f.strong, Rect::new(r.l, r.t, r.r - right_space, r.b), pal().text);
     } else {
-        g.text(title, &g.f.strong, Rect::new(r.l, r.t + 12.0, r.r - right_space, r.cy()), TEXT);
-        g.text(sub, &g.f.small, Rect::new(r.l, r.cy(), r.r - right_space, r.b - 12.0), MUTED);
+        g.text(title, &g.f.strong, Rect::new(r.l, r.t + 12.0, r.r - right_space, r.cy()), pal().text);
+        g.text(sub, &g.f.small, Rect::new(r.l, r.cy(), r.r - right_space, r.b - 12.0), pal().muted);
     }
-    g.fill(Rect::new(r.l, r.b - 1.0, r.r, r.b), 0.0, HOVER);
+    g.fill(Rect::new(r.l, r.b - 1.0, r.r, r.b), 0.0, pal().hover);
 }
 
 /// Kısayol ya da etiket kutucuğu.

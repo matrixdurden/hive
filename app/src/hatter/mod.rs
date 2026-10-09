@@ -19,6 +19,8 @@ mod tray;
 
 use std::path::PathBuf;
 
+pub use dock::{Geometry, geometry};
+
 use windows::Win32::Foundation::HWND;
 use windows::Win32::Graphics::Gdi::InvalidateRect;
 
@@ -30,7 +32,7 @@ pub const ACCENT: u32 = 0xfb923c;
 
 const ROW: f32 = 68.0;
 /// Simge boyu kaydırıcısının satırı (anahtarlardan sonra).
-const SIZE_ROW: usize = 3;
+const SIZE_ROW: usize = 2;
 const SIZES: (u32, u32, u32) = (36, 64, 4);
 
 pub fn dir() -> PathBuf {
@@ -51,8 +53,6 @@ pub fn installed() -> bool {
 
 #[derive(Clone, Copy, PartialEq)]
 pub struct Settings {
-    /// Pencere üstüne gelince saklan; kapalıysa ekranın altında yer ayırır.
-    pub autohide: bool,
     /// Simge boyu (DIP).
     pub size: u32,
     /// Etkin köşeler: sol üst görev görünümü, sağ alt masaüstü.
@@ -62,13 +62,12 @@ pub struct Settings {
 
 impl Settings {
     fn load() -> Self {
-        let mut s = Settings { autohide: true, size: 48, corner_tl: true, corner_br: true };
+        let mut s = Settings { size: 48, corner_tl: true, corner_br: true };
         let text = std::fs::read_to_string(ini()).unwrap_or_default();
         for line in text.lines() {
             let Some((k, v)) = line.split_once('=') else { continue };
             let (k, v) = (k.trim(), v.trim());
             match k {
-                "gizle" => s.autohide = v == "1",
                 "kose_sol_ust" => s.corner_tl = v == "1",
                 "kose_sag_alt" => s.corner_br = v == "1",
                 "boyut" => {
@@ -87,13 +86,7 @@ impl Settings {
         let b = |v: bool| v as u8;
         std::fs::write(
             ini(),
-            format!(
-                "gizle={}\nboyut={}\nkose_sol_ust={}\nkose_sag_alt={}\n",
-                b(self.autohide),
-                self.size,
-                b(self.corner_tl),
-                b(self.corner_br)
-            ),
+            format!("boyut={}\nkose_sol_ust={}\nkose_sag_alt={}\n", self.size, b(self.corner_tl), b(self.corner_br)),
         )
     }
 }
@@ -251,8 +244,6 @@ pub fn probe() -> String {
 enum Hit {
     None,
     Toggle(usize),
-    /// Dock modu: `true` akıllı gizle, `false` hep görünür.
-    Mode(bool),
     Size,
 }
 
@@ -294,23 +285,8 @@ impl Hatter {
         (r.r - 220.0, r.r - 52.0)
     }
 
-    /// Mod seçicisinin iki parçası: [hep görünür, akıllı gizle].
-    fn mode_rects(g: &Gfx, r: Rect) -> [Rect; 2] {
-        let labels = [t!("Always visible", "Hep görünür"), t!("Smart hide", "Akıllı gizle")];
-        let w = labels.iter().map(|l| g.measure(l, &g.f.button)).fold(0.0, f32::max) + 28.0;
-        let (t, b) = (r.cy() - 15.0, r.cy() + 15.0);
-        [Rect::new(r.r - 2.0 * w - 3.0, t, r.r - w - 3.0, b), Rect::new(r.r - w, t, r.r, b)]
-    }
-
-    fn hit(&self, g: &Gfx, x: f32, y: f32) -> Hit {
-        let [a, b] = Self::mode_rects(g, self.row(0));
-        if a.contains(x, y) {
-            return Hit::Mode(false);
-        }
-        if b.contains(x, y) {
-            return Hit::Mode(true);
-        }
-        for i in [1, 2] {
+    fn hit(&self, _g: &Gfx, x: f32, y: f32) -> Hit {
+        for i in [0, 1] {
             let r = self.row(i);
             if toggle_rect(r.r, r.cy()).contains(x, y) || (r.contains(x, y) && x > r.r - 120.0) {
                 return Hit::Toggle(i);
@@ -345,30 +321,14 @@ impl Hatter {
 
     pub fn paint(&self, g: &Gfx) {
         let s = &self.settings;
-        let head = if s.autohide {
-            t!("Dock on · hides when a window covers it", "Dock açık · pencere gelince saklanır")
-        } else {
-            t!("Dock on · always visible", "Dock açık · hep görünür")
-        };
-        status(g, self.head_x + 16.0, HEAD_CY, GREEN, head, MUTED, self.head_r - 8.0);
+        let head = t!(
+            "Dock on · always visible, maximized windows end above it",
+            "Dock açık · hep görünür, büyütülen pencereler onun üstünde biter"
+        );
+        status(g, self.head_x + 16.0, HEAD_CY, pal().green, head, pal().muted, self.head_r - 8.0);
 
         g.clip(Rect::new(0.0, HEADER, self.w, self.h), || {
-            let rows: [(&str, &str, bool); 3] = [
-                (
-                    "Dock",
-                    if s.autohide {
-                        t!(
-                            "Slides away when a window covers it · touch the bottom edge to bring it back",
-                            "Pencere üstüne gelince aşağı kayar · ekranın altına dokununca geri gelir"
-                        )
-                    } else {
-                        t!(
-                            "Always on screen like a Mac · maximized windows end above it",
-                            "Mac gibi hep ekranda · büyütülen pencereler onun üstünde biter"
-                        )
-                    },
-                    s.autohide,
-                ),
+            let rows: [(&str, &str, bool); 2] = [
                 (
                     t!("Top-left corner", "Sol üst köşe"),
                     t!(
@@ -388,26 +348,6 @@ impl Hatter {
             ];
             for (i, (title, sub, on)) in rows.iter().enumerate() {
                 let r = self.row(i);
-                if i == 0 {
-                    let seg = Self::mode_rects(g, r);
-                    setting_row(g, r, title, sub, r.r - seg[0].l + 16.0);
-                    g.fill(Rect::new(seg[0].l - 3.0, seg[0].t - 3.0, seg[1].r + 3.0, seg[1].b + 3.0), 6.0, HOVER);
-                    let labels = [t!("Always visible", "Hep görünür"), t!("Smart hide", "Akıllı gizle")];
-                    for (j, (sr, label)) in seg.iter().zip(labels).enumerate() {
-                        let selected = s.autohide == (j == 1);
-                        let c = if selected {
-                            g.fill(*sr, 4.0, accent());
-                            on_accent()
-                        } else if self.hover == Hit::Mode(j == 1) {
-                            g.fill(*sr, 4.0, SEL);
-                            TEXT
-                        } else {
-                            MUTED
-                        };
-                        g.text(label, &g.f.button, *sr, c);
-                    }
-                    continue;
-                }
                 setting_row(g, r, title, sub, 120.0);
                 toggle(g, toggle_rect(r.r, r.cy()), *on, accent(), true);
             }
@@ -418,7 +358,7 @@ impl Hatter {
             let (lo, hi, _) = SIZES;
             let v = (s.size - lo) as f32 / (hi - lo) as f32;
             slider(g, a, b, r.cy(), v, accent(), self.dragging || self.hover == Hit::Size);
-            g.text(&s.size.to_string(), &g.f.small_right, Rect::new(b + 8.0, r.t, r.r, r.b), MUTED);
+            g.text(&s.size.to_string(), &g.f.small_right, Rect::new(b + 8.0, r.t, r.r, r.b), pal().muted);
         });
     }
 }
@@ -472,17 +412,10 @@ impl ToolPage for Hatter {
         if pressed != self.hit(g, x, y) {
             return;
         }
-        if let Hit::Mode(auto) = pressed {
-            if self.settings.autohide != auto {
-                self.settings.autohide = auto;
-                self.commit();
-            }
-            return;
-        }
         if let Hit::Toggle(i) = pressed {
             let s = &mut self.settings;
             match i {
-                1 => s.corner_tl = !s.corner_tl,
+                0 => s.corner_tl = !s.corner_tl,
                 _ => s.corner_br = !s.corner_br,
             }
             self.commit();

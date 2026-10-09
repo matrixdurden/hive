@@ -11,6 +11,7 @@ mod config;
 mod dormouse;
 mod gfx;
 mod hatter;
+mod music;
 mod log;
 mod lyrebird;
 mod myinstants;
@@ -42,6 +43,7 @@ use windows::core::w;
 //   hive --tweedle-test   tweedle'ın gördüğü ses çıkışlarını ve medya oturumlarını yazdır
 //   hive --hatter-test    hatter'ın gördüğü pencereleri ve dock'taki öğeleri yazdır
 //   hive --hatter-pin <yol>  dock'a sabitle (sağ tık menüsünden)
+//   hive --music-test [klasör]  medya oturumlarını yazdır; klasöre widget önizlemesi çiz
 
 /// Bayrak İngilizce ya da Türkçe adıyla verilmiş mi.
 fn flag(args: &[String], en: &str, tr: &str) -> bool {
@@ -117,6 +119,15 @@ fn main() {
             print!("{}", hatter::probe());
             std::process::exit(0);
         }
+        Some("--music-test" | "--muzik-dene") => {
+            unsafe {
+                let _ = AttachConsole(ATTACH_PARENT_PROCESS);
+                let _ = windows::Win32::System::Com::CoInitializeEx(None, windows::Win32::System::Com::COINIT_MULTITHREADED);
+                let _ = SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+            }
+            print!("{}", music::probe(args.get(1).map(String::as_str)));
+            std::process::exit(0);
+        }
         Some("--hatter-pin") => {
             unsafe {
                 let _ = windows::Win32::System::Com::CoInitializeEx(None, windows::Win32::System::Com::COINIT_APARTMENTTHREADED);
@@ -165,6 +176,7 @@ fn main() {
     unsafe {
         let _ = SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
     }
+    tools::migrate();
     if let Err(e) = app::run(hidden, tab) {
         log!("hata: {e}");
         util::error_box(&format!("{}\n\n{e}", t!("hive could not start:", "hive başlatılamadı:")));

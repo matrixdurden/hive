@@ -28,6 +28,7 @@ use crate::cheshire::{self, Cheshire};
 use crate::config::Config;
 use crate::dormouse::{self, Dormouse};
 use crate::tweedle::{self, Tweedle};
+use crate::music::{self, Music};
 use crate::hatter::Hatter;
 use crate::gfx::{Color, Gfx, ImageId, Rect};
 use crate::log;
@@ -146,6 +147,7 @@ enum Hit {
     Autostart,
     /// Dil: `true` Türkçe.
     Lang(bool),
+    Theme(Theme),
     Quit,
     RemoveHive,
 }
@@ -170,6 +172,7 @@ struct App {
     dormouse: Option<Dormouse>,
     tweedle: Option<Tweedle>,
     hatter: Option<Hatter>,
+    music: Option<Music>,
     /// Süren kurulum (`true`) ya da kaldırma (`false`), araç başına.
     busy: [Option<bool>; tools::COUNT],
     /// Son kurulum / kaldırma hatası, araç kartında görünür.
@@ -238,6 +241,7 @@ fn page_mut<'a>(
     dormouse: &'a mut Option<Dormouse>,
     tweedle: &'a mut Option<Tweedle>,
     hatter: &'a mut Option<Hatter>,
+    music: &'a mut Option<Music>,
     i: usize,
 ) -> Option<&'a mut dyn ToolPage> {
     match i {
@@ -246,6 +250,7 @@ fn page_mut<'a>(
         tools::DORMOUSE => dormouse.as_mut().map(|d| d as &mut dyn ToolPage),
         tools::TWEEDLE => tweedle.as_mut().map(|t| t as &mut dyn ToolPage),
         tools::HATTER => hatter.as_mut().map(|h| h as &mut dyn ToolPage),
+        tools::MUSIC => music.as_mut().map(|m| m as &mut dyn ToolPage),
         tools::RABBITHOLE => rabbit.as_mut().map(|r| r as &mut dyn ToolPage),
         _ => None,
     }
@@ -267,7 +272,7 @@ impl App {
     }
 
     fn save(&self) {
-        Config { narrow: self.narrow_pref, tab: self.page.id().into(), turkish: crate::i18n::turkish() }.save();
+        Config { narrow: self.narrow_pref, tab: self.page.id().into(), turkish: crate::i18n::turkish(), theme: theme() }.save();
     }
 
     fn visible(&self) -> bool {
@@ -285,6 +290,7 @@ impl App {
             tools::DORMOUSE => self.dormouse.is_some(),
             tools::TWEEDLE => self.tweedle.is_some(),
             tools::HATTER => self.hatter.is_some(),
+            tools::MUSIC => self.music.is_some(),
             _ => self.rabbit.is_some(),
         }
     }
@@ -297,6 +303,7 @@ impl App {
             tools::DORMOUSE => self.dormouse.as_ref().map(|d| d as &dyn ToolPage),
             tools::TWEEDLE => self.tweedle.as_ref().map(|t| t as &dyn ToolPage),
             tools::HATTER => self.hatter.as_ref().map(|h| h as &dyn ToolPage),
+            tools::MUSIC => self.music.as_ref().map(|m| m as &dyn ToolPage),
             _ => None,
         }
     }
@@ -348,6 +355,9 @@ impl App {
         if let Some(h) = self.hatter.as_mut() {
             h.set_visible(on && page == Page::Tool(tools::HATTER));
         }
+        if let Some(m) = self.music.as_mut() {
+            m.set_visible(on && page == Page::Tool(tools::MUSIC));
+        }
     }
 
     fn select(&mut self, page: Page) {
@@ -388,6 +398,8 @@ impl App {
                 (tools::TWEEDLE, false) => self.tweedle = None,
                 (tools::HATTER, true) => self.hatter = Some(Hatter::start(hwnd)),
                 (tools::HATTER, false) => self.hatter = None,
+                (tools::MUSIC, true) => self.music = Some(Music::start(hwnd)),
+                (tools::MUSIC, false) => self.music = None,
                 (_, true) => self.rabbit = Some(Rabbithole::start(hwnd)),
                 (_, false) => self.rabbit = None,
             }
@@ -421,6 +433,10 @@ impl App {
                 "The dock closes; the Windows taskbar and your desktop icons come back as they were.",
                 "Dock kapanır; Windows görev çubuğu ve masaüstü simgelerin eski haline döner."
             ),
+            tools::MUSIC => t!(
+                "The widget leaves your desktop and its settings are deleted.",
+                "Widget masaüstünden kalkar, ayarları silinir."
+            ),
             _ => t!(
                 "The tunnel closes; the service, network adapter and your server link are deleted.",
                 "Tünel kapanır; hizmet, ağ bağdaştırıcısı ve sunucu bağlantın silinir."
@@ -447,6 +463,7 @@ impl App {
                 tools::DORMOUSE => self.dormouse = None,
                 tools::TWEEDLE => self.tweedle = None,
                 tools::HATTER => self.hatter = None,
+                tools::MUSIC => self.music = None,
                 _ => self.rabbit = None,
             }
             self.page = self.valid(self.page);
@@ -533,7 +550,7 @@ impl App {
         if let Some(i) = self.tool_live() {
             let hx = self.head_x(i);
             let hr = w - sw - CAPTIONS - 12.0;
-            if let Some(p) = page_mut(&mut self.lyrebird, &mut self.rabbit, &mut self.cheshire, &mut self.dormouse, &mut self.tweedle, &mut self.hatter, i) {
+            if let Some(p) = page_mut(&mut self.lyrebird, &mut self.rabbit, &mut self.cheshire, &mut self.dormouse, &mut self.tweedle, &mut self.hatter, &mut self.music, i) {
                 p.layout(w - sw, h, hx, hr);
             }
         }
@@ -601,6 +618,7 @@ impl App {
         self.dormouse = None;
         self.tweedle = None;
         self.hatter = None;
+        self.music = None;
         self.page = Page::Settings;
         self.removing_self = true;
         self.redraw();
@@ -645,12 +663,12 @@ impl App {
     }
 
     fn quit_rect(&self, w: f32) -> Rect {
-        let r = self.settings_row(3, w);
+        let r = self.settings_row(4, w);
         button_rect_right(&self.gfx, r.r, r.cy() - 17.0, t!("Quit", "Çık"), false)
     }
 
     fn remove_hive_rect(&self, w: f32) -> Rect {
-        let r = self.settings_row(4, w);
+        let r = self.settings_row(5, w);
         button_rect_right(&self.gfx, r.r, r.cy() - 17.0, t!("Remove", "Kaldır"), false)
     }
 
@@ -662,6 +680,34 @@ impl App {
         let en_w = g.measure("English", &g.f.button) + 26.0;
         let tr = Rect::new(r.r - 3.0 - tr_w, r.cy() - 14.0, r.r - 3.0, r.cy() + 14.0);
         [Rect::new(tr.l - en_w, tr.t, tr.l, tr.b), tr]
+    }
+
+    /// Tema seçici: [Claude, Windows], satırın sağına yaslı.
+    fn theme_rects(&self, w: f32) -> [(Rect, Theme); 2] {
+        let r = self.settings_row(2, w);
+        let g = &self.gfx;
+        let win_w = g.measure("Windows", &g.f.button) + 26.0;
+        let cl_w = g.measure("Claude", &g.f.button) + 26.0;
+        let win = Rect::new(r.r - 3.0 - win_w, r.cy() - 14.0, r.r - 3.0, r.cy() + 14.0);
+        [(Rect::new(win.l - cl_w, win.t, win.l, win.b), Theme::Claude), (win, Theme::Windows)]
+    }
+
+    /// Temayı değiştirir: palet, pencerenin zemini (Mica ya da düz) ve pencere düğmeleri.
+    fn set_theme(&mut self, t: Theme) {
+        if t == theme() {
+            return;
+        }
+        set_theme(t);
+        let mica = pal().mica;
+        apply_backdrop(self.hwnd, mica);
+        self.gfx.set_transparent(mica);
+        self.mica = mica;
+        self.cap_hover = None;
+        self.save();
+        unsafe {
+            let _ = SetWindowPos(self.hwnd, None, 0, 0, 0, 0, SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER);
+        }
+        self.redraw();
     }
 
     fn hit(&self, x: f32, y: f32) -> Hit {
@@ -700,6 +746,8 @@ impl App {
                     Hit::Autostart
                 } else if let Some(k) = self.lang_rects(w).iter().position(|r| r.contains(x, y)) {
                     Hit::Lang(k == 1)
+                } else if let Some(&(_, t)) = self.theme_rects(w).iter().find(|(r, _)| r.contains(x, y)) {
+                    Hit::Theme(t)
                 } else if self.quit_rect(w).contains(x, y) {
                     Hit::Quit
                 } else if !self.removing_self && self.remove_hive_rect(w).contains(x, y) {
@@ -751,6 +799,7 @@ impl App {
                 crate::shell::sync_shortcuts(&installed);
                 self.redraw();
             }
+            Hit::Theme(t) => self.set_theme(t),
             Hit::Quit => unsafe {
                 let _ = DestroyWindow(self.hwnd);
             },
@@ -768,13 +817,13 @@ impl App {
         let hovered = self.hover == Hit::Nav(page);
         // Windows'un gezinti çubuğu gibi: seçili satır hafif dolu, solunda vurgu renginde hap.
         if selected {
-            g.fill(r, 4.0, SEL);
+            g.fill(r, 4.0, pal().sel);
             g.fill(Rect::new(r.l, r.cy() - 8.0, r.l + 3.0, r.cy() + 8.0), 1.5, accent());
         } else if hovered {
-            g.fill(r, 4.0, HOVER);
+            g.fill(r, 4.0, pal().hover);
         }
         let ic = Rect::new(r.l + 10.0, r.cy() - 12.0, r.l + 34.0, r.cy() + 12.0);
-        let fg = if selected || hovered { TEXT } else { MUTED };
+        let fg = if selected || hovered { pal().text } else { pal().muted };
         match page {
             Page::Tool(i) => g.image(self.icons[i], ic, 1.0),
             Page::Store => g.text(ICON_APPS, &g.f.icon, ic, fg),
@@ -788,17 +837,17 @@ impl App {
     fn paint_sidebar(&self, w: f32, h: f32) {
         let g = &self.gfx;
         let sw = self.side_w(w);
-        icon_button(g, Self::toggle_rect(), ICON_MENU, MUTED, self.hover == Hit::Toggle);
+        icon_button(g, Self::toggle_rect(), ICON_MENU, pal().muted, self.hover == Hit::Toggle);
         if !self.narrow(w) {
             g.image(self.logo, Rect::new(56.0, HEAD_CY - 11.0, 78.0, HEAD_CY + 11.0), 1.0);
-            g.text(NAME, &g.f.strong, Rect::new(88.0, HEAD_CY - 18.0, sw - 12.0, HEAD_CY + 18.0), TEXT);
+            g.text(NAME, &g.f.strong, Rect::new(88.0, HEAD_CY - 18.0, sw - 12.0, HEAD_CY + 18.0), pal().text);
         }
         for p in self.pages() {
             self.paint_nav(p, w, h);
         }
         // Araçlar ile alt bölüm arasında ince çizgi.
         let store = self.nav_rect(Page::Store, w, h);
-        g.fill(Rect::new(14.0, store.t - 7.0, sw - 14.0, store.t - 6.0), 0.0, LINE);
+        g.fill(Rect::new(14.0, store.t - 7.0, sw - 14.0, store.t - 6.0), 0.0, pal().line);
     }
 
     /// Canlı araç sayfası: başlıkta ikon ve ad, gerisini araç çizer; üstüne gelinen ikon
@@ -808,16 +857,16 @@ impl App {
         g.translate(sw, 0.0);
         g.image(self.icons[i], Rect::new(PAD, HEAD_CY - 14.0, PAD + 28.0, HEAD_CY + 14.0), 1.0);
         let name = Rect::new(PAD + 40.0, HEAD_CY - 18.0, PAD + 240.0, HEAD_CY + 18.0);
-        g.text(TOOLS[i].name(), &g.f.heading, name, TEXT);
+        g.text(TOOLS[i].name(), &g.f.heading, name, pal().text);
         if let Some(p) = self.page_ref(i) {
             p.paint(g);
             if let Some((r, text)) = p.tip() {
                 let tw = g.measure(&text, &g.f.small);
                 let l = ((r.l + r.r) / 2.0 - tw / 2.0 - 10.0).clamp(8.0, w - sw - tw - 28.0);
                 let tip = Rect::new(l, r.b + 6.0, l + tw + 20.0, r.b + 32.0);
-                g.fill(tip, 4.0, TIP);
-                g.stroke(tip, 4.0, LINE, 1.0);
-                g.text(&text, &g.f.small_center, tip, TEXT);
+                g.fill(tip, 4.0, pal().tip);
+                g.stroke(tip, 4.0, pal().line, 1.0);
+                g.text(&text, &g.f.small_center, tip, pal().text);
             }
         }
         g.translate(0.0, 0.0);
@@ -826,8 +875,8 @@ impl App {
     fn page_title(&self, w: f32, title: &str, sub: &str) {
         let g = &self.gfx;
         let x0 = self.side_w(w) + PAGE_PAD;
-        g.text(title, &g.f.heading, Rect::new(x0, HEAD_CY - 18.0, w - CAPTIONS - 12.0, HEAD_CY + 18.0), TEXT);
-        g.text(sub, &g.f.small, Rect::new(x0, HEADER + 14.0, w - PAGE_PAD, HEADER + 36.0), MUTED);
+        g.text(title, &g.f.heading, Rect::new(x0, HEAD_CY - 18.0, w - CAPTIONS - 12.0, HEAD_CY + 18.0), pal().text);
+        g.text(sub, &g.f.small, Rect::new(x0, HEADER + 14.0, w - PAGE_PAD, HEADER + 36.0), pal().muted);
     }
 
     fn paint_store(&self, w: f32, h: f32) {
@@ -844,22 +893,22 @@ impl App {
         for (i, tool) in TOOLS.iter().enumerate() {
             let c = self.card(i, w);
             let installed = self.installed(i);
-            g.fill(c, 8.0, PANEL);
-            g.stroke(c, 8.0, LINE, 1.0);
+            g.fill(c, 8.0, pal().panel);
+            g.stroke(c, 8.0, pal().line, 1.0);
             g.image(self.icons[i], Rect::new(c.l + 20.0, c.cy() - 28.0, c.l + 76.0, c.cy() + 28.0), 1.0);
 
             let (primary, second) = self.card_buttons(i, w);
             let text_r = primary.l - 16.0;
             let x = c.l + 96.0;
             let name_w = g.measure(tool.name(), &g.f.heading);
-            g.text(tool.name(), &g.f.heading, Rect::new(x, c.t + 16.0, text_r, c.t + 44.0), TEXT);
+            g.text(tool.name(), &g.f.heading, Rect::new(x, c.t + 16.0, text_r, c.t + 44.0), pal().text);
             if installed {
-                status(g, x + name_w + 14.0, c.t + 31.0, GREEN, t!("Installed", "Kurulu"), MUTED, text_r);
+                status(g, x + name_w + 14.0, c.t + 31.0, pal().green, t!("Installed", "Kurulu"), pal().muted, text_r);
             }
-            g.text(tool.tagline(), &g.f.text, Rect::new(x, c.t + 46.0, text_r, c.t + 66.0), MUTED);
+            g.text(tool.tagline(), &g.f.text, Rect::new(x, c.t + 46.0, text_r, c.t + 66.0), pal().muted);
             match &self.errors[i] {
-                Some(e) => g.text(e, &g.f.small, Rect::new(x, c.t + 68.0, text_r, c.t + 88.0), RED),
-                None => g.text(tool.note(), &g.f.small, Rect::new(x, c.t + 68.0, text_r, c.t + 88.0), FAINT),
+                Some(e) => g.text(e, &g.f.small, Rect::new(x, c.t + 68.0, text_r, c.t + 88.0), pal().red),
+                None => g.text(tool.note(), &g.f.small, Rect::new(x, c.t + 68.0, text_r, c.t + 88.0), pal().faint),
             }
 
             let accent = Color::rgb(tool.accent);
@@ -884,7 +933,7 @@ impl App {
         let dev = util::installed_copy().is_none();
         let r = self.settings_row(0, w);
         if self.hover == Hit::Autostart && !dev {
-            g.fill(Rect::new(r.l - 12.0, r.t + 4.0, r.r + 12.0, r.b - 4.0), 8.0, HOVER.alpha(0.6));
+            g.fill(Rect::new(r.l - 12.0, r.t + 4.0, r.r + 12.0, r.b - 4.0), 8.0, pal().hover.alpha(0.6));
         }
         let sub = match dev {
             true => t!("Not available in a development copy", "Geliştirme kopyasında kullanılamaz"),
@@ -894,33 +943,52 @@ impl App {
             ),
         };
         setting_row(g, r, t!("Start with Windows", "Windows ile başlat"), sub, 120.0);
-        toggle(g, toggle_rect(r.r, r.cy()), self.autostart, TEXT, !dev);
+        toggle(g, toggle_rect(r.r, r.cy()), self.autostart, pal().text, !dev);
 
         let r = self.settings_row(1, w);
         setting_row(g, r, t!("Language", "Dil"), "", 200.0);
         let [en, tr] = self.lang_rects(w);
-        g.fill(Rect::new(en.l - 3.0, en.t - 3.0, tr.r + 3.0, tr.b + 3.0), 8.0, HOVER);
+        g.fill(Rect::new(en.l - 3.0, en.t - 3.0, tr.r + 3.0, tr.b + 3.0), 8.0, pal().hover);
         for (rect, label, on) in [(en, "English", !crate::i18n::turkish()), (tr, "Türkçe", crate::i18n::turkish())] {
             let hovered = self.hover == Hit::Lang(label == "Türkçe");
             if on {
-                g.fill(rect, 6.0, SEL);
+                g.fill(rect, 6.0, pal().sel);
             } else if hovered {
-                g.fill(rect, 6.0, SEL.alpha(0.6));
+                g.fill(rect, 6.0, pal().sel.alpha(0.6));
             }
-            g.text(label, &g.f.button, rect, if on || hovered { TEXT } else { MUTED });
+            g.text(label, &g.f.button, rect, if on || hovered { pal().text } else { pal().muted });
         }
 
         let r = self.settings_row(2, w);
-        let sub = t!("hive and the soundboard and wallpaper engines inside it", "hive ve içindeki soundboard ile duvar kâğıdı motorları");
-        setting_row(g, r, t!("Version", "Sürüm"), sub, 120.0);
-        g.text(VERSION, &g.f.small_right, Rect::new(r.r - 120.0, r.t, r.r, r.b), MUTED);
+        setting_row(g, r, t!("Theme", "Tema"), "", 220.0);
+        let rects = self.theme_rects(w);
+        g.fill(Rect::new(rects[0].0.l - 3.0, rects[0].0.t - 3.0, rects[1].0.r + 3.0, rects[1].0.b + 3.0), 8.0, pal().hover);
+        for (rect, t) in rects {
+            let on = theme() == t;
+            let hovered = self.hover == Hit::Theme(t);
+            if on {
+                g.fill(rect, 6.0, pal().sel);
+            } else if hovered {
+                g.fill(rect, 6.0, pal().sel.alpha(0.6));
+            }
+            let label = match t {
+                Theme::Claude => "Claude",
+                Theme::Windows => "Windows",
+            };
+            g.text(label, &g.f.button, rect, if on || hovered { pal().text } else { pal().muted });
+        }
 
         let r = self.settings_row(3, w);
+        let sub = t!("hive and the soundboard and wallpaper engines inside it", "hive ve içindeki soundboard ile duvar kâğıdı motorları");
+        setting_row(g, r, t!("Version", "Sürüm"), sub, 120.0);
+        g.text(VERSION, &g.f.small_right, Rect::new(r.r - 120.0, r.t, r.r, r.b), pal().muted);
+
+        let r = self.settings_row(4, w);
         let sub = t!("hive and the tools' engines shut down completely", "hive ve araçların motorları tamamen kapanır");
         setting_row(g, r, t!("Quit", "Kapat"), sub, 120.0);
         button(g, self.quit_rect(w), t!("Quit", "Çık"), None, None, self.hover == Hit::Quit);
 
-        let r = self.settings_row(4, w);
+        let r = self.settings_row(5, w);
         let title = t!("Remove hive", "hive'ı kaldır");
         if self.removing_self {
             let sub = t!("Removing… each tool is removed and checked in turn", "Kaldırılıyor… araçlar sırayla kaldırılıp denetleniyor");
@@ -939,20 +1007,19 @@ impl App {
     fn paint(&mut self) {
         let (w, h) = self.size();
         let sw = self.layout_tool(w, h);
-        // Mica varsa zemin Windows'un camı, üstü koyulaştırılır; yoksa düz renk.
-        let bg = if self.mica { Color(0, 0.4) } else { BG };
-        if !self.gfx.begin(self.hwnd, self.dpi, bg) {
+        // Mica varsa zemin Windows'un camı (saydam çizilir); yoksa temanın düz rengi.
+        if !self.gfx.begin(self.hwnd, self.dpi, pal().bg) {
             unsafe {
                 let _ = ValidateRect(Some(self.hwnd), None);
             }
             return;
         }
         let g = &self.gfx;
-        // İçerik alanı Mica'nın üstünde ayrı bir katman: sol üst köşesi yuvarlak (Windows Ayarlar
-        // uygulaması gibi).
+        // İçerik alanı zeminin üstünde ayrı bir katman: sol üst köşesi yuvarlak (Windows Ayarlar
+        // uygulaması ve Claude gibi).
         let layer = Rect::new(sw, HEADER, w + 12.0, h + 12.0);
-        g.fill(layer, 8.0, Color(0x000000, 0.22));
-        g.stroke(layer, 8.0, LINE, 1.0);
+        g.fill(layer, 8.0, pal().layer);
+        g.stroke(layer, 8.0, pal().layer_line, 1.0);
         self.paint_sidebar(w, h);
         match (self.page, self.tool_live()) {
             (_, Some(i)) => g.clip(Rect::new(sw, 0.0, w, h), || self.paint_live(i, sw, w)),
@@ -967,9 +1034,9 @@ impl App {
             let r = self.nav_rect(p, w, h);
             let tw = g.measure(p.label(), &g.f.text);
             let tip = Rect::new(sw + 6.0, r.cy() - 14.0, sw + 6.0 + tw + 20.0, r.cy() + 14.0);
-            g.fill(tip, 4.0, TIP);
-            g.stroke(tip, 4.0, LINE, 1.0);
-            g.text(p.label(), &g.f.text, Rect::new(tip.l + 10.0, tip.t, tip.r, tip.b), TEXT);
+            g.fill(tip, 4.0, pal().tip);
+            g.stroke(tip, 4.0, pal().line, 1.0);
+            g.text(p.label(), &g.f.text, Rect::new(tip.l + 10.0, tip.t, tip.r, tip.b), pal().text);
         }
         self.paint_captions(w);
 
@@ -1010,11 +1077,11 @@ impl App {
                     Color::rgb(0xffffff)
                 }
                 (_, true) => {
-                    g.fill(r, 0.0, if pressed { SEL } else { HOVER });
-                    TEXT
+                    g.fill(r, 0.0, if pressed { pal().sel } else { pal().hover });
+                    pal().text
                 }
-                _ if self.active => MUTED,
-                _ => FAINT,
+                _ if self.active => pal().muted,
+                _ => pal().faint,
             };
             let glyph = match c {
                 Cap::Min => "\u{E921}",
@@ -1198,7 +1265,7 @@ impl App {
                 let hit = self.hit(mx, my);
                 if hit != self.hover {
                     if self.hover == Hit::Content
-                        && let Some(p) = live.and_then(|i| page_mut(&mut self.lyrebird, &mut self.rabbit, &mut self.cheshire, &mut self.dormouse, &mut self.tweedle, &mut self.hatter, i))
+                        && let Some(p) = live.and_then(|i| page_mut(&mut self.lyrebird, &mut self.rabbit, &mut self.cheshire, &mut self.dormouse, &mut self.tweedle, &mut self.hatter, &mut self.music, i))
                     {
                         p.mouse_leave();
                     }
@@ -1216,13 +1283,13 @@ impl App {
                 }
                 // Kaydırıcı sürüklenirken imleç kenar çubuğuna kaysa da sayfa izlemeli.
                 if (hit == Hit::Content || self.pressed == Hit::Content)
-                    && let Some(p) = live.and_then(|i| page_mut(&mut self.lyrebird, &mut self.rabbit, &mut self.cheshire, &mut self.dormouse, &mut self.tweedle, &mut self.hatter, i))
+                    && let Some(p) = live.and_then(|i| page_mut(&mut self.lyrebird, &mut self.rabbit, &mut self.cheshire, &mut self.dormouse, &mut self.tweedle, &mut self.hatter, &mut self.music, i))
                 {
                     p.mouse_move(&self.gfx, mx - sw, my);
                 }
             }
             WM_MOUSELEAVE => {
-                if let Some(p) = live.and_then(|i| page_mut(&mut self.lyrebird, &mut self.rabbit, &mut self.cheshire, &mut self.dormouse, &mut self.tweedle, &mut self.hatter, i)) {
+                if let Some(p) = live.and_then(|i| page_mut(&mut self.lyrebird, &mut self.rabbit, &mut self.cheshire, &mut self.dormouse, &mut self.tweedle, &mut self.hatter, &mut self.music, i)) {
                     p.mouse_leave();
                 }
                 self.hover = Hit::None;
@@ -1234,7 +1301,7 @@ impl App {
                 self.pressed = self.hit(mx, my);
                 unsafe { SetCapture(self.hwnd) };
                 if self.pressed == Hit::Content
-                    && let Some(p) = live.and_then(|i| page_mut(&mut self.lyrebird, &mut self.rabbit, &mut self.cheshire, &mut self.dormouse, &mut self.tweedle, &mut self.hatter, i))
+                    && let Some(p) = live.and_then(|i| page_mut(&mut self.lyrebird, &mut self.rabbit, &mut self.cheshire, &mut self.dormouse, &mut self.tweedle, &mut self.hatter, &mut self.music, i))
                 {
                     p.mouse_down(&self.gfx, mx - sw, my);
                 }
@@ -1247,7 +1314,7 @@ impl App {
                 let sw = self.layout_tool(w, h);
                 let pressed = std::mem::replace(&mut self.pressed, Hit::None);
                 if pressed == Hit::Content {
-                    if let Some(p) = live.and_then(|i| page_mut(&mut self.lyrebird, &mut self.rabbit, &mut self.cheshire, &mut self.dormouse, &mut self.tweedle, &mut self.hatter, i)) {
+                    if let Some(p) = live.and_then(|i| page_mut(&mut self.lyrebird, &mut self.rabbit, &mut self.cheshire, &mut self.dormouse, &mut self.tweedle, &mut self.hatter, &mut self.music, i)) {
                         p.mouse_up(&self.gfx, mx - sw, my);
                     }
                 } else if self.hit(mx, my) == pressed {
@@ -1264,7 +1331,7 @@ impl App {
                 let (w, h) = self.size();
                 let sw = self.layout_tool(w, h);
                 if x >= sw
-                    && let Some(p) = live.and_then(|i| page_mut(&mut self.lyrebird, &mut self.rabbit, &mut self.cheshire, &mut self.dormouse, &mut self.tweedle, &mut self.hatter, i))
+                    && let Some(p) = live.and_then(|i| page_mut(&mut self.lyrebird, &mut self.rabbit, &mut self.cheshire, &mut self.dormouse, &mut self.tweedle, &mut self.hatter, &mut self.music, i))
                 {
                     p.wheel(&self.gfx, x - sw, y, delta);
                 } else if x >= sw && live.is_none() && self.page == Page::Store {
@@ -1275,14 +1342,14 @@ impl App {
             }
             WM_CHAR => {
                 let c = char::from_u32(wp.0 as u32)?;
-                let p = live.and_then(|i| page_mut(&mut self.lyrebird, &mut self.rabbit, &mut self.cheshire, &mut self.dormouse, &mut self.tweedle, &mut self.hatter, i))?;
+                let p = live.and_then(|i| page_mut(&mut self.lyrebird, &mut self.rabbit, &mut self.cheshire, &mut self.dormouse, &mut self.tweedle, &mut self.hatter, &mut self.music, i))?;
                 if !p.char(c) {
                     return None;
                 }
             }
             WM_KEYDOWN | WM_SYSKEYDOWN => {
                 let vk = VIRTUAL_KEY(wp.0 as u16);
-                if let Some(p) = live.and_then(|i| page_mut(&mut self.lyrebird, &mut self.rabbit, &mut self.cheshire, &mut self.dormouse, &mut self.tweedle, &mut self.hatter, i))
+                if let Some(p) = live.and_then(|i| page_mut(&mut self.lyrebird, &mut self.rabbit, &mut self.cheshire, &mut self.dormouse, &mut self.tweedle, &mut self.hatter, &mut self.music, i))
                     && p.key(vk.0)
                 {
                     return Some(LRESULT(0));
@@ -1404,6 +1471,11 @@ impl App {
                 }
                 return Some(LRESULT(1));
             }
+            music::WM_MEDIA => {
+                if let Some(m) = self.music.as_mut() {
+                    m.media_changed();
+                }
+            }
             tweedle::WM_DEVICE => {
                 if let Some(t) = self.tweedle.as_mut() {
                     t.device_changed();
@@ -1474,6 +1546,31 @@ impl App {
 
 fn with_app<T>(f: impl FnOnce(&mut App) -> T) -> Option<T> {
     APP.with(|a| a.try_borrow_mut().ok().and_then(|mut a| a.as_mut().map(f)))
+}
+
+/// Pencerenin zemini. Mica (Windows teması, Windows 11 22H2+): bütün pencere camın üstünde,
+/// içerik saydam çizilir, pencere düğmelerini Windows çizer. Değilse temanın düz rengi; gölge ve
+/// köşeler DWM'de kalır (başlık çubuğu WM_NCCALCSIZE'da kaldırılıyor).
+fn apply_backdrop(hwnd: HWND, mica: bool) {
+    use windows::Win32::Graphics::Dwm::{DWMSBT_MAINWINDOW, DWMSBT_NONE, DWMWA_SYSTEMBACKDROP_TYPE};
+    MICA.store(mica, Ordering::Relaxed);
+    unsafe {
+        if mica {
+            let margins = MARGINS { cxLeftWidth: -1, cxRightWidth: -1, cyTopHeight: -1, cyBottomHeight: -1 };
+            let _ = DwmExtendFrameIntoClientArea(hwnd, &margins);
+            let backdrop = DWMSBT_MAINWINDOW;
+            let _ = DwmSetWindowAttribute(hwnd, DWMWA_SYSTEMBACKDROP_TYPE, &backdrop as *const _ as _, 4);
+        } else {
+            let backdrop = DWMSBT_NONE;
+            let _ = DwmSetWindowAttribute(hwnd, DWMWA_SYSTEMBACKDROP_TYPE, &backdrop as *const _ as _, 4);
+            // COLORREF 0x00BBGGRR.
+            let c = pal().bg.0;
+            let caption = COLORREF((c & 0xff) << 16 | (c & 0xff00) | (c >> 16) & 0xff);
+            let _ = DwmSetWindowAttribute(hwnd, DWMWINDOWATTRIBUTE(35), &caption as *const _ as _, 4);
+            let margins = MARGINS { cxLeftWidth: 0, cxRightWidth: 0, cyTopHeight: 1, cyBottomHeight: 0 };
+            let _ = DwmExtendFrameIntoClientArea(hwnd, &margins);
+        }
+    }
 }
 
 unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
@@ -1579,25 +1676,12 @@ pub fn run(hidden: bool, tab: Option<String>) -> Res<()> {
         let _ = SetWindowPos(hwnd, None, 0, 0, size.0, size.1, SWP_NOMOVE | SWP_NOZORDER);
         let dark = BOOL(1);
         let _ = DwmSetWindowAttribute(hwnd, DWMWA_USE_IMMERSIVE_DARK_MODE, &dark as *const _ as _, 4);
-        // Windows 11: zemin Mica (bütün pencere camın üstünde, içerik saydam çizilir). Mica
-        // yoksa düz koyu zemin; gölge ve köşeler DWM'de kalır (başlık çubuğu WM_NCCALCSIZE'da
-        // kaldırılıyor).
-        let mica = crate::hatter::theme::mica();
-        MICA.store(mica, Ordering::Relaxed);
-        if mica {
-            let margins = MARGINS { cxLeftWidth: -1, cxRightWidth: -1, cyTopHeight: -1, cyBottomHeight: -1 };
-            let _ = DwmExtendFrameIntoClientArea(hwnd, &margins);
-            let backdrop = windows::Win32::Graphics::Dwm::DWMSBT_TABBEDWINDOW;
-            let _ = DwmSetWindowAttribute(hwnd, windows::Win32::Graphics::Dwm::DWMWA_SYSTEMBACKDROP_TYPE, &backdrop as *const _ as _, 4);
-        } else {
-            let caption = COLORREF(0x141414);
-            let _ = DwmSetWindowAttribute(hwnd, DWMWINDOWATTRIBUTE(35), &caption as *const _ as _, 4);
-            let margins = MARGINS { cxLeftWidth: 0, cxRightWidth: 0, cyTopHeight: 1, cyBottomHeight: 0 };
-            let _ = DwmExtendFrameIntoClientArea(hwnd, &margins);
-        }
+        let cfg = Config::load();
+        set_theme(cfg.theme);
+        let mica = pal().mica;
+        apply_backdrop(hwnd, mica);
         DragAcceptFiles(hwnd, true);
 
-        let cfg = Config::load();
         let mut gfx = Gfx::new()?;
         gfx.set_transparent(mica);
         let icons = TOOLS.iter().map(|t| gfx.load_image(t.icons)).collect::<Res<Vec<_>>>()?;
@@ -1623,6 +1707,7 @@ pub fn run(hidden: bool, tab: Option<String>) -> Res<()> {
             dormouse: None,
             tweedle: None,
             hatter: None,
+            music: None,
             busy: [None; tools::COUNT],
             errors: Default::default(),
             results: Arc::default(),

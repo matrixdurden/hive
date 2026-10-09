@@ -718,19 +718,19 @@ impl Tweedle {
     fn paint_devices(&self, g: &Gfx, rows: &[Rect], list: &[Device], current: Option<&str>, mic: bool) {
         if list.is_empty() {
             let r = rows[0];
-            g.text(t!("No device", "Cihaz yok"), &g.f.text, Rect::new(r.l + 14.0, r.t, r.r, r.b), FAINT);
+            g.text(t!("No device", "Cihaz yok"), &g.f.text, Rect::new(r.l + 14.0, r.t, r.r, r.b), pal().faint);
             return;
         }
         for (i, (r, d)) in rows.iter().zip(list).enumerate() {
             let selected = current == Some(d.id.as_str());
             let hit = if mic { Hit::In(i) } else { Hit::Out(i) };
             if self.hover == hit && !selected {
-                g.fill(*r, 8.0, HOVER);
+                g.fill(*r, 8.0, pal().hover);
             }
             let (icon, color) = match (mic, selected, self.muted) {
-                (false, _, _) => (ICON_HEADPHONE, if selected { accent() } else { MUTED }),
-                (true, _, true) => (ICON_MIC_OFF, if selected { RED } else { MUTED }),
-                (true, _, false) => (ICON_MIC, if selected { accent() } else { MUTED }),
+                (false, _, _) => (ICON_HEADPHONE, if selected { accent() } else { pal().muted }),
+                (true, _, true) => (ICON_MIC_OFF, if selected { pal().red } else { pal().muted }),
+                (true, _, false) => (ICON_MIC, if selected { accent() } else { pal().muted }),
             };
             g.text(icon, &g.f.icon_small, Rect::new(r.l + 12.0, r.t, r.l + 32.0, r.b), color);
             let mut right = r.r - 12.0;
@@ -738,7 +738,7 @@ impl Tweedle {
                 g.text(ICON_CHECK, &g.f.icon_small, Rect::new(r.r - 34.0, r.t, r.r - 12.0, r.b), accent());
                 right -= 30.0;
             }
-            g.text(&d.name, &g.f.text, Rect::new(r.l + 44.0, r.t, right, r.b), if selected { TEXT } else { MUTED });
+            g.text(&d.name, &g.f.text, Rect::new(r.l + 44.0, r.t, right, r.b), if selected { pal().text } else { pal().muted });
         }
     }
 
@@ -746,20 +746,20 @@ impl Tweedle {
         let w = self.w;
         let watching = self.enumerator.is_some();
         let (dot, head) = match () {
-            _ if !watching => (RED, t!("Cannot read audio devices", "Ses cihazları okunamıyor")),
-            _ if self.muted => (RED, t!("Microphone off · all microphones", "Mikrofon kapalı · bütün mikrofonlar")),
-            _ => (GREEN, t!("Music pauses when headphones drop", "Kulaklık kopunca müzik durur")),
+            _ if !watching => (pal().red, t!("Cannot read audio devices", "Ses cihazları okunamıyor")),
+            _ if self.muted => (pal().red, t!("Microphone off · all microphones", "Mikrofon kapalı · bütün mikrofonlar")),
+            _ => (pal().green, t!("Music pauses when headphones drop", "Kulaklık kopunca müzik durur")),
         };
-        status(g, self.head_x + 16.0, HEAD_CY, dot, head, MUTED, self.head_r - 8.0);
+        status(g, self.head_x + 16.0, HEAD_CY, dot, head, pal().muted, self.head_r - 8.0);
 
         let l = self.layout_all();
         g.clip(Rect::new(0.0, HEADER, w, self.h), || {
             let titles = [t!("Output", "Çıkış"), t!("Input", "Giriş"), t!("Shortcuts", "Kısayollar")];
             for (s, title) in titles.iter().enumerate() {
                 let t = l.titles[s];
-                g.text(title, &g.f.strong, Rect::new(PAD, t, w - PAD, t + 24.0), TEXT);
-                g.fill(l.panels[s], 12.0, PANEL);
-                g.stroke(l.panels[s], 12.0, LINE, 1.0);
+                g.text(title, &g.f.strong, Rect::new(PAD, t, w - PAD, t + 24.0), pal().text);
+                g.fill(l.panels[s], 12.0, pal().panel);
+                g.stroke(l.panels[s], 12.0, pal().line, 1.0);
             }
             let [outs, ins, keys] = &l.rows;
             self.paint_devices(g, outs, &self.outs, self.out.as_ref().map(|d| d.id.as_str()), false);
@@ -772,15 +772,15 @@ impl Tweedle {
             ];
             for (i, (r, name)) in keys.iter().zip(names).enumerate() {
                 if i > 0 {
-                    g.fill(Rect::new(r.l + 8.0, r.t, r.r - 8.0, r.t + 1.0), 0.0, HOVER);
+                    g.fill(Rect::new(r.l + 8.0, r.t, r.r - 8.0, r.t + 1.0), 0.0, pal().hover);
                 }
-                g.text(name, &g.f.text, Rect::new(r.l + 14.0, r.t, r.r - 160.0, r.b), TEXT);
+                g.text(name, &g.f.text, Rect::new(r.l + 14.0, r.t, r.r - 160.0, r.b), pal().text);
                 let (c, b) = match () {
                     _ if self.bind == Some(i) => (accent(), accent()),
-                    _ if self.conflicts[i] => (RED, LINE),
-                    _ if self.settings.keys[i].is_none() => (FAINT, LINE),
-                    _ if self.hover == Hit::Key(i) => (TEXT, FAINT),
-                    _ => (MUTED, LINE),
+                    _ if self.conflicts[i] => (pal().red, pal().line),
+                    _ if self.settings.keys[i].is_none() => (pal().faint, pal().line),
+                    _ if self.hover == Hit::Key(i) => (pal().text, pal().faint),
+                    _ => (pal().muted, pal().line),
                 };
                 chip(g, self.key_chip(g, *r, i), &self.chip_text(i), c, b);
             }

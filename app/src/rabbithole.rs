@@ -543,17 +543,17 @@ impl Rabbithole {
                 if y + LINE_H >= HEADER && y <= self.h {
                     let t = line.trim_start();
                     let (c, f) = match () {
-                        _ if t.starts_with('✓') => (GREEN.alpha(0.9), &g.f.text),
-                        _ if t.starts_with('✗') => (RED, &g.f.text),
-                        _ if !line.starts_with(' ') && !line.is_empty() => (TEXT, &g.f.strong),
-                        _ => (MUTED, &g.f.text),
+                        _ if t.starts_with('✓') => (pal().green.alpha(0.9), &g.f.text),
+                        _ if t.starts_with('✗') => (pal().red, &g.f.text),
+                        _ if !line.starts_with(' ') && !line.is_empty() => (pal().text, &g.f.strong),
+                        _ => (pal().muted, &g.f.text),
                     };
                     g.text(line, f, Rect::new(PAD, y, self.w - PAD, y + LINE_H), c);
                 }
                 y += LINE_H;
             }
             if d.running {
-                g.text(t!("Testing the network, takes 10–20 seconds…", "Ağ test ediliyor, 10–20 saniye sürer…"), &g.f.small, Rect::new(PAD, y + 6.0, self.w - PAD, y + 28.0), FAINT);
+                g.text(t!("Testing the network, takes 10–20 seconds…", "Ağ test ediliyor, 10–20 saniye sürer…"), &g.f.small, Rect::new(PAD, y + 6.0, self.w - PAD, y + 28.0), pal().faint);
             }
         });
     }
@@ -581,9 +581,9 @@ impl Rabbithole {
                 g.stroke(ring, r, accent(), 2.0);
             }
             Some(State::Starting | State::Stopping) => g.stroke(ring, r, accent().alpha(0.5), 2.0),
-            _ => g.stroke(ring, r, LINE, 2.0),
+            _ => g.stroke(ring, r, pal().line, 2.0),
         }
-        g.text("\u{E7E8}", &g.f.icon_large, ring, if accent_live { accent() } else { FAINT });
+        g.text("\u{E7E8}", &g.f.icon_large, ring, if accent_live { accent() } else { pal().faint });
 
         let (label, sub) = match (self.busy, self.st.state, self.st.mode) {
             (Some(b), _, _) => (b.to_string(), String::new()),
@@ -601,8 +601,8 @@ impl Rabbithole {
             (_, Some(State::Stopping), _) => (t!("Turning off…", "Kapanıyor…").into(), String::new()),
             _ => (t!("Off", "Kapalı").into(), t!("The computer uses its normal connection", "Bilgisayar normal bağlantısını kullanıyor").into()),
         };
-        text_center(g, &label, &g.f.heading, w / 2.0, cy + r + 14.0, cy + r + 44.0, TEXT);
-        text_center(g, &sub, &g.f.small, w / 2.0, cy + r + 44.0, cy + r + 66.0, MUTED);
+        text_center(g, &label, &g.f.heading, w / 2.0, cy + r + 14.0, cy + r + 44.0, pal().text);
+        text_center(g, &sub, &g.f.small, w / 2.0, cy + r + 44.0, cy + r + 66.0, pal().muted);
 
         // Mod seçici: sunucu · DPI · kapalı.
         let current = match (self.st.state, self.st.mode) {
@@ -611,21 +611,21 @@ impl Rabbithole {
             _ => 2,
         };
         let all = Rect::new(self.mode_rect(0).l, self.mode_rect(0).t, self.mode_rect(2).r, self.mode_rect(0).b);
-        g.fill(all, 8.0, HOVER);
+        g.fill(all, 8.0, pal().hover);
         for (k, name) in [t!("Server", "Sunucu"), "DPI", t!("Off", "Kapalı")].iter().enumerate() {
             let mr = self.mode_rect(k);
             let inner = Rect::new(mr.l + 3.0, mr.t + 3.0, mr.r - 3.0, mr.b - 3.0);
             let dim = k == 0 && self.st.host.is_none();
             if k == current {
-                g.fill(inner, 6.0, if k == 2 { SEL } else { accent() });
+                g.fill(inner, 6.0, if k == 2 { pal().sel } else { accent() });
             } else if self.hover == Hit::Mode(k) {
-                g.fill(inner, 6.0, SEL);
+                g.fill(inner, 6.0, pal().sel);
             }
             let c = match () {
                 _ if k == current && k != 2 => on_accent(),
-                _ if k == current || self.hover == Hit::Mode(k) => TEXT,
-                _ if dim => FAINT,
-                _ => MUTED,
+                _ if k == current || self.hover == Hit::Mode(k) => pal().text,
+                _ if dim => pal().faint,
+                _ => pal().muted,
             };
             g.text(name, &g.f.button, mr, c);
         }
@@ -634,7 +634,7 @@ impl Rabbithole {
             self.st.error.clone().filter(|_| self.busy.is_none()).map(|e| (format!("{} {e}", t!("Last attempt failed:", "Son deneme başarısız:")), true))
         }) {
             let t = self.mode_rect(0).b + 8.0;
-            text_center(g, &m, &g.f.small, w / 2.0, t, t + 22.0, if err { RED } else { MUTED });
+            text_center(g, &m, &g.f.small, w / 2.0, t, t + 22.0, if err { pal().red } else { pal().muted });
         }
 
         // Ayar satırları.

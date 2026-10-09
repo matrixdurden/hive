@@ -1670,7 +1670,7 @@ impl Dock {
         if old.size != s.size {
             self.clear_icons();
         }
-        self.set_appbar(!s.autohide);
+        self.set_appbar(true);
         super::keys::set_corners(s.corner_tl, s.corner_br);
         self.cover = self.compute_cover();
         self.relayout();
@@ -2244,6 +2244,40 @@ fn create(settings: Settings, lines: Vec<String>) -> windows::core::Result<Dock>
     }
 }
 
+/// Dock'un ekrandaki yeri ve görünüşü: müzik widget'ı yanına oturur.
+#[derive(Clone, Copy)]
+pub struct Geometry {
+    pub monitor: RECT,
+    pub dpi: f32,
+    /// Hapın yüksekliği, ekranın altından uzaklığı ve köşe yarıçapı (DIP).
+    pub pill_h: f32,
+    pub margin: f32,
+    pub radius: f32,
+    /// Hapın sol ve sağ kenarı (ekran pikseli).
+    pub left: i32,
+    pub right: i32,
+    pub theme: Theme,
+}
+
+/// Açık dock'un yeri (yoksa `None`). Arayüz iş parçacığından.
+pub fn geometry() -> Option<Geometry> {
+    DOCK.with(|d| {
+        let d = d.try_borrow().ok()?;
+        let d = d.as_ref().filter(|d| d.live && d.monitor.bottom > d.monitor.top)?;
+        let r = d.screen_rect();
+        Some(Geometry {
+            monitor: d.monitor,
+            dpi: d.dpi,
+            pill_h: d.pill_h(),
+            margin: MARGIN,
+            radius: RADIUS,
+            left: r.left,
+            right: r.right,
+            theme: d.theme,
+        })
+    })
+}
+
 /// Dock'u açar (zaten açıksa ayarları uygular). Arayüz iş parçacığından çağrılır.
 pub fn start(settings: Settings, lines: Vec<String>) {
     if HWND_DOCK.get() != 0 {
@@ -2278,7 +2312,7 @@ pub fn start(settings: Settings, lines: Vec<String>) {
             }
         }
     }
-    dock.set_appbar(!dock.settings.autohide);
+    dock.set_appbar(true);
     DOCK.with_borrow_mut(|d| *d = Some(dock));
     with(|d| {
         d.measure_clock();
