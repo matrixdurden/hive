@@ -4,11 +4,12 @@
 //! dahil) olduğu gibi geçer.
 //!
 //! Etkin köşeler (Linux masaüstlerindeki gibi): imleç ekranın sol üst köşesine gidince görev
-//! görünümü (Win+Tab), sağ alt köşesine gidince masaüstü (Win+D). Aynı iş parçacığındaki fare
+//! görünümü (Win+Tab), sağ alt köşesine gidince masaüstü (Win+D); imleç köşede kısa bir süre
+//! beklemeli. Aynı iş parçacığındaki fare
 //! kancası yalnızca bir köşe açıkken kurulur; her harekette iki karşılaştırma yapar. Tuş basılıyken
 //! (pencere köşeye sürüklenip yapıştırılırken) ve tam ekranda çalışmaz.
 
-use std::sync::atomic::{AtomicBool, AtomicIsize, AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicIsize, AtomicU32, AtomicUsize, Ordering};
 
 use windows::Win32::Foundation::*;
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
@@ -31,8 +32,17 @@ pub static FULLSCREEN: AtomicBool = AtomicBool::new(false);
 static ARMED: AtomicBool = AtomicBool::new(true);
 /// Kanca iş parçacığına: fare kancasını köşe ayarlarına göre kur ya da kaldır.
 const WM_CORNERS: u32 = WM_APP + 1;
-/// Kanca iş parçacığına: köşe tetiklendi (wParam: 0 sol üst, 1 sağ alt).
-const WM_CORNER_HIT: u32 = WM_APP + 2;
+/// İmleç köşeye girdi: hangisi (sağ alt mı) ve bekleme zamanlayıcısı.
+static PENDING_BR: AtomicBool = AtomicBool::new(false);
+static DWELL_TIMER: AtomicUsize = AtomicUsize::new(0);
+/// Köşeye girilen ve (beklerken) çıkılan an, fare olayının zamanıyla (ms; 0: çıkılmadı).
+/// Zamanlayıcı geç gelse de imlecin yeterince beklediği buradan bilinir.
+static ENTERED: AtomicU32 = AtomicU32::new(0);
+static LEFT: AtomicU32 = AtomicU32::new(0);
+/// Köşede bu kadar beklenince tetiklenir (ms): yanlışlıkla savrulan imleç saymasın. Sağ alt
+/// saatin yanında, imleç oraya daha sık kaçar.
+const DWELL_TL: u32 = 200;
+const DWELL_BR: u32 = 350;
 /// Köşeden bu kadar uzaklaşınca yeniden kurulur (piksel).
 const REARM: i32 = 40;
 
@@ -75,17 +85,24 @@ unsafe extern "system" fn keyboard(code: i32, wp: WPARAM, lp: LPARAM) -> LRESULT
 
 unsafe extern "system" fn mouse(code: i32, wp: WPARAM, lp: LPARAM) -> LRESULT {
     if code == HC_ACTION as i32 && wp.0 as u32 == WM_MOUSEMOVE {
-        let p = unsafe { (*(lp.0 as *const MSLLHOOKSTRUCT)).pt };
+        let (p, time) = unsafe {
+            let m = &*(lp.0 as *const MSLLHOOKSTRUCT);
+            (m.pt, m.time)
+        };
         let (w, h) = unsafe { (GetSystemMetrics(SM_CXSCREEN), GetSystemMetrics(SM_CYSCREEN)) };
         let tl = p.x <= 0 && p.y <= 0;
         let br = p.x >= w - 1 && p.y >= h - 1;
         if tl || br {
             if ARMED.load(Ordering::Relaxed) {
                 ARMED.store(false, Ordering::Relaxed);
-                unsafe {
-                    let _ = PostThreadMessageW(GetCurrentThreadId(), WM_CORNER_HIT, WPARAM(br as usize), LPARAM(0));
-                }
+                PENDING_BR.store(br, Ordering::Relaxed);
+                ENTERED.store(time, Ordering::Relaxed);
+                LEFT.store(0, Ordering::Relaxed);
+                let id = unsafe { SetTimer(None, 0, if br { DWELL_BR } else { DWELL_TL }, None) };
+                DWELL_TIMER.store(id, Ordering::Relaxed);
             }
+        } else if DWELL_TIMER.load(Ordering::Relaxed) != 0 && LEFT.load(Ordering::Relaxed) == 0 {
+            LEFT.store(time.max(1), Ordering::Relaxed);
         } else if (p.x > REARM || p.y > REARM) && (p.x < w - 1 - REARM || p.y < h - 1 - REARM) {
             // İki köşenin de çevresinden çıktı.
             ARMED.store(true, Ordering::Relaxed);
@@ -94,8 +111,16 @@ unsafe extern "system" fn mouse(code: i32, wp: WPARAM, lp: LPARAM) -> LRESULT {
     unsafe { CallNextHookEx(None, code, wp, lp) }
 }
 
-/// Köşe tetiklendi (kancanın dışında, iş parçacığının mesaj döngüsünde).
+/// Köşede beklendi (kancanın dışında, iş parçacığının mesaj döngüsünde): imleç süre dolmadan
+/// çıkmadıysa köşenin işi yapılır, çıktıysa köşe yeniden kurulur.
 fn corner_hit(br: bool) {
+    let left = LEFT.load(Ordering::Relaxed);
+    let dwell = if br { DWELL_BR } else { DWELL_TL };
+    let still = left == 0 || left.wrapping_sub(ENTERED.load(Ordering::Relaxed)) >= dwell;
+    if !still {
+        ARMED.store(true, Ordering::Relaxed);
+        return;
+    }
     if !(if br { CORNER_BR.load(Ordering::Relaxed) } else { CORNER_TL.load(Ordering::Relaxed) }) || FULLSCREEN.load(Ordering::Relaxed) {
         return;
     }
@@ -156,7 +181,11 @@ pub fn register(hwnd: HWND) {
         while GetMessageW(&mut msg, None, 0, 0).as_bool() {
             match (msg.hwnd.is_invalid(), msg.message) {
                 (true, WM_CORNERS) => sync_mouse(&mut mouse_hook),
-                (true, WM_CORNER_HIT) => corner_hit(msg.wParam.0 == 1),
+                (true, WM_TIMER) if msg.wParam.0 == DWELL_TIMER.load(Ordering::Relaxed) => {
+                    let _ = KillTimer(None, msg.wParam.0);
+                    DWELL_TIMER.store(0, Ordering::Relaxed);
+                    corner_hit(PENDING_BR.load(Ordering::Relaxed));
+                }
                 _ => {
                     DispatchMessageW(&msg);
                 }
