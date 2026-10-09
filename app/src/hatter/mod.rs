@@ -372,16 +372,16 @@ impl Hatter {
                 (
                     t!("Top-left corner", "Sol üst köşe"),
                     t!(
-                        "Push the cursor into the corner to see all windows (Win+Tab)",
-                        "İmleci köşeye götürünce bütün pencereler görünür (Win+Tab)"
+                        "Throw the cursor into the corner to see all windows (Win+Tab)",
+                        "İmleci köşeye sertçe götürünce bütün pencereler görünür (Win+Tab)"
                     ),
                     s.corner_tl,
                 ),
                 (
                     t!("Bottom-right corner", "Sağ alt köşe"),
                     t!(
-                        "Push the cursor into the corner to show the desktop, again to come back (Win+D)",
-                        "İmleci köşeye götürünce masaüstü, tekrar götürünce geri döner (Win+D)"
+                        "Throw the cursor into the corner for the desktop, again to come back (Win+D)",
+                        "İmleci köşeye sertçe götürünce masaüstü, tekrar götürünce geri döner (Win+D)"
                     ),
                     s.corner_br,
                 ),
