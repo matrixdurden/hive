@@ -11,7 +11,6 @@ mod config;
 mod battery;
 mod gfx;
 mod dock;
-mod music;
 mod log;
 mod soundboard;
 mod myinstants;
@@ -125,7 +124,7 @@ fn main() {
                 let _ = windows::Win32::System::Com::CoInitializeEx(None, windows::Win32::System::Com::COINIT_MULTITHREADED);
                 let _ = SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
             }
-            print!("{}", music::probe(args.get(1).map(String::as_str)));
+            print!("{}", dock::music::probe(args.get(1).map(String::as_str)));
             std::process::exit(0);
         }
         Some("--dock-pin" | "--hatter-pin") => {

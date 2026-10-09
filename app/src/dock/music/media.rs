@@ -193,7 +193,9 @@ fn run(rx: Receiver<Msg>, tx: Sender<Msg>, now: Arc<Mutex<Now>>, hwnd: usize, mu
     }))?;
 
     let mut watched: Option<Watched> = None;
-    let mut art_key = String::new();
+    let mut art = Art::default();
+    // Boş ya da kaybolmuş görünen oturum ilk ne zaman görüldü (şarkı geçişinde bir an böyle olur).
+    let mut gap: Option<Instant> = None;
     loop {
         // Oturumu seç; değiştiyse olaylarına abone ol.
         let s = pick(&m, others);
@@ -217,14 +219,27 @@ fn run(rx: Receiver<Msg>, tx: Sender<Msg>, now: Arc<Mutex<Now>>, hwnd: usize, mu
                     }))?,
                 ];
                 watched = Some(Watched { session: s, id: id.clone(), tokens });
-                art_key.clear();
+                art = Art::default();
             }
         }
 
         let prev = now.lock().unwrap().clone();
         let next = match &watched {
-            Some(w) => read(&w.session, &id, &prev, &mut art_key).unwrap_or_else(|_| prev.clone()),
+            Some(w) => read(&w.session, &id, &prev, &mut art, &tx).unwrap_or_else(|_| prev.clone()),
             None => Now::default(),
+        };
+        // Şarkı geçişinde oynatıcı bir an başlıksız ya da hiç yokmuş gibi görünür: bir buçuk
+        // saniye beklenir, o arada eski şarkı ekranda kalır ("Çalmıyor" yanıp sönmesin).
+        let blank = !next.active || next.title.is_empty();
+        let next = if blank && prev.active && !prev.title.is_empty() {
+            let since = *gap.get_or_insert_with(|| {
+                later(&tx, 1600);
+                Instant::now()
+            });
+            if since.elapsed() < Duration::from_millis(1500) { prev.clone() } else { next }
+        } else {
+            gap = None;
+            next
         };
         if next != prev {
             *now.lock().unwrap() = next;
@@ -267,7 +282,24 @@ fn secs(ticks: i64) -> f64 {
     ticks as f64 / 1e7
 }
 
-fn read(s: &Session, id: &str, prev: &Now, art_key: &mut String) -> windows::core::Result<Now> {
+/// Kapağın durumu: hangi şarkının, ne zamandan beri, son okunan baytlar.
+#[derive(Default)]
+struct Art {
+    key: String,
+    since: Option<Instant>,
+    bytes: Option<Arc<Vec<u8>>>,
+}
+
+/// `ms` sonra yeniden bakılsın.
+fn later(tx: &Sender<Msg>, ms: u64) {
+    let tx = tx.clone();
+    std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_millis(ms));
+        let _ = tx.send(Msg::Changed);
+    });
+}
+
+fn read(s: &Session, id: &str, prev: &Now, art: &mut Art, tx: &Sender<Msg>) -> windows::core::Result<Now> {
     let props = s.TryGetMediaPropertiesAsync()?.join()?;
     let info = s.GetPlaybackInfo()?;
     let controls = info.Controls()?;
@@ -288,26 +320,45 @@ fn read(s: &Session, id: &str, prev: &Now, art_key: &mut String) -> windows::cor
         position += secs(now_ticks - updated);
     }
 
-    // Kapak yalnızca şarkı değişince (ya da henüz gelmediyse) okunur.
+    // Kapak: tarayıcılar şarkı değişince önce kendi simgelerini ya da hiçbir şey vermez, asıl
+    // kapak biraz sonra gelir (çoğu zaman olaysız). Şarkı değiştikten sonraki dört saniye her
+    // bakışta ve birkaç kez kendiliğinden yeniden okunur; baytlar değişince yeni kapak sayılır.
     let key = format!("{id}\n{title}\n{artist}");
-    let (mut art, mut art_gen) = (prev.art.clone(), prev.art_gen);
-    if *art_key != key || art.is_none() {
+    if art.key != key {
+        art.key = key;
+        art.since = Some(Instant::now());
+        art.bytes = None;
+        for ms in [400, 1200, 2500, 4000] {
+            later(tx, ms);
+        }
+    }
+    let fresh = art.since.is_some_and(|t| t.elapsed() < Duration::from_millis(4500));
+    if fresh || art.bytes.is_none() {
         let bytes = match props.Thumbnail() {
             Ok(t) => match thumbnail(&t) {
                 Ok(b) if !b.is_empty() => Some(b),
                 Ok(_) => None,
                 Err(e) => {
-                    crate::log!("music: kapak okunamadı ({title}): {e}");
+                    crate::log!("müzik: kapak okunamadı ({title}): {e}");
                     None
                 }
             },
             Err(_) => None,
         };
-        if *art_key != key || bytes.is_some() {
-            art = bytes.map(Arc::new);
-            art_gen = art_gen.wrapping_add(1);
+        if let Some(b) = bytes
+            && art.bytes.as_deref() != Some(&b)
+        {
+            art.bytes = Some(Arc::new(b));
         }
-        *art_key = key;
+    }
+    let (bytes, mut art_gen) = (art.bytes.clone(), prev.art_gen);
+    let same = match (&bytes, &prev.art) {
+        (Some(a), Some(b)) => Arc::ptr_eq(a, b),
+        (None, None) => true,
+        _ => false,
+    };
+    if !same {
+        art_gen = art_gen.wrapping_add(1);
     }
 
     Ok(Now {
@@ -323,7 +374,7 @@ fn read(s: &Session, id: &str, prev: &Now, art_key: &mut String) -> windows::cor
         position,
         duration: (end - start).max(0.0),
         at: Some(Instant::now()),
-        art,
+        art: bytes,
         art_gen,
     })
 }
@@ -379,7 +430,7 @@ pub fn probe() -> (String, Option<Now>) {
         match pick(&m, true) {
             Some(x) => {
                 let id = x.SourceAppUserModelId()?.to_string();
-                let n = read(&x, &id, &Now::default(), &mut String::new())?;
+                let n = read(&x, &id, &Now::default(), &mut Art::default(), &mpsc::channel().0)?;
                 s += &format!(
                     "gösterilen: {id} (spotify: {})\n  {} · {}\n  {} · {:.0}/{:.0} sn · kapak {} bayt\n",
                     n.spotify,

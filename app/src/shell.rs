@@ -21,6 +21,13 @@ fn programs_dir() -> Option<PathBuf> {
     Some(PathBuf::from(appdata).join(r"Microsoft\Windows\Start Menu\Programs"))
 }
 
+/// Başlat menüsündeki "<ad> · hive" kısayolunu siler (artık olmayan bir aracınki).
+pub fn remove_link(name: &str) {
+    if let Some(d) = programs_dir() {
+        let _ = std::fs::remove_file(d.join(link_name(name)));
+    }
+}
+
 /// Gömülü PNG'den tek görüntülü .ico (Vista'dan beri ICO içinde PNG geçerli).
 fn write_ico(png: &[u8], size: u32, path: &Path) -> std::io::Result<()> {
     let s = if size >= 256 { 0 } else { size as u8 };

@@ -348,12 +348,8 @@ impl App {
                 "Kısayolları bırakılır; kulaklık kopunca müzik yine hoparlörden çalmaya devam eder."
             ),
             tools::DOCK => t!(
-                "The dock closes; the Windows taskbar and your desktop icons come back as they were.",
-                "Dock kapanır; Windows görev çubuğu ve masaüstü simgelerin eski haline döner."
-            ),
-            tools::MUSIC => t!(
-                "The widget leaves your desktop and its settings are deleted.",
-                "Widget masaüstünden kalkar, ayarları silinir."
+                "The dock and its music strip close; the Windows taskbar and your desktop icons come back as they were.",
+                "Dock ve müzik şeridi kapanır; Windows görev çubuğu ve masaüstü simgelerin eski haline döner."
             ),
             _ => t!(
                 "The tunnel closes; the service, network adapter and your server link are deleted.",

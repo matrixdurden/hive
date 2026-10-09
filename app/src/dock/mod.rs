@@ -2,13 +2,16 @@
 //! sabitlenenler (uygulama, klasör, ne sabitlenirse), yanlarında açık olanlar; sağ uçta ağ, ses,
 //! pil ve saat. Masaüstü simgeleri de istenirse gizlenir.
 //!
-//! Motor hive sürecinin içinde (dock.rs). Kurmak ayar dosyasını ve dock'un ilk listesini
+//! Dock'un solunda çalan şarkının şeridi (music/): Spotify, kapak, düğmeler.
+//!
+//! Motor hive sürecinin içinde (bar.rs). Kurmak ayar dosyasını ve dock'un ilk listesini
 //! (görev çubuğuna sabitlenmiş kısayollar) yazar.
 //! Kaldırınca (ya da hive kapanınca) görev çubuğu ve masaüstü simgeleri eski haline döner.
 
 mod apps;
 mod bar;
 mod menu;
+pub mod music;
 mod stack;
 mod status;
 mod keys;
@@ -29,9 +32,7 @@ use crate::ui::*;
 use crate::util;
 
 
-const ROW: f32 = 68.0;
-/// Simge boyu kaydırıcısının satırı (anahtarlardan sonra).
-const SIZE_ROW: usize = 2;
+const ROW: f32 = 64.0;
 const SIZES: (u32, u32, u32) = (36, 64, 4);
 
 pub fn dir() -> PathBuf {
@@ -255,20 +256,53 @@ pub fn probe() -> String {
 
 // --- Sayfa ---
 
+/// Sayfanın satırları, yukarıdan aşağı. Müzik satırlarının üstünde bölüm başlığı.
+#[derive(Clone, Copy, PartialEq, Debug)]
+enum Row {
+    CornerTl,
+    CornerBr,
+    Size,
+    Music,
+    Style,
+    Opacity,
+    Progress,
+    Others,
+    HideIdle,
+}
+
+const ROWS: [Row; 9] = [
+    Row::CornerTl,
+    Row::CornerBr,
+    Row::Size,
+    Row::Music,
+    Row::Style,
+    Row::Opacity,
+    Row::Progress,
+    Row::Others,
+    Row::HideIdle,
+];
+/// Müzik bölümünün başlığı için boşluk.
+const SECTION: f32 = 52.0;
+
 #[derive(Clone, Copy, PartialEq)]
 enum Hit {
     None,
-    Toggle(usize),
-    Size,
+    Toggle(Row),
+    /// Arka plan seçicisinin `n`. parçası.
+    Style(usize),
+    /// Kaydırıcı: simge boyu ya da müziğin saydamlığı.
+    Slider(Row),
 }
 
 pub struct Dock {
     hwnd: HWND,
     settings: Settings,
+    music: music::Music,
     hover: Hit,
     pressed: Hit,
-    /// Boyut kaydırıcısı sürükleniyor (bırakınca uygulanır).
-    dragging: bool,
+    /// Sürüklenen kaydırıcı (bırakınca uygulanır).
+    dragging: Option<Row>,
+    scroll: f32,
     w: f32,
     h: f32,
     head_x: f32,
@@ -281,7 +315,19 @@ impl Dock {
         shell_verbs(true);
         taskbar::hide();
         bar::start(settings, load_pins());
-        Self { hwnd, settings, hover: Hit::None, pressed: Hit::None, dragging: false, w: 0.0, h: 0.0, head_x: 0.0, head_r: 0.0 }
+        Self {
+            hwnd,
+            settings,
+            music: music::Music::start(hwnd),
+            hover: Hit::None,
+            pressed: Hit::None,
+            dragging: None,
+            scroll: 0.0,
+            w: 0.0,
+            h: 0.0,
+            head_x: 0.0,
+            head_r: 0.0,
+        }
     }
 
     fn redraw(&self) {
@@ -290,39 +336,81 @@ impl Dock {
         }
     }
 
-    fn row(&self, i: usize) -> Rect {
-        let t = HEADER + 12.0 + i as f32 * ROW;
+    fn row(&self, r: Row) -> Rect {
+        let i = ROWS.iter().position(|&x| x == r).unwrap_or(0);
+        let section = if i >= 3 { SECTION } else { 0.0 };
+        let t = HEADER + 12.0 + i as f32 * ROW + section - self.scroll;
         Rect::new(PAD, t, self.w - PAD, t + ROW)
     }
 
-    fn slider_x(&self) -> (f32, f32) {
-        let r = self.row(SIZE_ROW);
+    fn max_scroll(&self) -> f32 {
+        (HEADER + 24.0 + ROWS.len() as f32 * ROW + SECTION - self.h).max(0.0)
+    }
+
+    fn slider_x(&self, r: Row) -> (f32, f32) {
+        let r = self.row(r);
         (r.r - 220.0, r.r - 52.0)
     }
 
-    fn hit(&self, _g: &Gfx, x: f32, y: f32) -> Hit {
-        for i in [0, 1] {
-            let r = self.row(i);
-            if toggle_rect(r.r, r.cy()).contains(x, y) || (r.contains(x, y) && x > r.r - 120.0) {
-                return Hit::Toggle(i);
-            }
+    fn style_labels() -> [&'static str; 3] {
+        [t!("Cover", "Kapak"), t!("Color", "Renk"), t!("Like the dock", "Dock gibi")]
+    }
+
+    /// Arka plan seçicisinin parçaları, satırın sağına yaslı.
+    fn seg_rects(&self, g: &Gfx) -> Vec<Rect> {
+        let r = self.row(Row::Style);
+        let labels = Self::style_labels();
+        let w = labels.iter().map(|l| g.measure(l, &g.f.button)).fold(0.0, f32::max) + 28.0;
+        let (t, b) = (r.cy() - 15.0, r.cy() + 15.0);
+        (0..3).map(|i| Rect::new(r.r - (3 - i) as f32 * w, t, r.r - (2 - i) as f32 * w, b)).collect()
+    }
+
+    /// Müzik kapalıyken altındaki ayarlar sönük durur.
+    fn enabled(&self, r: Row) -> bool {
+        !matches!(r, Row::Style | Row::Opacity | Row::Progress | Row::Others | Row::HideIdle) || self.music.settings.show
+    }
+
+    fn hit(&self, g: &Gfx, x: f32, y: f32) -> Hit {
+        if y < HEADER {
+            return Hit::None;
         }
-        let r = self.row(SIZE_ROW);
-        let (a, b) = self.slider_x();
-        if Rect::new(a - 10.0, r.t + 14.0, b + 10.0, r.b - 14.0).contains(x, y) {
-            return Hit::Size;
+        for row in ROWS {
+            let r = self.row(row);
+            if !r.contains(x, y) || !self.enabled(row) {
+                continue;
+            }
+            return match row {
+                Row::Style => self.seg_rects(g).iter().position(|s| s.contains(x, y)).map_or(Hit::None, Hit::Style),
+                Row::Size | Row::Opacity => {
+                    let (a, b) = self.slider_x(row);
+                    if x >= a - 10.0 && x <= b + 10.0 { Hit::Slider(row) } else { Hit::None }
+                }
+                _ if x > r.r - 120.0 => Hit::Toggle(row),
+                _ => Hit::None,
+            };
         }
         Hit::None
     }
 
-    fn set_size_from(&mut self, x: f32) {
-        let (a, b) = self.slider_x();
-        let (lo, hi, step) = SIZES;
-        let v = lo as f32 + ((x - a) / (b - a)).clamp(0.0, 1.0) * (hi - lo) as f32;
-        let v = ((v / step as f32).round() as u32 * step).clamp(lo, hi);
-        if v != self.settings.size {
-            self.settings.size = v;
-            self.redraw();
+    fn set_slider_from(&mut self, row: Row, x: f32) {
+        let (a, b) = self.slider_x(row);
+        let t = ((x - a) / (b - a)).clamp(0.0, 1.0);
+        if row == Row::Size {
+            let (lo, hi, step) = SIZES;
+            let v = lo as f32 + t * (hi - lo) as f32;
+            let v = ((v / step as f32).round() as u32 * step).clamp(lo, hi);
+            if v != self.settings.size {
+                self.settings.size = v;
+                self.redraw();
+            }
+        } else {
+            let v = (30.0 + t * 70.0).round() as u32;
+            if v != self.music.settings.opacity {
+                self.music.settings.opacity = v;
+                // Sürüklerken şerit de canlı değişsin (dosyaya bırakınca yazılır).
+                self.music.apply();
+                self.redraw();
+            }
         }
     }
 
@@ -334,46 +422,125 @@ impl Dock {
         self.redraw();
     }
 
+    fn texts(row: Row) -> (&'static str, &'static str) {
+        match row {
+            Row::CornerTl => (
+                t!("Top-left corner", "Sol üst köşe"),
+                t!(
+                    "Throw the cursor into the corner to see all windows (Win+Tab)",
+                    "İmleci köşeye sertçe götürünce bütün pencereler görünür (Win+Tab)"
+                ),
+            ),
+            Row::CornerBr => (
+                t!("Bottom-right corner", "Sağ alt köşe"),
+                t!(
+                    "Throw the cursor into the corner for the desktop, again to come back (Win+D)",
+                    "İmleci köşeye sertçe götürünce masaüstü, tekrar götürünce geri döner (Win+D)"
+                ),
+            ),
+            Row::Size => (t!("Icon size", "Simge boyu"), ""),
+            Row::Music => (
+                t!("Now playing", "Çalan şarkı"),
+                t!(
+                    "Spotify left of the dock; click it to bring Spotify forward",
+                    "Dock'un solunda Spotify; tıklayınca Spotify öne gelir"
+                ),
+            ),
+            Row::Style => (
+                t!("Background", "Arka plan"),
+                t!("The cover blurred, its color, or plain like the dock", "Kapağın bulanık hali, rengi ya da dock gibi düz"),
+            ),
+            Row::Opacity => (t!("Opacity", "Saydamlık"), t!("Of the background; text stays sharp", "Arka planın; yazılar hep net")),
+            Row::Progress => (
+                t!("Progress line", "İlerleme çizgisi"),
+                t!("A thin line under the song; click it to seek", "Şarkının altında ince bir çizgi; tıklayıp atlayabilirsin"),
+            ),
+            Row::Others => (
+                t!("Other players too", "Diğer oynatıcılar da"),
+                t!(
+                    "When Spotify isn't open, show what the browser or another app is playing",
+                    "Spotify açık değilken tarayıcının ya da başka bir uygulamanın çaldığını göster"
+                ),
+            ),
+            Row::HideIdle => (
+                t!("Hide when nothing plays", "Bir şey çalmıyorken gizle"),
+                t!("Otherwise it waits with a shortcut that opens Spotify", "Kapalıysa Spotify'ı açan bir kısayolla bekler"),
+            ),
+        }
+    }
+
     pub fn paint(&self, g: &Gfx) {
         let s = &self.settings;
-        let head = t!(
-            "Dock on · always visible, maximized windows end above it",
-            "Dock açık · hep görünür, büyütülen pencereler onun üstünde biter"
-        );
-        status(g, self.head_x + 16.0, HEAD_CY, pal().green, head, pal().muted, self.head_r - 8.0);
+        let m = &self.music.settings;
+        let n = &self.music.now;
+        let head = if m.show && n.active {
+            let who = if n.artist.is_empty() { n.title.clone() } else { format!("{} · {}", n.title, n.artist) };
+            format!("{} · {who}", t!("Dock on", "Dock açık"))
+        } else {
+            t!("Dock on · always visible, maximized windows end above it", "Dock açık · hep görünür, büyütülen pencereler onun üstünde biter")
+                .to_string()
+        };
+        status(g, self.head_x + 16.0, HEAD_CY, pal().green, &head, pal().muted, self.head_r - 8.0);
 
         g.clip(Rect::new(0.0, HEADER, self.w, self.h), || {
-            let rows: [(&str, &str, bool); 2] = [
-                (
-                    t!("Top-left corner", "Sol üst köşe"),
-                    t!(
-                        "Throw the cursor into the corner to see all windows (Win+Tab)",
-                        "İmleci köşeye sertçe götürünce bütün pencereler görünür (Win+Tab)"
-                    ),
-                    s.corner_tl,
-                ),
-                (
-                    t!("Bottom-right corner", "Sağ alt köşe"),
-                    t!(
-                        "Throw the cursor into the corner for the desktop, again to come back (Win+D)",
-                        "İmleci köşeye sertçe götürünce masaüstü, tekrar götürünce geri döner (Win+D)"
-                    ),
-                    s.corner_br,
-                ),
-            ];
-            for (i, (title, sub, on)) in rows.iter().enumerate() {
-                let r = self.row(i);
-                setting_row(g, r, title, sub, 120.0);
-                toggle(g, toggle_rect(r.r, r.cy()), *on, accent(), true);
-            }
+            // Müzik bölümünün başlığı.
+            let first = self.row(Row::Music);
+            let title = Rect::new(PAD, first.t - SECTION + 16.0, self.w - PAD, first.t - 8.0);
+            g.text(t!("Music", "Müzik"), &g.f.strong, title, pal().text);
 
-            let r = self.row(SIZE_ROW);
-            setting_row(g, r, t!("Icon size", "Simge boyu"), "", 240.0);
-            let (a, b) = self.slider_x();
-            let (lo, hi, _) = SIZES;
-            let v = (s.size - lo) as f32 / (hi - lo) as f32;
-            slider(g, a, b, r.cy(), v, accent(), self.dragging || self.hover == Hit::Size);
-            g.text(&s.size.to_string(), &g.f.small_right, Rect::new(b + 8.0, r.t, r.r, r.b), pal().muted);
+            for row in ROWS {
+                let r = self.row(row);
+                let (title, sub) = Self::texts(row);
+                let enabled = self.enabled(row);
+                match row {
+                    Row::Style => {
+                        let seg = self.seg_rects(g);
+                        setting_row(g, r, title, sub, r.r - seg[0].l + 16.0);
+                        g.fill(Rect::new(seg[0].l - 3.0, seg[0].t - 3.0, seg[2].r + 3.0, seg[0].b + 3.0), 6.0, pal().hover);
+                        let current = music::Style::ALL.iter().position(|&x| x == m.style).unwrap_or(0);
+                        for (i, (sr, label)) in seg.iter().zip(Self::style_labels()).enumerate() {
+                            let c = if i == current && enabled {
+                                g.fill(*sr, 4.0, accent());
+                                on_accent()
+                            } else if self.hover == Hit::Style(i) {
+                                g.fill(*sr, 4.0, pal().sel);
+                                pal().text
+                            } else if enabled {
+                                pal().muted
+                            } else {
+                                pal().faint
+                            };
+                            g.text(label, &g.f.button, *sr, c);
+                        }
+                    }
+                    Row::Size | Row::Opacity => {
+                        setting_row(g, r, title, sub, 260.0);
+                        let (a, b) = self.slider_x(row);
+                        let (v, label) = if row == Row::Size {
+                            let (lo, hi, _) = SIZES;
+                            ((s.size - lo) as f32 / (hi - lo) as f32, s.size.to_string())
+                        } else {
+                            ((m.opacity as f32 - 30.0) / 70.0, format!("%{}", m.opacity))
+                        };
+                        let active = enabled && (self.dragging == Some(row) || self.hover == Hit::Slider(row));
+                        slider(g, a, b, r.cy(), v, accent(), active);
+                        let c = if enabled { pal().muted } else { pal().faint };
+                        g.text(&label, &g.f.small_right, Rect::new(b + 8.0, r.t, r.r, r.b), c);
+                    }
+                    _ => {
+                        let on = match row {
+                            Row::CornerTl => s.corner_tl,
+                            Row::CornerBr => s.corner_br,
+                            Row::Music => m.show,
+                            Row::Progress => m.progress,
+                            Row::Others => m.others,
+                            _ => m.hide_idle,
+                        };
+                        setting_row(g, r, title, sub, 120.0);
+                        toggle(g, toggle_rect(r.r, r.cy()), on, accent(), enabled);
+                    }
+                }
+            }
         });
     }
 }
@@ -384,15 +551,31 @@ impl ToolPage for Dock {
         self.h = h;
         self.head_x = head_x;
         self.head_r = head_r;
+        self.scroll = self.scroll.min(self.max_scroll());
     }
 
     fn paint(&self, g: &Gfx) {
         Dock::paint(self, g)
     }
 
+    fn message(
+        &mut self,
+        _g: &mut Gfx,
+        msg: u32,
+        _wp: windows::Win32::Foundation::WPARAM,
+        _lp: windows::Win32::Foundation::LPARAM,
+    ) -> Option<windows::Win32::Foundation::LRESULT> {
+        if msg != music::WM_MEDIA {
+            return None;
+        }
+        self.music.media_changed();
+        self.redraw();
+        Some(windows::Win32::Foundation::LRESULT(0))
+    }
+
     fn mouse_move(&mut self, g: &Gfx, x: f32, y: f32) {
-        if self.dragging {
-            self.set_size_from(x);
+        if let Some(row) = self.dragging {
+            self.set_slider_from(row, x);
             return;
         }
         let hit = self.hit(g, x, y);
@@ -403,7 +586,7 @@ impl ToolPage for Dock {
     }
 
     fn mouse_leave(&mut self) {
-        if self.hover != Hit::None && !self.dragging {
+        if self.hover != Hit::None && self.dragging.is_none() {
             self.hover = Hit::None;
             self.redraw();
         }
@@ -411,30 +594,57 @@ impl ToolPage for Dock {
 
     fn mouse_down(&mut self, g: &Gfx, x: f32, y: f32) {
         self.pressed = self.hit(g, x, y);
-        if self.pressed == Hit::Size {
-            self.dragging = true;
-            self.set_size_from(x);
+        if let Hit::Slider(row) = self.pressed {
+            self.dragging = Some(row);
+            self.set_slider_from(row, x);
         }
     }
 
     fn mouse_up(&mut self, g: &Gfx, x: f32, y: f32) {
         let pressed = std::mem::replace(&mut self.pressed, Hit::None);
-        if std::mem::take(&mut self.dragging) {
-            self.set_size_from(x);
-            self.commit();
+        if let Some(row) = self.dragging.take() {
+            self.set_slider_from(row, x);
+            if row == Row::Size {
+                self.commit();
+            } else {
+                self.music.commit();
+                self.redraw();
+            }
             return;
         }
         if pressed != self.hit(g, x, y) {
             return;
         }
-        if let Hit::Toggle(i) = pressed {
-            let s = &mut self.settings;
-            match i {
-                0 => s.corner_tl = !s.corner_tl,
-                _ => s.corner_br = !s.corner_br,
+        let (s, m) = (&mut self.settings, &mut self.music.settings);
+        match pressed {
+            Hit::Toggle(Row::CornerTl) => s.corner_tl = !s.corner_tl,
+            Hit::Toggle(Row::CornerBr) => s.corner_br = !s.corner_br,
+            Hit::Toggle(row) => {
+                match row {
+                    Row::Music => m.show = !m.show,
+                    Row::Progress => m.progress = !m.progress,
+                    Row::Others => m.others = !m.others,
+                    _ => m.hide_idle = !m.hide_idle,
+                }
+                self.music.commit();
+                self.redraw();
+                return;
             }
-            self.commit();
+            Hit::Style(i) => {
+                m.style = music::Style::ALL[i];
+                self.music.commit();
+                self.redraw();
+                return;
+            }
+            Hit::Slider(_) | Hit::None => return,
         }
+        self.commit();
+    }
+
+    fn wheel(&mut self, g: &Gfx, x: f32, y: f32, delta: f32) {
+        self.scroll = (self.scroll - delta * 60.0).clamp(0.0, self.max_scroll());
+        self.hover = self.hit(g, x, y);
+        self.redraw();
     }
 
     fn interactive(&self, g: &Gfx, x: f32, y: f32) -> bool {
@@ -444,7 +654,7 @@ impl ToolPage for Dock {
     fn set_visible(&mut self, visible: bool) {
         if !visible {
             self.hover = Hit::None;
-            self.dragging = false;
+            self.dragging = None;
         }
     }
 }

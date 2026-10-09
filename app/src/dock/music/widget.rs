@@ -36,6 +36,11 @@ const CLASS: PCWSTR = w!("hive-music");
 const TIMER_TICK: usize = 1;
 /// Dock'un yeri arada bir okunur (simge eklenince hap genişler, ekran değişir).
 const TIMER_DOCK: usize = 2;
+/// Kapak geçişi (kare kare) ve yeni şarkının kapağını bekleme süresi.
+const TIMER_FADE: usize = 3;
+const TIMER_WAIT: usize = 4;
+const FADE_MS: f32 = 280.0;
+const WAIT_MS: u32 = 3000;
 const WM_MOUSELEAVE: u32 = 0x02A3;
 
 /// Şeridin en geniş hali ve sığmazsa gizlendiği en dar hali, çevresindeki gölge payı (DIP).
@@ -181,6 +186,9 @@ struct Bitmaps {
     shadow_key: (i32, i32),
     art: Option<ID2D1Bitmap>,
     ambient: Option<ID2D1Bitmap>,
+    /// Geçişte solan eski kapak.
+    old_art: Option<ID2D1Bitmap>,
+    old_ambient: Option<ID2D1Bitmap>,
 }
 
 struct Fonts {
@@ -202,8 +210,15 @@ struct Widget {
     /// Dock'un yeri (açıksa); şerit onun soluna oturur.
     dock: Option<Geometry>,
     now: Now,
+    /// Gösterilen kapak; yeni şarkının kapağı gelene kadar öncekininki kalır.
     art: Option<Art>,
+    /// Geçişte solan kapak ve geçişin başladığı an.
+    old: Option<Art>,
+    fade: Option<Instant>,
     art_gen: u32,
+    /// Gösterilen şarkı (başlık, sanatçı) ve kapağının gelip gelmediği.
+    track: (String, String),
+    track_art: bool,
     /// Saniyede bir çizen zamanlayıcı açık mı (yalnızca çalarken).
     ticking: bool,
     /// Son çizilen saniye.
@@ -591,13 +606,16 @@ impl Widget {
                 self.bitmaps.shadow = Self::bitmap(rt, wp as u32, hp as u32, &px);
                 self.bitmaps.shadow_key = (wp, hp);
             }
-            if let Some(a) = &self.art {
-                if self.bitmaps.art.is_none() {
-                    self.bitmaps.art = Self::bitmap(rt, a.w, a.h, &a.px);
-                }
-                if self.bitmaps.ambient.is_none() {
-                    let (aw, ah, px) = &a.ambient;
-                    self.bitmaps.ambient = Self::bitmap(rt, *aw as u32, *ah as u32, px);
+            let b = &mut self.bitmaps;
+            for (a, art, ambient) in [(&self.art, &mut b.art, &mut b.ambient), (&self.old, &mut b.old_art, &mut b.old_ambient)] {
+                if let Some(a) = a {
+                    if art.is_none() {
+                        *art = Self::bitmap(rt, a.w, a.h, &a.px);
+                    }
+                    if ambient.is_none() {
+                        let (aw, ah, px) = &a.ambient;
+                        *ambient = Self::bitmap(rt, *aw as u32, *ah as u32, px);
+                    }
                 }
             }
         }
@@ -605,16 +623,19 @@ impl Widget {
         let pos = self.now.position_now();
         self.drawn_sec = pos as i64;
         let active = self.now.active;
-        let art_color = self.art.as_ref().filter(|_| active).map(|a| a.color);
         let opacity = self.o.opacity;
         let th = dock.theme;
-        // Arka plan kapaktan mı geliyor (koyu, beyaz yazı) yoksa dock'un renginde mi.
-        let from_art = active
-            && match self.o.style {
-                Style::Cover => self.bitmaps.ambient.is_some(),
-                Style::Color => art_color.is_some(),
-                Style::Plain => false,
-            };
+        let p = self.fade_t();
+        // Arka planı kapaktan mı geliyor (koyu, beyaz yazı) yoksa dock'un renginde mi; geçişte
+        // ağır basan katmana göre.
+        let style = self.o.style;
+        let uses_art = |a: &Option<Art>| active && style != Style::Plain && a.is_some();
+        let from_art = if p < 0.5 && self.fade.is_some() { uses_art(&self.old) } else { uses_art(&self.art) };
+        // Yazının altını koyulaştıran katmanın gücü (iki katmanın karışımı).
+        let shade_k = match self.fade {
+            Some(_) => (uses_art(&self.old) as u8 as f32) * (1.0 - p) + (uses_art(&self.art) as u8 as f32) * p,
+            None => uses_art(&self.art) as u8 as f32,
+        };
         let fg = if from_art || th.dark { 0xffffff } else { 0x000000 };
         let light = fg == 0;
 
@@ -648,21 +669,32 @@ impl Widget {
                 rt.DrawBitmap(s, Some(&r), opacity, D2D1_BITMAP_INTERPOLATION_MODE_LINEAR, None);
             }
 
-            // Arka plan: kapak (bulanık), kapağın rengi ya da dock gibi.
-            let ambient = self.bitmaps.ambient.as_ref().filter(|_| from_art && self.o.style == Style::Cover);
-            match (ambient.and_then(|a| Self::brush_for(rt, a, &card, opacity)), art_color) {
-                (Some(b), _) => rt.FillRoundedRectangle(&card_r, &b),
-                (None, Some(c)) if from_art => {
-                    let stops = [(0.0, shade(c, 0.62), opacity), (1.0, shade(c, 0.26), opacity)];
-                    if let Some(g) = Self::linear(rt, (card.left, card.top), (card.right, card.bottom), &stops) {
-                        rt.FillRoundedRectangle(&card_r, &g);
+            // Arka plan: kapak (bulanık), kapağın rengi ya da dock gibi. Geçişte eski katmanın
+            // üstüne yenisi belirir.
+            let background = |art: Option<&Art>, ambient: Option<&ID2D1Bitmap>, alpha: f32| {
+                let art = art.filter(|_| active && style != Style::Plain);
+                match (style, art, ambient) {
+                    (Style::Cover, Some(_), Some(bmp)) => {
+                        if let Some(b) = Self::brush_for(rt, bmp, &card, opacity * alpha) {
+                            rt.FillRoundedRectangle(&card_r, &b);
+                        }
                     }
+                    (Style::Color, Some(a), _) => {
+                        let stops = [(0.0, shade(a.color, 0.62), opacity * alpha), (1.0, shade(a.color, 0.26), opacity * alpha)];
+                        if let Some(g) = Self::linear(rt, (card.left, card.top), (card.right, card.bottom), &stops) {
+                            rt.FillRoundedRectangle(&card_r, &g);
+                        }
+                    }
+                    _ => fill(card_r, color(th.base, 0.88 * opacity * alpha)),
                 }
-                _ => fill(card_r, color(th.base, 0.88 * opacity)),
+            };
+            if self.fade.is_some() {
+                background(self.old.as_ref(), self.bitmaps.old_ambient.as_ref(), 1.0);
             }
-            if from_art {
+            background(self.art.as_ref(), self.bitmaps.ambient.as_ref(), if self.fade.is_some() { p } else { 1.0 });
+            if shade_k > 0.0 {
                 // Yazının altı biraz daha koyu (sağa doğru).
-                let stops = [(0.0, 0, 0.0), (0.3, 0, 0.10 * opacity), (1.0, 0, 0.30 * opacity)];
+                let stops = [(0.0, 0, 0.0), (0.3, 0, 0.10 * opacity * shade_k), (1.0, 0, 0.30 * opacity * shade_k)];
                 if let Some(g) = Self::linear(rt, (card.left, card.top), (card.right, card.top), &stops) {
                     rt.FillRoundedRectangle(&card_r, &g);
                 }
@@ -672,22 +704,27 @@ impl Widget {
             let edge = rect(card.left + 0.5, card.top + 0.5, card.right - 0.5, card.bottom - 0.5);
             rt.DrawRoundedRectangle(&rounded(edge, dock.radius - 0.5), brush, 1.0, None);
 
-            // Kapak (yoksa bir nota).
+            // Kapak (yoksa bir nota); geçişte eskisinin üstüne yenisi belirir.
             let ar = l.art;
-            match self.bitmaps.art.as_ref().filter(|_| active).and_then(|a| Self::brush_for(rt, a, &ar, 1.0)) {
+            let cover = |bmp: Option<&ID2D1Bitmap>, alpha: f32| match bmp.filter(|_| active).and_then(|b| Self::brush_for(rt, b, &ar, alpha)) {
                 Some(b) => {
                     rt.FillRoundedRectangle(&rounded(ar, ART_RADIUS), &b);
-                    brush.SetColor(&color(0xffffff, 0.10));
+                    brush.SetColor(&color(0xffffff, 0.10 * alpha));
                     let r = rect(ar.left + 0.5, ar.top + 0.5, ar.right - 0.5, ar.bottom - 0.5);
                     rt.DrawRoundedRectangle(&rounded(r, ART_RADIUS - 0.5), brush, 1.0, None);
                 }
                 None => {
-                    fill(rounded(ar, ART_RADIUS), color(fg, 0.08));
-                    brush.SetColor(&color(fg, 0.6));
+                    fill(rounded(ar, ART_RADIUS), color(th.base, alpha));
+                    fill(rounded(ar, ART_RADIUS), color(fg, 0.08 * alpha));
+                    brush.SetColor(&color(fg, 0.6 * alpha));
                     let s: Vec<u16> = "\u{EC4F}".encode_utf16().collect();
                     rt.DrawText(&s, &f.glyph, &ar, brush, D2D1_DRAW_TEXT_OPTIONS_NONE, DWRITE_MEASURING_MODE_NATURAL);
                 }
+            };
+            if self.fade.is_some() {
+                cover(self.bitmaps.old_art.as_ref(), 1.0);
             }
+            cover(self.bitmaps.art.as_ref(), if self.fade.is_some() { p } else { 1.0 });
 
             if active {
                 text(&self.now.title, &f.title, l.title, 1.0);
@@ -779,17 +816,27 @@ impl Widget {
     // --- Medya ---
 
     fn update(&mut self, now: Now) {
+        // Şarkı değişti: yeni kapak gelene kadar eskisi kalır; gelmezse bir süre sonra notaya geçilir.
+        let track = (now.title.clone(), now.artist.clone());
+        if track != self.track {
+            self.track = track;
+            self.track_art = false;
+            unsafe {
+                SetTimer(Some(self.hwnd), TIMER_WAIT, WAIT_MS, None);
+            }
+        }
         if now.art_gen != self.art_gen {
             self.art_gen = now.art_gen;
-            self.art = now.art.as_ref().and_then(|b| {
-                let a = self.decode(b);
-                if a.is_none() {
-                    crate::log!("müzik: kapak çözülemedi ({} bayt)", b.len());
+            // Tarayıcının simgesi ya da çözülemeyen resim kapak sayılmaz: gösterilen kalır.
+            if let Some(a) = now.art.as_ref().and_then(|b| self.decode(b)) {
+                self.track_art = true;
+                unsafe {
+                    let _ = KillTimer(Some(self.hwnd), TIMER_WAIT);
                 }
-                a
-            });
-            self.bitmaps.art = None;
-            self.bitmaps.ambient = None;
+                if self.art.as_ref().is_none_or(|old| old.px != a.px) {
+                    self.crossfade(Some(a));
+                }
+            }
         }
         if now.spotify {
             self.o.app = now.app.clone();
@@ -798,6 +845,50 @@ impl Widget {
         self.sync_shown();
         self.sync_timer();
         self.paint();
+    }
+
+    /// Gösterilen kapaktan `new`'e (yoksa notaya) yumuşak geçiş.
+    fn crossfade(&mut self, new: Option<Art>) {
+        if self.art.is_none() && new.is_none() {
+            return;
+        }
+        self.old = self.art.take();
+        self.bitmaps.old_art = self.bitmaps.art.take();
+        self.bitmaps.old_ambient = self.bitmaps.ambient.take();
+        self.art = new;
+        self.fade = Some(Instant::now());
+        unsafe {
+            SetTimer(Some(self.hwnd), TIMER_FADE, 16, None);
+        }
+    }
+
+    /// Geçişin ilerleyişi (0..1, yumuşatılmış); geçiş yoksa 1.
+    fn fade_t(&self) -> f32 {
+        let t = self.fade.map_or(1.0, |f| (f.elapsed().as_secs_f32() * 1000.0 / FADE_MS).min(1.0));
+        t * t * (3.0 - 2.0 * t)
+    }
+
+    fn fade_tick(&mut self) {
+        if self.fade_t() >= 1.0 {
+            self.fade = None;
+            self.old = None;
+            self.bitmaps.old_art = None;
+            self.bitmaps.old_ambient = None;
+            unsafe {
+                let _ = KillTimer(Some(self.hwnd), TIMER_FADE);
+            }
+        }
+        self.paint();
+    }
+
+    /// Yeni şarkının kapağı gelmedi: notaya geçilir.
+    fn wait_over(&mut self) {
+        unsafe {
+            let _ = KillTimer(Some(self.hwnd), TIMER_WAIT);
+        }
+        if !self.track_art {
+            self.crossfade(None);
+        }
     }
 
     /// Kapak baytlarını 192 piksele küçültüp çözer.
@@ -809,6 +900,10 @@ impl Widget {
             let frame = dec.GetFrame(0).ok()?;
             let (mut w, mut h) = (0, 0);
             frame.GetSize(&mut w, &mut h).ok()?;
+            // Uygulama simgesi (tarayıcı şarkı değişirken bir an kendi simgesini verir) küçüktür.
+            if w < 100 || h < 100 {
+                return None;
+            }
             let side = 192u32;
             let (tw, th) =
                 if w >= h { (side, (side * h / w.max(1)).max(1)) } else { ((side * w / h.max(1)).max(1), side) };
@@ -826,6 +921,11 @@ impl Widget {
             .ok()?;
             let mut px = vec![0u8; (tw * th * 4) as usize];
             conv.CopyPixels(std::ptr::null(), tw * 4, &mut px).ok()?;
+            // ... ya da saydam köşelidir; kapaklar opaktır.
+            let clear = px.chunks_exact(4).filter(|p| p[3] < 250).count();
+            if clear * 100 > px.len() / 4 {
+                return None;
+            }
             let color = dominant(&px);
             let ambient = look::ambient(&px, tw as usize, th as usize, STRIP_W / 66.0);
             Some(Art { w: tw, h: th, px, color, ambient })
@@ -964,6 +1064,8 @@ unsafe extern "system" fn proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> 
         match msg {
             WM_TIMER if wp.0 == TIMER_TICK => w.tick(),
             WM_TIMER if wp.0 == TIMER_DOCK => w.dock_check(),
+            WM_TIMER if wp.0 == TIMER_FADE => w.fade_tick(),
+            WM_TIMER if wp.0 == TIMER_WAIT => w.wait_over(),
             WM_MOUSEMOVE => w.mouse_move(lp),
             WM_LBUTTONDOWN => w.mouse_down(lp),
             WM_LBUTTONUP => w.mouse_up(lp),
@@ -1047,7 +1149,11 @@ fn create(remote: Remote, o: Options) -> windows::core::Result<Widget> {
             dock: crate::dock::geometry(),
             now: Now::default(),
             art: None,
+            old: None,
+            fade: None,
             art_gen: 0,
+            track: Default::default(),
+            track_art: false,
             ticking: false,
             drawn_sec: -1,
             hover: Hit::None,
@@ -1094,6 +1200,8 @@ pub fn stop() {
         unsafe {
             let _ = KillTimer(Some(w.hwnd), TIMER_TICK);
             let _ = KillTimer(Some(w.hwnd), TIMER_DOCK);
+            let _ = KillTimer(Some(w.hwnd), TIMER_FADE);
+            let _ = KillTimer(Some(w.hwnd), TIMER_WAIT);
             if !w.hook.is_invalid() {
                 let _ = UnhookWinEvent(w.hook);
             }
@@ -1126,7 +1234,7 @@ pub fn preview(path: &std::path::Path, style: Style, hover: bool, real: Option<N
         let (u, v) = (x / wp as f32, y / hp as f32);
         [0.25 + 0.35 * u, 0.3 + 0.1 * v, 0.5 + 0.2 * v]
     };
-    let sample: &[u8] = include_bytes!("../../assets/araclar/wallpaper-128.png");
+    let sample: &[u8] = include_bytes!("../../../assets/araclar/wallpaper-128.png");
     let art = real.as_ref().and_then(|n| n.art.clone());
     w.art = w.decode(art.as_deref().map_or(sample, |a| a.as_slice()));
     w.now = real.unwrap_or(Now {

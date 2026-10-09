@@ -7,7 +7,6 @@
 //! - battery: motoru hive'ın içinde; kurmak mevcut güç ayarlarını yedekleyip uygulamaların GPU tercihini yazmaktır.
 //! - audio: motoru hive'ın içinde; kurmak yalnızca kısayol dosyasını yazmaktır.
 //! - dock: motoru (dock) hive'ın içinde; kurmak ayarları ve dock'un ilk listesini yazmaktır.
-//! - music: motoru (widget) hive'ın içinde; kurmak yalnızca ayar dosyasını yazmaktır.
 
 use std::os::windows::process::CommandExt;
 use std::process::{Command, Stdio};
@@ -20,7 +19,7 @@ use windows::Win32::System::Threading::{OpenProcess, PROCESS_TERMINATE, Terminat
 use windows::Win32::UI::WindowsAndMessaging::{FindWindowW, GetWindowThreadProcessId};
 use windows::core::{PCWSTR, w};
 
-use crate::{wallpaper, battery, dock, log, soundboard, music, net, tunnel, shell, audio, util};
+use crate::{audio, battery, dock, log, net, shell, soundboard, tunnel, util, wallpaper};
 
 pub const SOUNDBOARD: usize = 0;
 pub const WALLPAPER: usize = 1;
@@ -28,8 +27,7 @@ pub const TUNNEL: usize = 2;
 pub const BATTERY: usize = 3;
 pub const AUDIO: usize = 4;
 pub const DOCK: usize = 5;
-pub const MUSIC: usize = 6;
-pub const COUNT: usize = 7;
+pub const COUNT: usize = 6;
 
 pub struct Tool {
     pub id: &'static str,
@@ -113,37 +111,34 @@ pub static TOOLS: [Tool; COUNT] = [
         note: ["Replaces the taskbar · turn it off and the taskbar is back", "Görev çubuğunun yerine geçer · kapatınca görev çubuğu geri gelir"],
         icons: icons!("dock"),
     },
-    Tool {
-        id: "music",
-        names: ["Music widget", "Müzik widget'ı"],
-        tagline: ["What Spotify is playing, right next to the dock", "Spotify'da çalan, dock'un hemen yanında"],
-        note: ["No Spotify login needed", "Spotify'a giriş gerekmez"],
-        icons: icons!("music"),
-    },
 ];
 
-/// Araçların eski kod adları ve bugünkü kimlikleri: kayıtlı sekme, eski kısayollar ve veri
-/// klasörleri bunlarla taşınır.
-const RENAMED: [(&str, &str); 7] = [
+/// Araçların eski kimlikleri ve bugünkü karşılıkları: kayıtlı sekme ve eski kısayollar bunlarla
+/// açılır. Müzik eskiden ayrı bir araçtı, artık dock'un parçası.
+const RENAMED: [(&str, &str); 8] = [
     ("lyrebird", "soundboard"),
     ("cheshire", "wallpaper"),
     ("rabbithole", "tunnel"),
     ("dormouse", "battery"),
     ("tweedle", "audio"),
     ("hatter", "dock"),
-    ("mockturtle", "music"),
+    ("mockturtle", "dock"),
+    ("music", "dock"),
 ];
 
-/// Kimliği (ya da eski kod adı) bu olan araç.
+/// Eski adlı veri klasörleri: (eski, yeni).
+const DIRS: [(&str, &str); 4] = [("dormouse", "battery"), ("tweedle", "audio"), ("hatter", "dock"), ("mockturtle", "music")];
+
+/// Kimliği (ya da eski kimliği) bu olan araç.
 pub fn find(id: &str) -> Option<usize> {
     let id = RENAMED.iter().find(|(old, _)| old.eq_ignore_ascii_case(id)).map_or(id, |(_, new)| new);
     TOOLS.iter().position(|t| t.id.eq_ignore_ascii_case(id))
 }
 
-/// Eski kod adlı veri klasörleri yeni adlarına taşınır (araçların ayarları kaybolmasın), eski
-/// adlı kısayol simgeleri silinir (yenileri kısayollarla yazılır).
+/// Açılışta eski kurulumların izleri: eski adlı veri klasörleri yeni adlarına taşınır, müziğin
+/// ayarları dock'a geçer, artık olmayan araçların kısayolları ve simgeleri silinir.
 pub fn migrate() {
-    for (old, new) in RENAMED {
+    for (old, new) in DIRS {
         let (o, n) = (util::data_dir().join(old), util::data_dir().join(new));
         if o.is_dir() && !n.exists() {
             match std::fs::rename(&o, &n) {
@@ -151,7 +146,13 @@ pub fn migrate() {
                 Err(e) => log!("{old} → {new} taşınamadı: {e}"),
             }
         }
+    }
+    dock::music::migrate();
+    for (old, _) in RENAMED {
         let _ = std::fs::remove_file(util::data_dir().join("ikonlar").join(format!("{old}.ico")));
+    }
+    for name in ["Music widget", "Müzik widget'ı"] {
+        shell::remove_link(name);
     }
 }
 
@@ -166,7 +167,6 @@ pub fn start(i: usize, hwnd: windows::Win32::Foundation::HWND) -> Box<dyn crate:
         BATTERY => Box::new(battery::Battery::start(hwnd)),
         AUDIO => Box::new(audio::Audio::start(hwnd)),
         DOCK => Box::new(dock::Dock::start(hwnd)),
-        MUSIC => Box::new(music::Music::start(hwnd)),
         _ => Box::new(tunnel::Tunnel::start(hwnd)),
     }
 }
@@ -179,7 +179,6 @@ pub fn installed(i: usize) -> bool {
         BATTERY => battery::installed(),
         AUDIO => audio::installed(),
         DOCK => dock::installed(),
-        MUSIC => music::installed(),
         _ => tunnel::installed(),
     }
 }
@@ -201,7 +200,6 @@ pub fn run(i: usize, install: bool) -> Result<(), String> {
         (BATTERY, true) => battery::install(),
         (AUDIO, true) => audio::install(),
         (DOCK, true) => dock::install(),
-        (MUSIC, true) => music::install(),
         (_, true) => rabbithole_install(),
         (_, false) => uninstall(i),
     }
@@ -222,7 +220,6 @@ fn uninstall(i: usize) -> Result<(), String> {
         BATTERY => battery::uninstall()?,
         AUDIO => audio::uninstall()?,
         DOCK => dock::uninstall()?,
-        MUSIC => music::uninstall()?,
         _ => {
             tunnel::run(&["remove"])?;
             // Program Files'taki exe kendini silemez: tunnel arkasında birkaç saniye içinde
@@ -262,7 +259,6 @@ pub fn leftovers(i: usize) -> Vec<String> {
         BATTERY => battery::leftovers(),
         AUDIO => audio::leftovers(),
         DOCK => dock::leftovers(),
-        MUSIC => music::leftovers(),
         _ => {
             let mut l: Vec<String> =
                 [tunnel::install_dir(), tunnel::data_dir()].into_iter().filter_map(exists).collect();
