@@ -1104,7 +1104,7 @@ fn fonts() -> windows::core::Result<Fonts> {
         Ok(Fonts {
             title: fmt(ui, 13.0, DWRITE_FONT_WEIGHT_SEMI_BOLD, DWRITE_TEXT_ALIGNMENT_LEADING)?,
             artist: fmt(ui, 12.0, DWRITE_FONT_WEIGHT_NORMAL, DWRITE_TEXT_ALIGNMENT_LEADING)?,
-            glyph: fmt(w!("Segoe Fluent Icons"), 18.0, DWRITE_FONT_WEIGHT_NORMAL, DWRITE_TEXT_ALIGNMENT_CENTER)?,
+            glyph: fmt(crate::gfx::icon_family(&dw), 18.0, DWRITE_FONT_WEIGHT_NORMAL, DWRITE_TEXT_ALIGNMENT_CENTER)?,
         })
     }
 }

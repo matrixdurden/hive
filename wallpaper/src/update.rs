@@ -1,8 +1,9 @@
 //! Otomatik güncelleme. GitHub Releases'teki son sürüm bu exe'den yeniyse indirir, SHA-256'sını
-//! doğrular ve kurulum klasörüne `wallpaper.exe.yeni` olarak koyar. Geçiş `apply` ile olur: çalışan
+//! doğrular ve kurulum klasörüne `cheshire.exe.yeni` olarak koyar. Geçiş `apply` ile olur: çalışan
 //! exe silinemez ama yeniden adlandırılabilir, bu yüzden ayrı bir güncelleyici programa gerek yok.
 //!
-//! Yayın düzeni (`make release`): etiket `vX.Y.Z`, varlıklar `wallpaper.exe` ve `wallpaper.exe.sha256`.
+//! Motorun eski, tek başına sürümünden kalma: hive'ın içinde (hub modu) çalışmaz, motoru hive
+//! günceller. Yayın düzeni: etiket `vX.Y.Z`, varlıklar `cheshire.exe` ve `cheshire.exe.sha256`.
 //! Taslak ve ön sürümler `latest` sayılmaz, kullanıcılara gitmez.
 
 use std::path::PathBuf;

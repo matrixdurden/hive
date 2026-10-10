@@ -47,6 +47,22 @@ impl Rect {
     }
 }
 
+/// Simge yazı tipi: Windows 11'de Segoe Fluent Icons, 10'da Segoe MDL2 Assets. İkisi aynı kod
+/// noktalarını kullanır; Fluent olmayan sistemde onu istemek simgeleri kutucuk yapar.
+pub fn icon_family(dw: &IDWriteFactory) -> PCWSTR {
+    let fluent = unsafe {
+        let mut fonts = None;
+        let (mut index, mut found) = (0u32, BOOL(0));
+        if dw.GetSystemFontCollection(&mut fonts, false).is_ok()
+            && let Some(f) = &fonts
+        {
+            let _ = f.FindFamilyName(w!("Segoe Fluent Icons"), &mut index, &mut found);
+        }
+        found.as_bool()
+    };
+    if fluent { w!("Segoe Fluent Icons") } else { w!("Segoe MDL2 Assets") }
+}
+
 /// 0xRRGGBB ve saydamlık.
 #[derive(Clone, Copy)]
 pub struct Color(pub u32, pub f32);
@@ -157,14 +173,7 @@ impl Gfx {
                 ellipsis(f)?;
             }
 
-            // Windows 11'de Fluent, 10'da MDL2: ikisi de aynı kod noktalarını kullanır.
-            let mut fonts = None;
-            dw.GetSystemFontCollection(&mut fonts, false)?;
-            let (mut index, mut fluent) = (0u32, BOOL(0));
-            if let Some(f) = &fonts {
-                f.FindFamilyName(w!("Segoe Fluent Icons"), &mut index, &mut fluent)?;
-            }
-            let icons = if fluent.as_bool() { w!("Segoe Fluent Icons") } else { w!("Segoe MDL2 Assets") };
+            let icons = icon_family(&dw);
 
             let f = Fonts {
                 heading,

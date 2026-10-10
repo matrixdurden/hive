@@ -2179,7 +2179,7 @@ fn create(settings: Settings, lines: Vec<String>) -> windows::core::Result<Bar> 
                 f.SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP)?;
                 Ok(f)
             };
-            let glyph = fmt(w!("Segoe Fluent Icons"), 16.0, DWRITE_FONT_WEIGHT_NORMAL)?;
+            let glyph = fmt(crate::gfx::icon_family(&dw), 16.0, DWRITE_FONT_WEIGHT_NORMAL)?;
             let clock = fmt(w!("Segoe UI Variable Text"), 13.5, DWRITE_FONT_WEIGHT_SEMI_BOLD)?;
             Ok(Bar {
                 hwnd,
