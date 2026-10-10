@@ -42,7 +42,7 @@ impl Tray {
         d
     }
 
-    /// Bildirim balonu (araçların uyarıları: battery'un vites değişimi, RTX bekçisi).
+    /// Bildirim balonu (araçların uyarıları: Pil aracının vites değişimi, RTX bekçisi).
     pub fn notify(&self, title: &str, text: &str) {
         let mut d = self.data();
         d.uFlags = NIF_INFO;

@@ -19,6 +19,7 @@ mod osd;
 mod tunnel;
 mod shell;
 mod tools;
+mod update;
 mod tray;
 mod audio;
 mod ui;
@@ -32,17 +33,19 @@ use windows::core::w;
 
 // kullanım (Türkçe adlar da geçer: --sekme, --gizli, --kur, --kaldir, --kalinti):
 //   hive                  pencereyi aç (son sekmede)
-//   hive --tab <ad>       o sekmede aç: soundboard, wallpaper, tunnel, tools, settings
+//   hive --tab <ad>       o sekmede aç: soundboard, wallpaper, tunnel, battery, audio, dock, tools, settings
 //   hive --hidden         tepside başlat
-//   hive --install        kendini %LOCALAPPDATA%\Programs\hive'a kur ve başlat (güncelleme de)
+//   hive --install        kendini %LOCALAPPDATA%\Programs\hive'a kur ve başlat (güncelleme de;
+//                         --hidden ile pencere açmadan)
 //   hive --uninstall      hive'ı ve kurulu araçları iz bırakmadan kaldır
 //   hive --leftovers      kurulu olmayan araçlardan kalan iz var mı, listele
 //   hive --soundboard-test  her mikrofona test sesi gönder, geri geliyor mu ölç
-//   hive --battery-test  battery'un okuduğu pil, ekran ve ekran kartı bilgilerini yazdır
-//   hive --audio-test   audio'ın gördüğü ses çıkışlarını ve medya oturumlarını yazdır
-//   hive --dock-test    dock'ın gördüğü pencereleri ve dock'taki öğeleri yazdır
+//   hive --battery-test  Pil aracının okuduğu pil, ekran ve ekran kartı bilgilerini yazdır
+//   hive --audio-test   Ses aygıtları aracının gördüğü çıkışları ve medya oturumlarını yazdır
+//   hive --dock-test    dock'un gördüğü pencereleri ve dock'taki öğeleri yazdır
 //   hive --dock-pin <yol>  dock'a sabitle (sağ tık menüsünden)
-//   hive --music-test [klasör]  medya oturumlarını yazdır; klasöre widget önizlemesi çiz
+//   hive --music-test [klasör]  medya oturumlarını yazdır; klasöre müzik şeridinin önizlemesini çiz
+//   hive --update-test  son yayına bak, yeniyse indirip doğrula (kurmaz)
 
 /// Bayrak İngilizce ya da Türkçe adıyla verilmiş mi.
 fn flag(args: &[String], en: &str, tr: &str) -> bool {
@@ -63,7 +66,7 @@ fn main() {
         Some("--install" | "--kur") => {
             log::init("kurulum.log");
             // Kurulum komutundan çağrılır: hata kutusu açıp beklemez, çıkış koduyla bildirir.
-            if let Err(e) = shell::install_self() {
+            if let Err(e) = shell::install_self(flag(&args, "--hidden", "--gizli")) {
                 log!("kurulamadı: {e}");
                 std::process::exit(1);
             }
@@ -127,6 +130,13 @@ fn main() {
             print!("{}", dock::music::probe(args.get(1).map(String::as_str)));
             std::process::exit(0);
         }
+        Some("--update-test" | "--guncelleme-dene") => {
+            unsafe {
+                let _ = AttachConsole(ATTACH_PARENT_PROCESS);
+            }
+            print!("{}", update::probe());
+            std::process::exit(0);
+        }
         Some("--dock-pin" | "--hatter-pin") => {
             unsafe {
                 let _ = windows::Win32::System::Com::CoInitializeEx(None, windows::Win32::System::Com::COINIT_APARTMENTTHREADED);
@@ -152,7 +162,7 @@ fn main() {
     // İndirilip çift tıklanan exe de kendini kurar (WSL'deki geliştirme kopyası hariç).
     if util::installed_copy().is_some_and(|exe| !exe.eq_ignore_ascii_case(&util::data_dir().join("hive.exe").display().to_string())) {
         log::init("kurulum.log");
-        if let Err(e) = shell::install_self() {
+        if let Err(e) = shell::install_self(false) {
             util::error_box(&format!("{}\n\n{e}", t!("hive could not be installed:", "hive kurulamadı:")));
         }
         return;
@@ -164,6 +174,11 @@ fn main() {
     } else {
         args.iter().position(|a| a == "--tab" || a == "--sekme").and_then(|i| args.get(i + 1)).cloned()
     };
+
+    // İndirilmiş güncelleme varsa önce o kurulur (o da bu sürümü kapatıp yerine geçer).
+    if !flag(&args, "--uninstall", "--kaldir") && update::install_pending_at_start(true) {
+        return;
+    }
 
     // Tek kopya: zaten çalışıyorsa sekmeyi ona ilet.
     let _mutex = unsafe { CreateMutexW(None, true, w!("Local\\hive-tek-kopya")) };

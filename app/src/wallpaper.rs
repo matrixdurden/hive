@@ -165,7 +165,7 @@ fn write_engine() -> Result<(), String> {
     Err(format!("{} {last}", t!("could not write cheshire.exe:", "cheshire.exe yazılamadı:")))
 }
 
-/// Ayrı wallpaper'ın kendi kayıtları (Windows ile başlama, Programlar listesi): artık hive yönetiyor.
+/// Motorun eski, tek başına sürümünün kendi kayıtları (Windows ile başlama, Programlar listesi): artık hive yönetiyor.
 fn remove_standalone_registrations() {
     unsafe {
         let _ = RegDeleteKeyValueW(HKEY_CURRENT_USER, w!(r"Software\Microsoft\Windows\CurrentVersion\Run"), w!("cheshire"));
@@ -442,7 +442,7 @@ pub struct Wallpaper {
 
 impl Wallpaper {
     /// Sayfayı kurar ve motoru başlatır: önceki motor (eski bir hive'dan ya da tepsideki ayrı
-    /// wallpaper'dan) kapatılır, exe güncel değilse yazılır, sonra WM_RELAUNCH ile `--hub` açılır.
+    /// duvar kâğıdı motorundan) kapatılır, exe güncel değilse yazılır, sonra WM_RELAUNCH ile `--hub` açılır.
     pub fn start(hwnd: HWND) -> Self {
         let st = parse_state(&std::fs::read_to_string(app_dir().join("durum.txt")).unwrap_or_default());
         let raw = hwnd.0 as usize;

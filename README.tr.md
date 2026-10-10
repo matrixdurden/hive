@@ -21,7 +21,7 @@ PowerShell'e yapıştır:
 irm https://github.com/matrixdurden/hive/raw/main/install.ps1 | iex
 ```
 
-Yönetici izni gerekmez. Aynı komut hive'ı günceller.
+Yönetici izni gerekmez. Sonrasında hive yeni sürümleri kendisi indirir, doğrular ve bir sonraki açılışında kurar (Ayarlar'dan hemen de kurulur, otomatik güncelleme kapatılabilir).
 
 ## Araçlar
 

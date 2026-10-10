@@ -1,4 +1,4 @@
-//! soundboard sayfası. Motor (çözme, ortak bellek, kulaklık, kısayollar) ../soundboard'de ve
+//! soundboard sayfası. Motor (çözme, ortak bellek, kulaklık, kısayollar) ../soundboard'da ve
 //! hive sürecinde çalışır; mikrofon efekti (APO) audiodg.exe içinde.
 //!
 //! Sayfa: üstte mikrofon durumu ve "hepsini sustur", altında iki sekme, en altta iki ses düzeyi.

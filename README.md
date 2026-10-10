@@ -21,7 +21,7 @@ Paste into PowerShell:
 irm https://github.com/matrixdurden/hive/raw/main/install.ps1 | iex
 ```
 
-No administrator needed. The same command updates hive.
+No administrator needed. After that hive downloads new versions by itself, verifies them and installs them the next time it starts (or right away from Settings; automatic updates can be turned off).
 
 ## Tools
 

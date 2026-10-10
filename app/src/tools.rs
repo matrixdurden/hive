@@ -290,7 +290,7 @@ fn soundboard_setup(install: bool) -> Result<(), String> {
 }
 
 /// Son sürümü indirir, doğrular ve `tunnel dpi` ile kurar: hizmet kurulur, sunucusuz modda
-/// açılır (tunnel'un kendi kurulumu da bağlantı verilmezse böyle yapar).
+/// açılır (rabbithole'un kendi kurulumu da bağlantı verilmezse böyle yapar).
 fn rabbithole_install() -> Result<(), String> {
     let asset = "rabbithole-windows-amd64.exe";
     let base = "https://github.com/matrixdurden/rabbithole/releases/latest/download/";

@@ -99,7 +99,7 @@ fn legacy_dir() -> Option<PathBuf> {
     std::env::var_os("APPDATA").map(|a| PathBuf::from(a).join("cheshire"))
 }
 
-/// Eski sürümler veriyi %APPDATA%\wallpaper'da tutuyordu: ayarları ve duvar kâğıtlarını
+/// Eski sürümler veriyi %APPDATA%\duvar kâğıdı motorunda tutuyordu: ayarları ve duvar kâğıtlarını
 /// kurulum klasörüne taşır, eski klasörü siler.
 pub fn migrate() {
     let Some(old) = legacy_dir().filter(|d| d.exists()) else { return };

@@ -142,6 +142,9 @@ enum Hit {
     /// Dil: `true` Türkçe.
     Lang(bool),
     Theme(Theme),
+    /// Hazır güncellemeyi şimdi kur.
+    Update,
+    AutoUpdate,
     Quit,
     RemoveHive,
 }
@@ -181,6 +184,9 @@ struct App {
     cap_pressed: Option<Cap>,
     /// Pencerenin zemini Mica (Windows 11 22H2+).
     mica: bool,
+    auto_update: bool,
+    /// Hazır güncelleme tepsiden haber verildi.
+    update_told: bool,
 }
 
 /// Başlık çubuğunu biz çiziyoruz (pencere kurulduktan sonra açılır).
@@ -238,7 +244,14 @@ impl App {
     }
 
     fn save(&self) {
-        Config { narrow: self.narrow_pref, tab: self.page.id().into(), turkish: crate::i18n::turkish(), theme: theme() }.save();
+        Config {
+            narrow: self.narrow_pref,
+            tab: self.page.id().into(),
+            turkish: crate::i18n::turkish(),
+            theme: theme(),
+            auto_update: self.auto_update,
+        }
+        .save();
     }
 
     fn visible(&self) -> bool {
@@ -370,7 +383,7 @@ impl App {
             return;
         }
         if !install {
-            // Motor önce durur: wallpaper'ın exe'si silinebilsin, soundboard kısayolları bıraksın.
+            // Motor önce durur: duvar kâğıdı motorunun exe'si silinebilsin, soundboard kısayolları bıraksın.
             self.tools[i] = None;
             self.page = self.valid(self.page);
         }
@@ -544,13 +557,19 @@ impl App {
         Rect::new(self.side_w(w) + PAGE_PAD, t, w - PAGE_PAD, t + 64.0)
     }
 
+    /// Hazır güncellemenin "Güncelle" düğmesi (sürüm satırında).
+    fn update_rect(&self, w: f32) -> Rect {
+        let r = self.settings_row(3, w);
+        button_rect_right(&self.gfx, r.r, r.cy() - 17.0, t!("Update", "Güncelle"), false)
+    }
+
     fn quit_rect(&self, w: f32) -> Rect {
-        let r = self.settings_row(4, w);
+        let r = self.settings_row(5, w);
         button_rect_right(&self.gfx, r.r, r.cy() - 17.0, t!("Quit", "Çık"), false)
     }
 
     fn remove_hive_rect(&self, w: f32) -> Rect {
-        let r = self.settings_row(5, w);
+        let r = self.settings_row(6, w);
         button_rect_right(&self.gfx, r.r, r.cy() - 17.0, t!("Remove", "Kaldır"), false)
     }
 
@@ -631,6 +650,12 @@ impl App {
                     Hit::Lang(k == 1)
                 } else if let Some(&(_, t)) = self.theme_rects(w).iter().find(|(r, _)| r.contains(x, y)) {
                     Hit::Theme(t)
+                } else if matches!(crate::update::status(), crate::update::Status::Ready(_))
+                    && self.update_rect(w).contains(x, y)
+                {
+                    Hit::Update
+                } else if self.settings_row(4, w).contains(x, y) && x > self.settings_row(4, w).r - 120.0 {
+                    Hit::AutoUpdate
                 } else if self.quit_rect(w).contains(x, y) {
                     Hit::Quit
                 } else if !self.removing_self && self.remove_hive_rect(w).contains(x, y) {
@@ -682,6 +707,15 @@ impl App {
                 self.redraw();
             }
             Hit::Theme(t) => self.set_theme(t),
+            Hit::Update => {
+                crate::update::install(false);
+            }
+            Hit::AutoUpdate => {
+                self.auto_update = !self.auto_update;
+                crate::update::set_enabled(self.hwnd, self.auto_update);
+                self.save();
+                self.redraw();
+            }
             Hit::Quit => unsafe {
                 let _ = DestroyWindow(self.hwnd);
             },
@@ -857,12 +891,38 @@ impl App {
             g.text(label, &g.f.button, rect, if on || hovered { pal().text } else { pal().muted });
         }
 
+        // Sürüm ve güncelleme durumu; hazır güncelleme varsa "Güncelle".
         let r = self.settings_row(3, w);
-        let sub = t!("hive and the soundboard and wallpaper engines inside it", "hive ve içindeki soundboard ile duvar kâğıdı motorları");
-        setting_row(g, r, t!("Version", "Sürüm"), sub, 120.0);
-        g.text(VERSION, &g.f.small_right, Rect::new(r.r - 120.0, r.t, r.r, r.b), pal().muted);
+        use crate::update::Status;
+        let status = crate::update::status();
+        let sub = match &status {
+            _ if dev => t!("A development copy is not updated", "Geliştirme kopyası güncellenmez").to_string(),
+            Status::Checking => t!("Looking for a new version…", "Yeni sürüm var mı bakılıyor…").to_string(),
+            Status::Current => t!("This is the latest version", "En son sürüm bu").to_string(),
+            Status::Ready(v) => t!(
+                format!("{v} is ready · installs now or the next time hive starts"),
+                format!("{v} hazır · şimdi ya da hive bir sonraki açılışında kurulur")
+            ),
+            Status::Failed(e) => t!(format!("Could not check: {e}"), format!("Bakılamadı: {e}")),
+            Status::Idle if self.auto_update => {
+                t!("New versions are looked for now and then", "Yeni sürüme arada bir bakılır").to_string()
+            }
+            Status::Idle => t!("Automatic updates are off", "Otomatik güncelleme kapalı").to_string(),
+        };
+        setting_row(g, r, &format!("{} {VERSION}", t!("Version", "Sürüm")), &sub, 140.0);
+        if matches!(status, Status::Ready(_)) {
+            button(g, self.update_rect(w), t!("Update", "Güncelle"), None, Some(accent()), self.hover == Hit::Update);
+        }
 
         let r = self.settings_row(4, w);
+        let sub = t!(
+            "Downloads new versions from GitHub, verifies and installs them",
+            "Yeni sürümleri GitHub'dan indirir, doğrular ve kurar"
+        );
+        setting_row(g, r, t!("Automatic updates", "Otomatik güncelle"), sub, 120.0);
+        toggle(g, toggle_rect(r.r, r.cy()), self.auto_update, accent(), !dev);
+
+        let r = self.settings_row(5, w);
         let sub = t!("hive and the tools' engines shut down completely", "hive ve araçların motorları tamamen kapanır");
         setting_row(g, r, t!("Quit", "Kapat"), sub, 120.0);
         button(g, self.quit_rect(w), t!("Quit", "Çık"), None, None, self.hover == Hit::Quit);
@@ -1249,6 +1309,20 @@ impl App {
             WM_SYSCHAR | WM_SYSKEYUP if self.tools.iter().flatten().any(|t| t.binding()) => {}
             WM_KILLFOCUS => self.tools.iter_mut().flatten().for_each(|t| t.kill_focus()),
             WM_TOOL_SETUP => self.setup_done(),
+            crate::update::WM_UPDATE => {
+                // Güncelleme indirildi: bir kez tepsiden haber verilir.
+                if let crate::update::Status::Ready(v) = crate::update::status()
+                    && !self.update_told
+                {
+                    self.update_told = true;
+                    let text = t!(
+                        format!("hive {v} is ready: it installs the next time hive starts, or now from Settings."),
+                        format!("hive {v} hazır: bir sonraki açılışta kurulur, istersen Ayarlar'dan hemen."),
+                    );
+                    self.tray.notify(t!("Update ready", "Güncelleme hazır"), &text);
+                }
+                self.redraw();
+            }
             WM_SELF_DONE => self.self_remove_done(),
             WM_EXIT => unsafe {
                 let _ = DestroyWindow(self.hwnd);
@@ -1375,7 +1449,7 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
             result.unwrap_or_else(|| unsafe { DefWindowProcW(hwnd, msg, wp, lp) })
         }
         None if msg == WM_COPYDATA => {
-            // Uygulama o an meşgul (örneğin wallpaper'a komut gönderirken gelen istek): veriyi
+            // Uygulama o an meşgul (örneğin duvar kâğıdı motoruna komut gönderirken gelen istek): veriyi
             // sakla, kendi kuyruğumuzdan sonra uygula.
             let cds = unsafe { &*(lp.0 as *const COPYDATASTRUCT) };
             if cds.dwData != COPY_TAB {
@@ -1481,7 +1555,10 @@ pub fn run(hidden: bool, tab: Option<String>) -> Res<()> {
             cap_hover: None,
             cap_pressed: None,
             mica,
+            auto_update: cfg.auto_update,
+            update_told: false,
         };
+        crate::update::start(hwnd, cfg.auto_update);
         app.sync_tools();
         crate::shell::register_app();
         crate::shell::migrate_autostart();

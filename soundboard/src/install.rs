@@ -81,14 +81,14 @@ fn saved_sysfx(n: u32) -> String {
     format!("{},{n}", guid_str(&FMTID).to_lowercase())
 }
 
-/// soundboard'ün bir mikrofonun FxProperties'ine yazabildiği kendi değerleri (1..6).
+/// soundboard'un bir mikrofonun FxProperties'ine yazabildiği kendi değerleri (1..6).
 fn own_values() -> Vec<String> {
     (1..=6).map(|n| format!("{},{n}", guid_str(&FMTID).to_lowercase())).collect()
 }
 
 const AUDIO_KEY: &str = r"SOFTWARE\Microsoft\Windows\CurrentVersion\Audio";
 const PROTECTED: &str = "DisableProtectedAudioDG";
-/// `DisableProtectedAudioDG`'nin soundboard'den önceki değeri; yoksa ABSENT.
+/// `DisableProtectedAudioDG`'nin soundboard'dan önceki değeri; yoksa ABSENT.
 const PROTECTED_SAVED: &str = "lyrebird_DisableProtectedAudioDG";
 const ABSENT: u32 = u32::MAX;
 
@@ -481,7 +481,7 @@ fn protected_restore() -> Res<()> {
     Ok(())
 }
 
-/// Bileşik listeden soundboard'ü çıkarır; liste boşalırsa değer silinir.
+/// Bileşik listeden soundboard'u çıkarır; liste boşalırsa değer silinir.
 fn unlist(k: &Key, name: &str) -> Res<bool> {
     let Some(list) = k.multi(name) else { return Ok(false) };
     let rest: Vec<String> = list.iter().filter(|s| !ours(s)).cloned().collect();

@@ -334,7 +334,7 @@ fn stop_running() {
 
 /// İndirilen exe (ya da `hive --kur`): kendini %LOCALAPPDATA%\Programs\hive'a kurar ve oradan
 /// başlatır. Çalışan bir hive varsa önce kapanır; aynı yol güncelleme için de kullanılır.
-pub fn install_self() -> Result<(), String> {
+pub fn install_self(hidden: bool) -> Result<(), String> {
     use std::os::windows::process::CommandExt;
     let src = std::env::current_exe().map_err(|e| e.to_string())?;
     let dst = util::data_dir().join("hive.exe");
@@ -363,8 +363,12 @@ pub fn install_self() -> Result<(), String> {
         }
         set_autostart(Some(&dst.display().to_string()));
     }
-    std::process::Command::new(&dst)
-        .creation_flags(0x0000_0008) // DETACHED_PROCESS
+    let mut cmd = std::process::Command::new(&dst);
+    if hidden {
+        // Kendiliğinden yapılan güncelleme: pencere açılmaz, hive tepside başlar.
+        cmd.arg("--hidden");
+    }
+    cmd.creation_flags(0x0000_0008) // DETACHED_PROCESS
         .spawn()
         .map_err(|e| e.to_string())?;
     log!("hive kuruldu: {}", dst.display());
