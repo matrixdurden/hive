@@ -1,6 +1,6 @@
 [package]
 name = "hive"
-version = "0.4.1"
+version = "0.4.2"
 edition = "2024"
 description = "hive: matrixdurden'in Windows araçları tek yerde: soundboard, duvar kâğıdı, tünel, pil, ses aygıtları, dock, müzik"
 license = "MIT"

@@ -142,7 +142,7 @@ enum Hit {
     /// Dil: `true` Türkçe.
     Lang(bool),
     Theme(Theme),
-    /// Hazır güncellemeyi şimdi kur.
+    /// Hazır güncellemeyi şimdi kur, yoksa şimdi bak.
     Update,
     AutoUpdate,
     Quit,
@@ -558,9 +558,19 @@ impl App {
     }
 
     /// Hazır güncellemenin "Güncelle" düğmesi (sürüm satırında).
+    /// Sürüm satırının düğmesi: güncelleme hazırsa "Güncelle", değilse "Denetle" (bakılırken
+    /// basılmaz).
+    fn update_label() -> &'static str {
+        match crate::update::status() {
+            crate::update::Status::Ready(_) => t!("Update", "Güncelle"),
+            crate::update::Status::Checking => t!("Checking…", "Bakılıyor…"),
+            _ => t!("Check", "Denetle"),
+        }
+    }
+
     fn update_rect(&self, w: f32) -> Rect {
         let r = self.settings_row(3, w);
-        button_rect_right(&self.gfx, r.r, r.cy() - 17.0, t!("Update", "Güncelle"), false)
+        button_rect_right(&self.gfx, r.r, r.cy() - 17.0, Self::update_label(), false)
     }
 
     fn quit_rect(&self, w: f32) -> Rect {
@@ -650,7 +660,8 @@ impl App {
                     Hit::Lang(k == 1)
                 } else if let Some(&(_, t)) = self.theme_rects(w).iter().find(|(r, _)| r.contains(x, y)) {
                     Hit::Theme(t)
-                } else if matches!(crate::update::status(), crate::update::Status::Ready(_))
+                } else if util::installed_copy().is_some()
+                    && crate::update::status() != crate::update::Status::Checking
                     && self.update_rect(w).contains(x, y)
                 {
                     Hit::Update
@@ -708,7 +719,11 @@ impl App {
             }
             Hit::Theme(t) => self.set_theme(t),
             Hit::Update => {
-                crate::update::install(false);
+                if matches!(crate::update::status(), crate::update::Status::Ready(_)) {
+                    crate::update::install(false);
+                } else {
+                    crate::update::check_now(self.hwnd);
+                }
             }
             Hit::AutoUpdate => {
                 self.auto_update = !self.auto_update;
@@ -910,8 +925,9 @@ impl App {
             Status::Idle => t!("Automatic updates are off", "Otomatik güncelleme kapalı").to_string(),
         };
         setting_row(g, r, &format!("{} {VERSION}", t!("Version", "Sürüm")), &sub, 140.0);
-        if matches!(status, Status::Ready(_)) {
-            button(g, self.update_rect(w), t!("Update", "Güncelle"), None, Some(accent()), self.hover == Hit::Update);
+        if !dev {
+            let primary = matches!(status, Status::Ready(_)).then(accent);
+            button(g, self.update_rect(w), Self::update_label(), None, primary, self.hover == Hit::Update);
         }
 
         let r = self.settings_row(4, w);
