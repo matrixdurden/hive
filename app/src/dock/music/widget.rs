@@ -37,9 +37,13 @@ const TIMER_TICK: usize = 1;
 /// Dock'un yeri arada bir okunur (simge eklenince hap genişler, ekran değişir).
 const TIMER_DOCK: usize = 2;
 /// Kapak geçişi (kare kare) ve yeni şarkının kapağını bekleme süresi.
-const TIMER_FADE: usize = 3;
+/// Animasyonun bir sonraki karesi (ekran yenilemesiyle, bkz. frame.rs): kapak ve yazı geçişi,
+/// düğmelerin üstüne gelme ışığı.
+const WM_ANIM: u32 = WM_APP + 31;
 const TIMER_WAIT: usize = 4;
 const FADE_MS: f32 = 280.0;
+/// Şarkı değişince başlığın geçişi.
+const TEXT_MS: f32 = 260.0;
 const WAIT_MS: u32 = 3000;
 const WM_MOUSELEAVE: u32 = 0x02A3;
 
@@ -216,6 +220,13 @@ struct Widget {
     old: Option<Art>,
     fade: Option<Instant>,
     art_gen: u32,
+    /// Şarkı değişince solan eski başlık ve sanatçı, geçişin başladığı an.
+    text_old: Option<(String, String)>,
+    text_fade: Option<Instant>,
+    /// Düğmelerin (önceki, çal, sonraki) ve ilerleme çizgisinin üstüne gelme ışığı (0..1).
+    glow: [f32; 4],
+    /// Son animasyon karesi (adım süresi için).
+    anim_at: Instant,
     /// Gösterilen şarkı (başlık, sanatçı) ve kapağının gelip gelmediği.
     track: (String, String),
     track_art: bool,
@@ -685,7 +696,7 @@ impl Widget {
                             rt.FillRoundedRectangle(&card_r, &g);
                         }
                     }
-                    _ => fill(card_r, color(th.base, 0.88 * opacity * alpha)),
+                    _ => fill(card_r, color(th.base, opacity * alpha)),
                 }
             };
             if self.fade.is_some() {
@@ -727,8 +738,24 @@ impl Widget {
             cover(self.bitmaps.art.as_ref(), if self.fade.is_some() { p } else { 1.0 });
 
             if active {
-                text(&self.now.title, &f.title, l.title, 1.0);
-                text(&self.now.artist, &f.artist, l.artist, 0.65);
+                // Şarkı değişince eski başlık yukarı kayarak söner, yenisi aşağıdan belirir.
+                let shift = |r: D2D_RECT_F, dy: f32| rect(r.left, r.top + dy, r.right, r.bottom + dy);
+                match (&self.text_old, self.text_fade) {
+                    (Some((ot, oa)), Some(t0)) => {
+                        let t = (t0.elapsed().as_secs_f32() * 1000.0 / TEXT_MS).min(1.0);
+                        let e = t * t * (3.0 - 2.0 * t);
+                        rt.PushAxisAlignedClip(&rect(l.title.left, l.title.top - 2.0, l.title.right, l.artist.bottom + 2.0), D2D1_ANTIALIAS_MODE_ALIASED);
+                        text(ot, &f.title, shift(l.title, -5.0 * e), 1.0 - e);
+                        text(oa, &f.artist, shift(l.artist, -5.0 * e), 0.65 * (1.0 - e));
+                        text(&self.now.title, &f.title, shift(l.title, 5.0 * (1.0 - e)), e);
+                        text(&self.now.artist, &f.artist, shift(l.artist, 5.0 * (1.0 - e)), 0.65 * e);
+                        rt.PopAxisAlignedClip();
+                    }
+                    _ => {
+                        text(&self.now.title, &f.title, l.title, 1.0);
+                        text(&self.now.artist, &f.artist, l.artist, 0.65);
+                    }
+                }
 
                 for (n, &(h, cx, cy, rad)) in l.buttons.iter().enumerate() {
                     let enabled = match h {
@@ -738,20 +765,21 @@ impl Widget {
                     };
                     let hovered = self.hover == h && enabled;
                     let pressed = hovered && self.pressed == h;
-                    // Basılıyken bir tık küçülür.
+                    // Üstüne gelme ışığı yumuşakça yanıp söner; basılıyken bir tık küçülür.
+                    let g = self.glow[n];
                     let r = if pressed { rad - 1.0 } else { rad };
                     let e = D2D1_ELLIPSE { point: pt(cx, cy), radiusX: r, radiusY: r };
                     let ink = if h == Hit::Play {
                         // Çal: dolu daire, içinde ters renk simge.
-                        brush.SetColor(&color(fg, if hovered { 1.0 } else { 0.92 }));
+                        brush.SetColor(&color(fg, 0.92 + 0.08 * g));
                         rt.FillEllipse(&e, brush);
                         color(if light { 0xffffff } else { 0x111111 }, 1.0)
                     } else {
-                        if hovered {
-                            brush.SetColor(&color(fg, if pressed { 0.18 } else { 0.10 }));
+                        if g > 0.01 {
+                            brush.SetColor(&color(fg, if pressed { 0.18 } else { 0.10 * g }));
                             rt.FillEllipse(&e, brush);
                         }
-                        color(fg, if !enabled { 0.3 } else if hovered { 1.0 } else { 0.85 })
+                        color(fg, if !enabled { 0.3 } else { 0.85 + 0.15 * g })
                     };
                     if let Some(g) = &icons[n] {
                         brush.SetColor(&ink);
@@ -764,13 +792,14 @@ impl Widget {
                     && self.now.duration > 0.0
                 {
                     let cy = (b.top + b.bottom) / 2.0;
-                    let thick = if self.hover == Hit::Bar { 2.0 } else { 1.25 };
+                    let gb = self.glow[3];
+                    let thick = 1.25 + 0.75 * gb;
                     fill(rounded(rect(b.left, cy - thick, b.right, cy + thick), thick), color(fg, 0.18));
                     let x = b.left + (b.right - b.left) * (pos / self.now.duration).clamp(0.0, 1.0) as f32;
                     let done = rect(b.left, cy - thick, x.max(b.left + 2.0 * thick), cy + thick);
                     fill(rounded(done, thick), color(fg, 0.85));
-                    if self.hover == Hit::Bar {
-                        let e = D2D1_ELLIPSE { point: pt(x, cy), radiusX: 4.5, radiusY: 4.5 };
+                    if gb > 0.05 {
+                        let e = D2D1_ELLIPSE { point: pt(x, cy), radiusX: 4.5 * gb, radiusY: 4.5 * gb };
                         brush.SetColor(&color(fg, 1.0));
                         rt.FillEllipse(&e, brush);
                     }
@@ -819,6 +848,12 @@ impl Widget {
         // Şarkı değişti: yeni kapak gelene kadar eskisi kalır; gelmezse bir süre sonra notaya geçilir.
         let track = (now.title.clone(), now.artist.clone());
         if track != self.track {
+            // Eski başlık solarken yenisi belirir (ilk şarkıda ya da boşken değil).
+            if !self.track.0.is_empty() && !track.0.is_empty() && self.now.active {
+                self.text_old = Some(self.track.clone());
+                self.text_fade = Some(Instant::now());
+                self.kick();
+            }
             self.track = track;
             self.track_art = false;
             unsafe {
@@ -857,28 +892,59 @@ impl Widget {
         self.bitmaps.old_ambient = self.bitmaps.ambient.take();
         self.art = new;
         self.fade = Some(Instant::now());
-        unsafe {
-            SetTimer(Some(self.hwnd), TIMER_FADE, 16, None);
+        self.kick();
+    }
+
+    /// Hangi düğmenin ışığı hedefte: üstüne gelinen (ve basılabilen) 1, diğerleri 0.
+    fn glow_targets(&self) -> [f32; 4] {
+        let on = |h: Hit, enabled: bool| (self.hover == h && enabled) as u8 as f32;
+        [
+            on(Hit::Prev, self.now.can_prev),
+            on(Hit::Play, true),
+            on(Hit::Next, self.now.can_next),
+            on(Hit::Bar, self.now.can_seek),
+        ]
+    }
+
+    fn animating(&self) -> bool {
+        self.fade.is_some() || self.text_fade.is_some() || self.glow != self.glow_targets()
+    }
+
+    /// Animasyon sürüyorsa bir sonraki karede `animate` çağrılır.
+    fn kick(&mut self) {
+        if self.animating() {
+            crate::frame::request(self.hwnd, WM_ANIM);
         }
+    }
+
+    /// Bir animasyon karesi: ışıklar hedefe yaklaşır, biten geçişler düşer, çizilir.
+    fn animate(&mut self) {
+        let now = Instant::now();
+        let dt = (now - self.anim_at).as_secs_f32().min(0.05);
+        self.anim_at = now;
+        let target = self.glow_targets();
+        for (g, t) in self.glow.iter_mut().zip(target) {
+            let n = *g + (t - *g) * (1.0 - (-dt / 0.06).exp());
+            *g = if (n - t).abs() < 0.01 { t } else { n };
+        }
+        if self.text_fade.is_some_and(|f| f.elapsed().as_secs_f32() * 1000.0 >= TEXT_MS) {
+            self.text_fade = None;
+            self.text_old = None;
+        }
+        if self.fade.is_some() && self.fade_t() >= 1.0 {
+            self.fade = None;
+            self.old = None;
+            self.bitmaps.old_art = None;
+            self.bitmaps.old_ambient = None;
+        }
+        self.paint();
+        self.kick();
     }
 
     /// Geçişin ilerleyişi (0..1, yumuşatılmış); geçiş yoksa 1.
     fn fade_t(&self) -> f32 {
         let t = self.fade.map_or(1.0, |f| (f.elapsed().as_secs_f32() * 1000.0 / FADE_MS).min(1.0));
         t * t * (3.0 - 2.0 * t)
-    }
-
-    fn fade_tick(&mut self) {
-        if self.fade_t() >= 1.0 {
-            self.fade = None;
-            self.old = None;
-            self.bitmaps.old_art = None;
-            self.bitmaps.old_ambient = None;
-            unsafe {
-                let _ = KillTimer(Some(self.hwnd), TIMER_FADE);
-            }
-        }
-        self.paint();
     }
 
     /// Yeni şarkının kapağı gelmedi: notaya geçilir.
@@ -972,6 +1038,11 @@ impl Widget {
         let h = self.hit(x, y);
         if h != self.hover {
             self.hover = h;
+            if !self.animating() {
+                // Işık yeniden yaklaşmaya başlıyor: adım süresi şimdiden sayılsın.
+                self.anim_at = Instant::now();
+            }
+            self.kick();
             self.paint();
         }
     }
@@ -1030,6 +1101,8 @@ impl Widget {
         self.tracking = false;
         if self.hover != Hit::None {
             self.hover = Hit::None;
+            self.anim_at = Instant::now();
+            self.kick();
             self.paint();
         }
     }
@@ -1064,7 +1137,7 @@ unsafe extern "system" fn proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> 
         match msg {
             WM_TIMER if wp.0 == TIMER_TICK => w.tick(),
             WM_TIMER if wp.0 == TIMER_DOCK => w.dock_check(),
-            WM_TIMER if wp.0 == TIMER_FADE => w.fade_tick(),
+            WM_ANIM => w.animate(),
             WM_TIMER if wp.0 == TIMER_WAIT => w.wait_over(),
             WM_MOUSEMOVE => w.mouse_move(lp),
             WM_LBUTTONDOWN => w.mouse_down(lp),
@@ -1152,6 +1225,10 @@ fn create(remote: Remote, o: Options) -> windows::core::Result<Widget> {
             old: None,
             fade: None,
             art_gen: 0,
+            text_old: None,
+            text_fade: None,
+            glow: [0.0; 4],
+            anim_at: Instant::now(),
             track: Default::default(),
             track_art: false,
             ticking: false,
@@ -1200,7 +1277,6 @@ pub fn stop() {
         unsafe {
             let _ = KillTimer(Some(w.hwnd), TIMER_TICK);
             let _ = KillTimer(Some(w.hwnd), TIMER_DOCK);
-            let _ = KillTimer(Some(w.hwnd), TIMER_FADE);
             let _ = KillTimer(Some(w.hwnd), TIMER_WAIT);
             if !w.hook.is_invalid() {
                 let _ = UnhookWinEvent(w.hook);

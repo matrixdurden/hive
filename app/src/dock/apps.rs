@@ -17,7 +17,8 @@ use windows::Win32::System::Com::StructuredStorage::PropVariantToStringAlloc;
 use windows::Win32::System::Com::{CLSCTX_INPROC_SERVER, CoCreateInstance, CoTaskMemFree, IPersistFile, STGM_READ};
 use windows::Win32::System::SystemServices::{SFGAO_FOLDER, SFGAO_STREAM};
 use windows::Win32::System::Threading::{
-    OpenProcess, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION, QueryFullProcessImageNameW,
+    OpenProcess, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_TERMINATE, QueryFullProcessImageNameW,
+    TerminateProcess,
 };
 use windows::Win32::UI::Shell::PropertiesSystem::{IPropertyStore, SHGetPropertyStoreForWindow};
 use windows::Win32::UI::Shell::*;
@@ -562,12 +563,13 @@ pub fn probe(pins: &[String]) -> String {
     for w in windows() {
         let r = running(&w);
         s += &format!(
-            "  {:>8x}  {:<28} anahtar={}  aumid={}  exe={}\n",
+            "  {:>8x}  {:<28} anahtar={}  aumid={}  exe={}  atlama listesi={}\n",
             w.hwnd.0 as usize,
             r.name,
             w.key(),
             w.aumid.as_deref().unwrap_or("-"),
-            w.exe
+            w.exe,
+            super::jump::list(&w.aumid.iter().cloned().collect::<Vec<_>>(), Some(&w.exe)).len()
         );
     }
     s += "sabitlenenler:\n";
@@ -587,4 +589,71 @@ pub fn probe(pins: &[String]) -> String {
         }
     }
     s
+}
+
+// --- Sağ tık menüsü ---
+
+/// Pencerenin sürecinin exe yolu.
+pub fn exe_of(hwnd: HWND) -> Option<String> {
+    win(hwnd).map(|w| w.exe)
+}
+
+/// Pencerenin uygulama kimliği (AppUserModelID).
+pub fn aumid_of(hwnd: HWND) -> Option<String> {
+    win(hwnd).and_then(|w| w.aumid)
+}
+
+/// Store uygulamasının exe'si mi (WindowsApps altında: klasörü korumalı, yönetici olarak
+/// çalıştırılamaz).
+pub fn is_packaged(exe: &str) -> bool {
+    exe.to_lowercase().contains(r"\windowsapps\")
+}
+
+/// Kısayolun hedef exe'si.
+pub fn link_target(path: &str) -> Option<String> {
+    read_link(path).map(|l| l.0).filter(|e| !e.is_empty())
+}
+
+/// Kısayolu ya da exe'yi yönetici olarak çalıştırır (Windows izin ister).
+pub fn run_as_admin(target: &str) {
+    let t = wide(target);
+    unsafe {
+        let _ = ShellExecuteW(None, w!("runas"), PCWSTR(t.as_ptr()), PCWSTR::null(), PCWSTR::null(), SW_SHOWNORMAL);
+    }
+}
+
+/// Dosyayı klasöründe seçili gösterir.
+pub fn show_in_folder(path: &str) {
+    let args = wide(&format!("/select,\"{path}\""));
+    unsafe {
+        let _ = ShellExecuteW(None, w!("open"), w!("explorer.exe"), PCWSTR(args.as_ptr()), PCWSTR::null(), SW_SHOWNORMAL);
+    }
+}
+
+/// Pencerelerin süreçlerini sonlandırır (yanıt vermeyen uygulama için). Kabuk (explorer.exe)
+/// ve hive'ın kendisi atlanır.
+pub fn force_quit(windows: &[HWND]) {
+    let me = std::process::id();
+    let mut done = Vec::new();
+    for &h in windows {
+        let mut pid = 0u32;
+        unsafe {
+            GetWindowThreadProcessId(h, Some(&mut pid));
+        }
+        if pid == 0 || pid == me || done.contains(&pid) {
+            continue;
+        }
+        done.push(pid);
+        if win(h).is_some_and(|w| w.exe_name() == "explorer.exe") {
+            continue;
+        }
+        unsafe {
+            if let Ok(p) = OpenProcess(PROCESS_TERMINATE, false, pid) {
+                if let Err(e) = TerminateProcess(p, 1) {
+                    crate::log!("dock: zorla kapatılamadı (pid {pid}): {e}");
+                }
+                let _ = CloseHandle(p);
+            }
+        }
+    }
 }

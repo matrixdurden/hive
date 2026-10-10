@@ -25,8 +25,6 @@ pub struct Settings {
     /// Şerit açık mı.
     pub show: bool,
     pub style: Style,
-    /// Arka planın opaklığı, yüzde (30..100).
-    pub opacity: u32,
     pub progress: bool,
     /// Spotify çalmıyorken başka oynatıcılar (tarayıcı, ...) da görünsün.
     pub others: bool,
@@ -41,7 +39,6 @@ impl Settings {
         let mut s = Settings {
             show: true,
             style: Style::Cover,
-            opacity: 92,
             progress: true,
             others: false,
             hide_idle: false,
@@ -54,7 +51,6 @@ impl Settings {
             match k {
                 "goster" => s.show = v == "1",
                 "arka_plan" => s.style = Style::from_id(v).unwrap_or(s.style),
-                "opaklik" => s.opacity = v.parse::<u32>().unwrap_or(92).clamp(30, 100),
                 "ilerleme" => s.progress = v == "1",
                 "diger" => s.others = v == "1",
                 "bosken_gizle" => s.hide_idle = v == "1",
@@ -71,10 +67,9 @@ impl Settings {
         std::fs::write(
             ini(),
             format!(
-                "goster={}\narka_plan={}\nopaklik={}\nilerleme={}\ndiger={}\nbosken_gizle={}\nuygulama={}\n",
+                "goster={}\narka_plan={}\nilerleme={}\ndiger={}\nbosken_gizle={}\nuygulama={}\n",
                 b(self.show),
                 self.style.id(),
-                self.opacity,
                 b(self.progress),
                 b(self.others),
                 b(self.hide_idle),
@@ -83,12 +78,12 @@ impl Settings {
         )
     }
 
-    fn options(&self) -> widget::Options {
+    fn options(&self, opacity: u32) -> widget::Options {
         widget::Options {
             hide_idle: self.hide_idle,
             app: self.app.clone(),
             style: self.style,
-            opacity: self.opacity as f32 / 100.0,
+            opacity: opacity as f32 / 100.0,
             progress: self.progress,
         }
     }
@@ -133,13 +128,15 @@ pub fn probe(out: Option<&str>) -> String {
 pub struct Music {
     hwnd: HWND,
     pub settings: Settings,
+    /// Arka planın opaklığı (yüzde): dock'un ayarı, şeritle ortak.
+    opacity: u32,
     media: Option<media::Media>,
     pub now: Now,
 }
 
 impl Music {
-    pub fn start(hwnd: HWND) -> Self {
-        let mut m = Self { hwnd, settings: Settings::load(), media: None, now: Now::default() };
+    pub fn start(hwnd: HWND, opacity: u32) -> Self {
+        let mut m = Self { hwnd, settings: Settings::load(), opacity, media: None, now: Now::default() };
         m.apply();
         m
     }
@@ -162,7 +159,13 @@ impl Music {
         }
         let media = self.media.get_or_insert_with(|| media::Media::start(self.hwnd, self.settings.others));
         media.set_others(self.settings.others);
-        widget::start(media.remote(), self.settings.options(), self.now.clone());
+        widget::start(media.remote(), self.settings.options(self.opacity), self.now.clone());
+    }
+
+    /// Dock'un saydamlığı değişti.
+    pub fn set_opacity(&mut self, opacity: u32) {
+        self.opacity = opacity;
+        self.apply();
     }
 
     /// WM_MEDIA: çalan şarkı değişti.

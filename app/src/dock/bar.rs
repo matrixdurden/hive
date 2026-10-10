@@ -59,6 +59,8 @@ const NOTICES: isize = 2;
 const WM_MOUSELEAVE: u32 = 0x02A3;
 /// Arka planda yüklenen ikon hazır (lParam: Box<IconDone>).
 const WM_ICON: u32 = WM_APP + 6;
+/// Animasyonun bir sonraki karesi (ekran yenilemesiyle, bkz. frame.rs).
+const WM_FRAME: u32 = WM_APP + 30;
 
 struct IconDone {
     id: String,
@@ -67,7 +69,6 @@ struct IconDone {
     pixels: Option<(u32, u32, Vec<u8>)>,
 }
 
-const TIMER_ANIM: usize = 1;
 const TIMER_HIDE: usize = 2;
 const TIMER_RETRY: usize = 3;
 /// Açılıştan sonra görev çubuğunun gerçekten saklı kaldığına bakılır.
@@ -80,6 +81,9 @@ const STACK_DWELL_MS: u32 = 500;
 const TIMER_CLOCK: usize = 7;
 /// Okunamayan ikonlar bir süre sonra yeniden denenir.
 const TIMER_ICON_RETRY: usize = 8;
+/// Basılı tutulan simgenin kalkması.
+const TIMER_LIFT: usize = 9;
+const HOLD_MS: u32 = 300;
 const ICON_TRIES: u8 = 4;
 
 // Ölçüler (DIP). Simge boyu ayardan gelir.
@@ -224,14 +228,18 @@ enum Cover {
     Full,
 }
 
-/// Sürükleyerek sıralama: basılan simge, imlecin x'i, hareket eşiği geçildi mi, bırakılırsa
-/// gideceği sıra (bütün öğeler içinde; kendi bölümünden çıkmaz).
+/// Sürükleyerek sıralama (macOS'taki gibi): simge basılı tutulunca (`HOLD_MS`) kalkar, ancak
+/// ondan sonra taşınır; bırakılırsa gideceği sıra bütün öğeler içinde. Süre dolmadan kayan fare
+/// hiçbir şeyi taşımaz (yanlışlıkla taşıma olmasın), o basış tıklama da sayılmaz.
 #[derive(Clone, Copy)]
 struct Drag {
     item: usize,
     start_x: f32,
     x: f32,
+    /// Simge kalktı, imleci izliyor.
     active: bool,
+    /// Süre dolmadan kaydı: bu basış hiçbir şey yapmaz.
+    cancelled: bool,
     target: usize,
 }
 
@@ -260,6 +268,12 @@ struct MenuSpec {
     windows: Vec<(HWND, String)>,
     pinned: bool,
     line: Option<String>,
+    /// Uygulamayı (yeniden) açan hedef: kısayol, exe ya da `shell:AppsFolder\<kimlik>`.
+    target: Option<String>,
+    /// Çalışan süreçlerinin exe yolu (dosya konumu, yönetici olarak çalıştırma için).
+    exe: Option<String>,
+    /// Atlama listesi: uygulamanın görevleri, kendi kategorileri, son açılan dosyaları.
+    recent: Vec<super::jump::Entry>,
     x: i32,
     y: i32,
 }
@@ -603,6 +617,24 @@ impl Bar {
         v
     }
 
+    /// Basılı tutulan simge kalkar: artık imleci izler, bırakılınca yeni yerine oturur.
+    fn lift(&mut self) {
+        let Some(mut d) = self.drag.filter(|d| !d.active && !d.cancelled) else { return };
+        d.active = true;
+        d.x = self.mouse.map_or(d.start_x, |m| m.0);
+        d.target = self.drag_target(d.item, d.x);
+        self.drag = Some(d);
+        self.pressed = None;
+        self.over_items = false;
+        self.hover = None;
+        unsafe {
+            let _ = KillTimer(Some(self.hwnd), TIMER_STACK);
+        }
+        stack::close();
+        self.render();
+        self.kick();
+    }
+
     /// Sürüklenen simgenin bırakılacağı sıra: imlecin büyütülmemiş yerleşimdeki yuvasına göre. Yuvalar sabit genişlikte olduğundan
     /// boşluk kayarken hedef titremez.
     fn drag_target(&self, item: usize, x: f32) -> usize {
@@ -893,9 +925,7 @@ impl Bar {
         if !self.animating && self.needs_anim() {
             self.animating = true;
             self.tick = Instant::now();
-            unsafe {
-                SetTimer(Some(self.hwnd), TIMER_ANIM, 10, None);
-            }
+            crate::frame::request(self.hwnd, WM_FRAME);
         }
     }
 
@@ -983,11 +1013,10 @@ impl Bar {
         self.attention.retain(|_, t| t.elapsed().as_secs_f32() < ATTENTION);
         self.dirty = false;
         self.paint_now();
-        if !self.needs_anim() {
+        if self.needs_anim() {
+            crate::frame::request(self.hwnd, WM_FRAME);
+        } else {
             self.animating = false;
-            unsafe {
-                let _ = KillTimer(Some(self.hwnd), TIMER_ANIM);
-            }
             if self.cover == Cover::Full && self.shown == 0.0 && !self.hidden_window {
                 self.hidden_window = true;
                 unsafe {
@@ -1156,7 +1185,7 @@ impl Bar {
                     let s = i as f32 * 2.0;
                     fill(rounded(pl - s, top - s + 4.0, pr + s, bottom + s + 4.0, RADIUS + s), color(0, 0.06));
                 }
-                fill(rounded(pl, top, pr, bottom, RADIUS), color(th.base, 0.88));
+                fill(rounded(pl, top, pr, bottom, RADIUS), color(th.base, self.settings.opacity as f32 / 100.0));
                 brush.SetColor(&color(th.stroke.0, th.stroke.1 + 0.03));
                 rt.DrawRoundedRectangle(&rounded(pl + 0.5, top + 0.5, pr - 0.5, bottom - 0.5, RADIUS - 0.5), brush, 1.0, None);
 
@@ -1365,13 +1394,13 @@ impl Bar {
         self.mouse = Some((x, y));
         if let Some(mut d) = self.drag {
             d.x = x;
-            if !d.active && (x - d.start_x).abs() > 6.0 {
-                d.active = true;
+            if !d.active && !d.cancelled && (x - d.start_x).abs() > 6.0 {
+                // Kalkmadan kaydı: yanlışlıkla sürükleme, bu basış iptal.
+                d.cancelled = true;
                 self.pressed = None;
                 unsafe {
-                    let _ = KillTimer(Some(self.hwnd), TIMER_STACK);
+                    let _ = KillTimer(Some(self.hwnd), TIMER_LIFT);
                 }
-                stack::close();
             }
             if d.active {
                 d.target = self.drag_target(d.item, x);
@@ -1590,6 +1619,20 @@ impl Bar {
         let k = self.k();
         let cx = (s.l + s.r) / 2.0;
         let top = self.pill_bottom() - self.pill_h() - 8.0;
+        let target = item.pin.as_ref().map(|p| p.target.clone()).or_else(|| item.line.clone());
+        // Exe: çalışıyorsa sürecinki, değilse kısayolun hedefi.
+        let exe = item.windows.first().and_then(|&h| apps::exe_of(h)).or_else(|| {
+            let t = target.as_deref()?;
+            let l = t.to_lowercase();
+            if l.ends_with(".exe") { Some(t.to_string()) } else if l.ends_with(".lnk") { apps::link_target(t) } else { None }
+        });
+        let aumids: Vec<String> = item
+            .pin
+            .as_ref()
+            .and_then(|p| p.aumid.clone())
+            .into_iter()
+            .chain(item.windows.first().and_then(|&h| apps::aumid_of(h)))
+            .collect();
         Some(MenuSpec {
             id: item.id.clone(),
             name: item.name.clone(),
@@ -1597,6 +1640,9 @@ impl Bar {
             windows: item.windows.iter().map(|&h| (h, apps::title(h))).collect(),
             pinned: item.pin.is_some(),
             line: item.line.clone(),
+            recent: if item.folder() { Vec::new() } else { super::jump::list(&aumids, exe.as_deref()) },
+            target,
+            exe,
             x: self.place.left + (cx * k) as i32,
             y: self.place.top + (top * k) as i32,
         })
@@ -1608,7 +1654,30 @@ impl Bar {
         self.menu_open = false;
         let r = match choice {
             0 => None,
+            c if c >= 2000 => {
+                if let Some(e) = spec.recent.get(c - 2000) {
+                    e.open();
+                }
+                None
+            }
             c if c >= 1000 => spec.windows.get(c - 1000).map(|w| Action::Activate(w.0)),
+            M_NEW => spec.target.clone().or_else(|| spec.exe.clone()).map(Action::Open),
+            M_ADMIN => {
+                if let Some(t) = admin_target(spec) {
+                    apps::run_as_admin(&t);
+                }
+                None
+            }
+            M_LOCATION => {
+                if let Some(p) = location_target(spec) {
+                    apps::show_in_folder(&p);
+                }
+                None
+            }
+            M_KILL => {
+                apps::force_quit(&spec.windows.iter().map(|w| w.0).collect::<Vec<_>>());
+                None
+            }
             M_PIN => {
                 if spec.pinned {
                     self.lines.retain(|l| !l.eq_ignore_ascii_case(&spec.id));
@@ -1714,19 +1783,66 @@ impl Drop for Bar {
 const M_PIN: usize = 2;
 const M_CLOSE: usize = 3;
 const M_SETTINGS: usize = 4;
+const M_NEW: usize = 5;
+const M_ADMIN: usize = 6;
+const M_LOCATION: usize = 7;
+const M_KILL: usize = 8;
+
+/// Yönetici olarak çalıştırılabilecek dosya: kısayol ya da exe (Store uygulamaları olmaz).
+fn admin_target(spec: &MenuSpec) -> Option<String> {
+    let file = |t: &String| {
+        let l = t.to_lowercase();
+        (l.ends_with(".exe") || l.ends_with(".lnk")).then(|| t.clone())
+    };
+    spec.target.as_ref().and_then(file).or_else(|| spec.exe.clone().filter(|e| !apps::is_packaged(e)))
+}
+
+/// Dosya konumu: kısayol ya da exe; Store uygulamasının klasörü açılmaz (korumalı).
+fn location_target(spec: &MenuSpec) -> Option<String> {
+    let file = |t: &String| (!t.starts_with("shell:")).then(|| t.clone());
+    spec.target.as_ref().and_then(file).or_else(|| spec.exe.clone().filter(|e| !apps::is_packaged(e)))
+}
 
 
 /// Sağ tık menüsünün satırları.
 fn menu_entries(spec: &MenuSpec) -> Vec<super::menu::Entry> {
     use super::menu::{Entry, Glyph};
+    let short = |t: &str| -> String {
+        if t.chars().count() > 48 { t.chars().take(47).collect::<String>() + "…" } else { t.to_string() }
+    };
     let mut v = Vec::new();
+    // Açık pencereler (birden çoksa), son açılan dosyalar.
     if spec.windows.len() > 1 {
         for (i, (_, title)) in spec.windows.iter().enumerate().take(12) {
-            let t: String = if title.chars().count() > 48 { title.chars().take(47).collect::<String>() + "…" } else { title.clone() };
-            v.push(Entry { id: 1000 + i, text: t, glyph: Some(Glyph::App) });
+            v.push(Entry { id: 1000 + i, text: short(title), glyph: Some(Glyph::App) });
         }
         v.push(Entry::sep());
     }
+    // Atlama listesi: önce uygulamanın kendi listesi (görevler, son klasörler), sonra son dosyalar.
+    if !spec.recent.is_empty() {
+        let mut own = None;
+        for (i, e) in spec.recent.iter().enumerate() {
+            if own.is_some_and(|o| o != e.own) {
+                v.push(Entry::sep());
+            }
+            own = Some(e.own);
+            let glyph = if e.own { "\u{E8A7}" } else { "\u{E8A5}" };
+            v.push(Entry { id: 2000 + i, text: short(&e.title), glyph: Some(Glyph::Fluent(glyph)) });
+        }
+        v.push(Entry::sep());
+    }
+    // Uygulama: yeni pencere, yönetici olarak, dosya konumu.
+    let folder = spec.target.as_deref().is_some_and(|t| std::path::Path::new(t).is_dir());
+    if spec.target.is_some() || spec.exe.is_some() {
+        v.push(Entry { id: M_NEW, text: short(&spec.name), glyph: Some(Glyph::App) });
+    }
+    if !folder && admin_target(spec).is_some() {
+        v.push(Entry { id: M_ADMIN, text: t!("Run as administrator", "Yönetici olarak çalıştır").into(), glyph: Some(Glyph::Fluent("\u{E7EF}")) });
+    }
+    if !folder && location_target(spec).is_some() {
+        v.push(Entry { id: M_LOCATION, text: t!("Open file location", "Dosya konumunu aç").into(), glyph: Some(Glyph::Fluent("\u{E838}")) });
+    }
+    v.push(Entry::sep());
     if spec.pinned {
         v.push(Entry { id: M_PIN, text: t!("Remove from dock", "Dock'tan kaldır").into(), glyph: Some(Glyph::Fluent("\u{E77A}")) });
     } else if spec.line.is_some() {
@@ -1740,6 +1856,11 @@ fn menu_entries(spec: &MenuSpec) -> Vec<super::menu::Entry> {
             text: t!(format!("Close all windows ({n})"), format!("Bütün pencereleri kapat ({n})")),
             glyph: Some(Glyph::Fluent("\u{E8BB}")),
         }),
+    }
+    // Zorla kapat: yanıt vermeyen uygulama için (macOS'taki gibi). Dosya Gezgini'ninki masaüstünü
+    // de götürür, gösterilmez.
+    if !spec.windows.is_empty() && !spec.exe.as_deref().is_some_and(|e| apps::file_name(e) == "explorer.exe") {
+        v.push(Entry { id: M_KILL, text: t!("Force quit", "Zorla kapat").into(), glyph: Some(Glyph::Fluent("\u{E711}")) });
     }
     v.push(Entry::sep());
     v.push(Entry { id: M_SETTINGS, text: t!("Dock settings", "Dock ayarları").into(), glyph: Some(Glyph::Fluent("\u{E713}")) });
@@ -1834,10 +1955,21 @@ unsafe extern "system" fn proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> 
             });
             return LRESULT(0);
         }
+        WM_FRAME => {
+            with(|d| {
+                if d.animating {
+                    d.step();
+                }
+            });
+            return LRESULT(0);
+        }
         WM_TIMER => {
             match wp.0 {
-                TIMER_ANIM => {
-                    with(|d| d.step());
+                TIMER_LIFT => {
+                    unsafe {
+                        let _ = KillTimer(Some(hwnd), TIMER_LIFT);
+                    }
+                    with(|d| d.lift());
                 }
                 TIMER_HIDE => {
                     unsafe {
@@ -1929,9 +2061,12 @@ unsafe extern "system" fn proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> 
                 d.dismiss_popups();
                 d.pressed = d.hover;
                 if let (Some(i), Some((x, _))) = (d.hover, d.mouse) {
-                    d.drag = Some(Drag { item: i, start_x: x, x, active: false, target: i });
+                    d.drag = Some(Drag { item: i, start_x: x, x, active: false, cancelled: false, target: i });
                     unsafe {
                         SetCapture(hwnd);
+                        if !d.settings.locked {
+                            SetTimer(Some(hwnd), TIMER_LIFT, HOLD_MS, None);
+                        }
                     }
                 }
                 d.render();
@@ -1948,9 +2083,17 @@ unsafe extern "system" fn proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> 
             return LRESULT(0);
         }
         WM_LBUTTONUP => with(|d| {
+            unsafe {
+                let _ = KillTimer(Some(hwnd), TIMER_LIFT);
+            }
             if let Some(dr) = d.drag.take() {
                 unsafe {
                     let _ = ReleaseCapture();
+                }
+                if dr.cancelled {
+                    d.pressed = None;
+                    d.render();
+                    return None;
                 }
                 if dr.active {
                     d.pressed = None;
@@ -2387,4 +2530,61 @@ pub fn notify_reload() {
             let _ = PostMessageW(Some(h), WM_RELOAD, WPARAM(0), LPARAM(0));
         }
     }
+}
+
+/// `hive --dock-bench`: dock'u görünmez kurar, simgeler yüklenince büyütme animasyonunun 240
+/// karesini çizer; kare başına çizim süresini yazar.
+pub fn bench() -> String {
+    let mut dock = match create(super::Settings::load(), super::load_pins()) {
+        Ok(d) => d,
+        Err(e) => return format!("dock kurulamadı: {e}\n"),
+    };
+    dock.status = Status::new(dock.hwnd, false);
+    BAR.with_borrow_mut(|d| *d = Some(dock));
+    with(|d| {
+        d.relayout();
+        d.refresh();
+    });
+    // Simgeler arka planda yüklenir: mesajları bir süre işle.
+    let end = Instant::now() + Duration::from_millis(2500);
+    while Instant::now() < end {
+        unsafe {
+            let mut msg = MSG::default();
+            while PeekMessageW(&mut msg, None, 0, 0, PM_REMOVE).as_bool() {
+                let _ = TranslateMessage(&msg);
+                DispatchMessageW(&msg);
+            }
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    let out = with(|d| {
+        d.shown = 1.0;
+        d.mag = 1.0;
+        let (w, h) = d.size_dip();
+        let k = d.k();
+        let mut times = Vec::new();
+        for i in 0..240 {
+            let x = w * (0.2 + 0.6 * i as f32 / 240.0);
+            d.mouse = Some((x, h - 20.0));
+            d.mag_x = Some(x);
+            let t = Instant::now();
+            d.paint_now();
+            times.push(t.elapsed().as_secs_f64() * 1000.0);
+        }
+        times.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        let avg = times.iter().sum::<f64>() / times.len() as f64;
+        let sources: Vec<_> = d.items.iter().map(|i| i.icon.clone()).collect();
+        let icons = sources.iter().filter(|s| d.bitmap(s).is_some()).count();
+        format!(
+            "pencere {}x{} px, {} öğe ({} simge yüklü)\nkare: ortalama {avg:.2} ms, p95 {:.2} ms, en çok {:.2} ms\n",
+            (w * k) as i32,
+            (h * k) as i32,
+            d.items.len(),
+            icons,
+            times[times.len() * 95 / 100],
+            times[times.len() - 1]
+        )
+    });
+    BAR.with_borrow_mut(|d| d.take());
+    out.unwrap_or_default()
 }

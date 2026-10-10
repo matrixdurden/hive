@@ -1,8 +1,8 @@
 //! Pencere önizlemesi: çalışan bir uygulamanın dock simgesinin üstünde kısa bir süre durunca
 //! (ya da birden çok penceresi varken tıklayınca) açılan, Windows görev çubuğunun önizlemesi
 //! gibi küçük pano. Her pencere bir kart: uygulamanın simgesi ve başlığı, altında canlı küçük
-//! resmi (DWM çizer, kopyalama yok). Tıklanan pencere öne gelir; çarpı ya da orta tık kapatır.
-//! Küçültülmüş pencerelerin canlı görüntüsü olmadığından kartında simge durur.
+//! resmi (DWM çizer, kopyalama yok; küçültülmüş pencerede son görüntüsü). Tıklanan pencere öne
+//! gelir; çarpı ya da orta tık kapatır.
 //!
 //! Windows panelleri gibi cam (acrylic) zemin, tema renkleri; açılırken aşağıdan kayar. Dock'a
 //! fare girdi / çıktı / iş bitti haberini mesajla verir; kapanma kararını dock verir.
@@ -173,15 +173,24 @@ impl Stack {
             }
         }
         for &h in windows {
-            let thumb = if unsafe { IsIconic(h).as_bool() } {
-                None
-            } else {
-                match unsafe { DwmRegisterThumbnail(self.hwnd, h) } {
-                    Ok(t) => Some(t),
-                    Err(e) => {
-                        crate::log!("dock: önizleme kaydedilemedi: {e}");
+            // Küçültülmüş pencerede de DWM son görüntüyü verir (görev çubuğu ve Alt+Tab gibi).
+            // Kayıt olmazsa ya da görüntü anlamsız küçükse (Windows 10'da küçültülmüş pencerenin
+            // başlık şeridi) kartta simge durur.
+            let thumb = match unsafe { DwmRegisterThumbnail(self.hwnd, h) } {
+                Ok(t) => {
+                    let size = unsafe { DwmQueryThumbnailSourceSize(t) }.unwrap_or_default();
+                    if size.cx >= 160 && size.cy >= 90 {
+                        Some(t)
+                    } else {
+                        unsafe {
+                            let _ = DwmUnregisterThumbnail(t);
+                        }
                         None
                     }
+                }
+                Err(e) => {
+                    crate::log!("dock: önizleme kaydedilemedi: {e}");
+                    None
                 }
             };
             self.cards.push(Card { hwnd: h, title: apps::title(h), thumb, rect: Rect::default() });
@@ -464,4 +473,106 @@ pub fn update(windows: &[HWND]) {
             s.set_cards(windows);
         }
     });
+}
+
+/// `hive --stack-test [klasör]`: birden çok penceresi olan (yoksa ilk) uygulamanın panosunu ekranın
+/// ortasında iki saniye açar; kartları ve küçük resimleri yazar, klasöre ekran görüntüsünü kaydeder.
+pub fn test(out: Option<&str>) -> String {
+    let wins = apps::windows();
+    let mut groups: Vec<(String, Vec<HWND>)> = Vec::new();
+    for w in &wins {
+        let k = w.key();
+        match groups.iter_mut().find(|g| g.0 == k) {
+            Some(g) => g.1.push(w.hwnd),
+            None => groups.push((k, vec![w.hwnd])),
+        }
+    }
+    // Küçültülmemiş penceresi olan, en çok pencereli uygulama.
+    groups.sort_by_key(|g| std::cmp::Reverse(g.1.len()));
+    let Some((key, hwnds)) = groups.first().cloned() else { return "pencere yok\n".into() };
+    let mut mi = MONITORINFO { cbSize: size_of::<MONITORINFO>() as u32, ..Default::default() };
+    unsafe {
+        let _ = GetMonitorInfoW(MonitorFromPoint(POINT { x: 0, y: 0 }, MONITOR_DEFAULTTOPRIMARY), &mut mi);
+    }
+    let m = mi.rcMonitor;
+    let anchor = ((m.left + m.right) / 2, (m.top + m.bottom) / 2 + 100);
+    let dpi = 96.0 * 1.25;
+    open(HWND::default(), &key, &IconSource::Window(hwnds[0].0 as isize), &hwnds, anchor, m, dpi);
+    let end = Instant::now() + std::time::Duration::from_millis(1200);
+    while Instant::now() < end {
+        unsafe {
+            let mut msg = MSG::default();
+            while PeekMessageW(&mut msg, None, 0, 0, PM_REMOVE).as_bool() {
+                let _ = TranslateMessage(&msg);
+                DispatchMessageW(&msg);
+            }
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    let mut report = format!("uygulama: {key}, {} pencere\n", hwnds.len());
+    let rect = with(|s| {
+        for c in &s.cards {
+            let size = c.thumb.and_then(|t| unsafe { DwmQueryThumbnailSourceSize(t) }.ok());
+            report += &format!("  {:?} küçük resim: {:?} kaynak: {:?}\n", c.title, c.thumb.is_some(), size.map(|s| (s.cx, s.cy)));
+        }
+        let mut r = RECT::default();
+        unsafe {
+            let _ = GetWindowRect(s.hwnd, &mut r);
+        }
+        report += &format!("pano: {:?} görünür: {}\n", (r.left, r.top, r.right, r.bottom), unsafe { IsWindowVisible(s.hwnd).as_bool() });
+        r
+    });
+    if let (Some(dir), Some(r)) = (out, rect) {
+        let path = std::path::Path::new(dir).join("pano.bmp");
+        match save_screen(r, &path) {
+            Ok(()) => report += &format!("görüntü: {}\n", path.display()),
+            Err(e) => report += &format!("görüntü alınamadı: {e}\n"),
+        }
+    }
+    close();
+    report
+}
+
+/// Ekranın `r` bölgesini BMP olarak kaydeder.
+fn save_screen(r: RECT, path: &std::path::Path) -> std::io::Result<()> {
+    let (w, h) = (r.right - r.left, r.bottom - r.top);
+    let mut px = vec![0u8; (w * h * 4) as usize];
+    unsafe {
+        let screen = GetDC(None);
+        let mem = CreateCompatibleDC(Some(screen));
+        let bmp = CreateCompatibleBitmap(screen, w, h);
+        let old = SelectObject(mem, bmp.into());
+        let _ = BitBlt(mem, 0, 0, w, h, Some(screen), r.left, r.top, SRCCOPY | CAPTUREBLT);
+        let mut bi = BITMAPINFO {
+            bmiHeader: BITMAPINFOHEADER {
+                biSize: size_of::<BITMAPINFOHEADER>() as u32,
+                biWidth: w,
+                biHeight: -h,
+                biPlanes: 1,
+                biBitCount: 32,
+                biCompression: BI_RGB.0,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        GetDIBits(mem, bmp, 0, h as u32, Some(px.as_mut_ptr().cast()), &mut bi, DIB_RGB_COLORS);
+        SelectObject(mem, old);
+        let _ = DeleteObject(bmp.into());
+        let _ = DeleteDC(mem);
+        ReleaseDC(None, screen);
+    }
+    let mut f = Vec::new();
+    let size = 54 + px.len() as u32;
+    f.extend_from_slice(b"BM");
+    f.extend_from_slice(&size.to_le_bytes());
+    f.extend_from_slice(&[0; 4]);
+    f.extend_from_slice(&54u32.to_le_bytes());
+    f.extend_from_slice(&40u32.to_le_bytes());
+    f.extend_from_slice(&w.to_le_bytes());
+    f.extend_from_slice(&(-h).to_le_bytes());
+    f.extend_from_slice(&1u16.to_le_bytes());
+    f.extend_from_slice(&32u16.to_le_bytes());
+    f.extend_from_slice(&[0; 24]);
+    f.extend_from_slice(&px);
+    std::fs::write(path, f)
 }

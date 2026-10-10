@@ -11,6 +11,7 @@ mod config;
 mod battery;
 mod gfx;
 mod dock;
+mod frame;
 mod log;
 mod soundboard;
 mod myinstants;
@@ -128,6 +129,32 @@ fn main() {
                 let _ = SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
             }
             print!("{}", dock::music::probe(args.get(1).map(String::as_str)));
+            std::process::exit(0);
+        }
+        Some("--stack-test") => {
+            unsafe {
+                let _ = AttachConsole(ATTACH_PARENT_PROCESS);
+                let _ = windows::Win32::System::Com::CoInitializeEx(None, windows::Win32::System::Com::COINIT_APARTMENTTHREADED);
+                let _ = SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+            }
+            print!("{}", dock::stack::test(args.get(1).map(String::as_str)));
+            std::process::exit(0);
+        }
+        Some("--jump-test") => {
+            unsafe {
+                let _ = AttachConsole(ATTACH_PARENT_PROCESS);
+                let _ = windows::Win32::System::Com::CoInitializeEx(None, windows::Win32::System::Com::COINIT_APARTMENTTHREADED);
+            }
+            print!("{}", dock::jump::probe(args.get(1).map(String::as_str).unwrap_or(""), args.get(2).map(String::as_str)));
+            std::process::exit(0);
+        }
+        Some("--dock-bench") => {
+            unsafe {
+                let _ = AttachConsole(ATTACH_PARENT_PROCESS);
+                let _ = windows::Win32::System::Com::CoInitializeEx(None, windows::Win32::System::Com::COINIT_APARTMENTTHREADED);
+                let _ = SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+            }
+            print!("{}", dock::bench());
             std::process::exit(0);
         }
         Some("--update-test" | "--guncelleme-dene") => {

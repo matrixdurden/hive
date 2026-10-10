@@ -10,9 +10,10 @@
 
 mod apps;
 mod bar;
+pub mod jump;
 mod menu;
 pub mod music;
-mod stack;
+pub mod stack;
 mod status;
 mod keys;
 mod taskbar;
@@ -22,7 +23,7 @@ mod tray;
 
 use std::path::PathBuf;
 
-pub use bar::{Geometry, geometry};
+pub use bar::{Geometry, bench, geometry};
 
 use windows::Win32::Foundation::HWND;
 use windows::Win32::Graphics::Gdi::InvalidateRect;
@@ -58,11 +59,15 @@ pub struct Settings {
     /// Etkin köşeler: sol üst görev görünümü, sağ alt masaüstü.
     pub corner_tl: bool,
     pub corner_br: bool,
+    /// Dock'un ve müzik şeridinin arka planının opaklığı, yüzde (30..100).
+    pub opacity: u32,
+    /// Simgeler kilitli: sürükleyerek yerleri değişmez.
+    pub locked: bool,
 }
 
 impl Settings {
     fn load() -> Self {
-        let mut s = Settings { size: 48, corner_tl: true, corner_br: true };
+        let mut s = Settings { size: 48, corner_tl: true, corner_br: true, opacity: 88, locked: false };
         let text = std::fs::read_to_string(ini()).unwrap_or_default();
         for line in text.lines() {
             let Some((k, v)) = line.split_once('=') else { continue };
@@ -70,6 +75,8 @@ impl Settings {
             match k {
                 "kose_sol_ust" => s.corner_tl = v == "1",
                 "kose_sag_alt" => s.corner_br = v == "1",
+                "opaklik" => s.opacity = v.parse::<u32>().unwrap_or(88).clamp(30, 100),
+                "kilitli" => s.locked = v == "1",
                 "boyut" => {
                     if let Ok(n) = v.parse::<u32>() {
                         s.size = n.clamp(SIZES.0, SIZES.1);
@@ -86,7 +93,14 @@ impl Settings {
         let b = |v: bool| v as u8;
         std::fs::write(
             ini(),
-            format!("boyut={}\nkose_sol_ust={}\nkose_sag_alt={}\n", self.size, b(self.corner_tl), b(self.corner_br)),
+            format!(
+                "boyut={}\nkose_sol_ust={}\nkose_sag_alt={}\nopaklik={}\nkilitli={}\n",
+                self.size,
+                b(self.corner_tl),
+                b(self.corner_br),
+                self.opacity,
+                b(self.locked)
+            ),
         )
     }
 }
@@ -262,21 +276,23 @@ enum Row {
     CornerTl,
     CornerBr,
     Size,
+    Opacity,
+    Lock,
     Music,
     Style,
-    Opacity,
     Progress,
     Others,
     HideIdle,
 }
 
-const ROWS: [Row; 9] = [
+const ROWS: [Row; 10] = [
     Row::CornerTl,
     Row::CornerBr,
     Row::Size,
+    Row::Opacity,
+    Row::Lock,
     Row::Music,
     Row::Style,
-    Row::Opacity,
     Row::Progress,
     Row::Others,
     Row::HideIdle,
@@ -318,7 +334,7 @@ impl Dock {
         Self {
             hwnd,
             settings,
-            music: music::Music::start(hwnd),
+            music: music::Music::start(hwnd, settings.opacity),
             hover: Hit::None,
             pressed: Hit::None,
             dragging: None,
@@ -338,7 +354,7 @@ impl Dock {
 
     fn row(&self, r: Row) -> Rect {
         let i = ROWS.iter().position(|&x| x == r).unwrap_or(0);
-        let section = if i >= 3 { SECTION } else { 0.0 };
+        let section = if i >= 5 { SECTION } else { 0.0 };
         let t = HEADER + 12.0 + i as f32 * ROW + section - self.scroll;
         Rect::new(PAD, t, self.w - PAD, t + ROW)
     }
@@ -367,7 +383,7 @@ impl Dock {
 
     /// Müzik kapalıyken altındaki ayarlar sönük durur.
     fn enabled(&self, r: Row) -> bool {
-        !matches!(r, Row::Style | Row::Opacity | Row::Progress | Row::Others | Row::HideIdle) || self.music.settings.show
+        !matches!(r, Row::Style | Row::Progress | Row::Others | Row::HideIdle) || self.music.settings.show
     }
 
     fn hit(&self, g: &Gfx, x: f32, y: f32) -> Hit {
@@ -405,10 +421,11 @@ impl Dock {
             }
         } else {
             let v = (30.0 + t * 70.0).round() as u32;
-            if v != self.music.settings.opacity {
-                self.music.settings.opacity = v;
-                // Sürüklerken şerit de canlı değişsin (dosyaya bırakınca yazılır).
-                self.music.apply();
+            if v != self.settings.opacity {
+                // Sürüklerken dock da şerit de canlı değişsin (dosyaya bırakınca yazılır).
+                self.settings.opacity = v;
+                bar::apply(self.settings);
+                self.music.set_opacity(v);
                 self.redraw();
             }
         }
@@ -439,6 +456,13 @@ impl Dock {
                 ),
             ),
             Row::Size => (t!("Icon size", "Simge boyu"), ""),
+            Row::Lock => (
+                t!("Lock icons", "Simgeleri kilitle"),
+                t!(
+                    "Icons can't be moved by dragging; otherwise hold an icon a moment to move it",
+                    "Simgeler sürüklenerek yer değiştirmez; kapalıyken simgeyi bir an basılı tutup taşırsın"
+                ),
+            ),
             Row::Music => (
                 t!("Now playing", "Çalan şarkı"),
                 t!(
@@ -450,7 +474,10 @@ impl Dock {
                 t!("Background", "Arka plan"),
                 t!("The cover blurred, its color, or plain like the dock", "Kapağın bulanık hali, rengi ya da dock gibi düz"),
             ),
-            Row::Opacity => (t!("Opacity", "Saydamlık"), t!("Of the background; text stays sharp", "Arka planın; yazılar hep net")),
+            Row::Opacity => (
+                t!("Opacity", "Saydamlık"),
+                t!("Of the dock and the music strip; icons and text stay sharp", "Dock'un ve müzik şeridinin; simgeler ve yazılar hep net"),
+            ),
             Row::Progress => (
                 t!("Progress line", "İlerleme çizgisi"),
                 t!("A thin line under the song; click it to seek", "Şarkının altında ince bir çizgi; tıklayıp atlayabilirsin"),
@@ -520,7 +547,7 @@ impl Dock {
                             let (lo, hi, _) = SIZES;
                             ((s.size - lo) as f32 / (hi - lo) as f32, s.size.to_string())
                         } else {
-                            ((m.opacity as f32 - 30.0) / 70.0, format!("%{}", m.opacity))
+                            ((s.opacity as f32 - 30.0) / 70.0, format!("%{}", s.opacity))
                         };
                         let active = enabled && (self.dragging == Some(row) || self.hover == Hit::Slider(row));
                         slider(g, a, b, r.cy(), v, accent(), active);
@@ -531,6 +558,7 @@ impl Dock {
                         let on = match row {
                             Row::CornerTl => s.corner_tl,
                             Row::CornerBr => s.corner_br,
+                            Row::Lock => s.locked,
                             Row::Music => m.show,
                             Row::Progress => m.progress,
                             Row::Others => m.others,
@@ -604,12 +632,7 @@ impl ToolPage for Dock {
         let pressed = std::mem::replace(&mut self.pressed, Hit::None);
         if let Some(row) = self.dragging.take() {
             self.set_slider_from(row, x);
-            if row == Row::Size {
-                self.commit();
-            } else {
-                self.music.commit();
-                self.redraw();
-            }
+            self.commit();
             return;
         }
         if pressed != self.hit(g, x, y) {
@@ -619,6 +642,7 @@ impl ToolPage for Dock {
         match pressed {
             Hit::Toggle(Row::CornerTl) => s.corner_tl = !s.corner_tl,
             Hit::Toggle(Row::CornerBr) => s.corner_br = !s.corner_br,
+            Hit::Toggle(Row::Lock) => s.locked = !s.locked,
             Hit::Toggle(row) => {
                 match row {
                     Row::Music => m.show = !m.show,
