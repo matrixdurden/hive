@@ -110,11 +110,5 @@ pub fn backdrop(hwnd: HWND, t: &Theme) {
 
 /// Mica (pencere zemini) var mı: Windows 11 22H2 (yapı 22621) ve sonrası.
 pub fn mica() -> bool {
-    crate::util::reg_string(
-        windows::Win32::System::Registry::HKEY_LOCAL_MACHINE,
-        r"SOFTWARE\Microsoft\Windows NT\CurrentVersion",
-        "CurrentBuildNumber",
-    )
-    .and_then(|b| b.trim().parse::<u32>().ok())
-    .is_some_and(|b| b >= 22621)
+    crate::util::windows_build() >= 22621
 }

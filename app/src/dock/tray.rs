@@ -32,8 +32,24 @@ pub fn is_open() -> bool {
     OPEN.load(Ordering::Relaxed)
 }
 
+/// Gizli simgeler penceresi: Windows 11'in XAML penceresi ya da Windows 10'un klasik penceresi.
 fn overflow() -> Option<HWND> {
-    unsafe { FindWindowW(w!("TopLevelWindowForOverflowXamlIsland"), PCWSTR::null()).ok() }
+    let class = if crate::util::windows11() { w!("TopLevelWindowForOverflowXamlIsland") } else { w!("NotifyIconOverflowWindow") };
+    unsafe { FindWindowW(class, PCWSTR::null()).ok() }
+}
+
+/// Windows 10: görev çubuğunun bildirim alanındaki "Gizli simgeleri göster" düğmesine basar
+/// (klavyeyle odaklamak gizli görev çubuğunu öne çıkarırdı).
+fn win10_chevron(tray: HWND) -> bool {
+    unsafe {
+        let Ok(notify) = FindWindowExW(Some(tray), None, w!("TrayNotifyWnd"), PCWSTR::null()) else { return false };
+        let Ok(button) = FindWindowExW(Some(notify), None, w!("Button"), PCWSTR::null()) else { return false };
+        if !IsWindowVisible(button).as_bool() {
+            return false;
+        }
+        let _ = PostMessageW(Some(button), BM_CLICK, WPARAM(0), LPARAM(0));
+        true
+    }
 }
 
 fn visible(h: HWND) -> bool {
@@ -87,11 +103,24 @@ pub fn toggle(x: i32, bottom: i32) {
         unsafe {
             SetWindowRgn(tray, Some(CreateRectRgn(0, 0, 0, 0)), false);
         }
-        let uia = unsafe { CoCreateInstance::<_, IUIAutomation>(&CUIAutomation, None, CLSCTX_INPROC_SERVER) }.ok();
-        super::press(&[VK_LWIN, VK_B]);
-        // Gizli simge yoksa düğme de yoktur; Enter o zaman başka bir simgeye basardı.
-        let ok = uia.as_ref().is_some_and(|u| wait(800, || chevron_focused(u)));
-        let ovf = if ok {
+        let ovf = if !crate::util::windows11() {
+            // Bölgesi boş: gösterilse de görünmez, ama düğmesi çalışır.
+            unsafe {
+                let _ = ShowWindow(tray, SW_SHOWNA);
+            }
+            if win10_chevron(tray) {
+                overflow().filter(|&h| wait(800, || visible(h)))
+            } else {
+                crate::log!("dock: gizli simgeler düğmesi bulunamadı");
+                None
+            }
+        } else if let Some(u) = unsafe { CoCreateInstance::<_, IUIAutomation>(&CUIAutomation, None, CLSCTX_INPROC_SERVER) }.ok()
+            && {
+                super::press(&[VK_LWIN, VK_B]);
+                // Gizli simge yoksa düğme de yoktur; Enter o zaman başka bir simgeye basardı.
+                wait(800, || chevron_focused(&u))
+            }
+        {
             super::press(&[VK_RETURN]);
             overflow().filter(|&h| wait(800, || visible(h)))
         } else {

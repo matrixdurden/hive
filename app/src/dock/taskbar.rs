@@ -147,8 +147,9 @@ pub fn hide() {
         }
     }
     // Başlat menüsü dock'un üstünden, ortadan açılsın. Explorer hizayı yalnızca açılışta
-    // okuduğundan değişince bir kez yeniden başlatılır (kurulumda).
-    if dword(w!("TaskbarAl")) != Some(1) {
+    // okuduğundan değişince bir kez yeniden başlatılır (kurulumda). Windows 10'da böyle bir
+    // ayar yok: Başlat solda açılır.
+    if crate::util::windows11() && dword(w!("TaskbarAl")) != Some(1) {
         set_align(Some(1));
         restart_explorer(false);
     }

@@ -58,6 +58,20 @@ pub fn reg_value_exists(root: HKEY, path: &str, name: &str) -> bool {
 }
 
 /// Metin değeri (genişletilmeden).
+/// Windows'un yapı numarası (Windows 11: 22000 ve sonrası).
+pub fn windows_build() -> u32 {
+    static BUILD: std::sync::OnceLock<u32> = std::sync::OnceLock::new();
+    *BUILD.get_or_init(|| {
+        reg_string(windows::Win32::System::Registry::HKEY_LOCAL_MACHINE, r"SOFTWARE\Microsoft\Windows NT\CurrentVersion", "CurrentBuildNumber")
+            .and_then(|b| b.trim().parse().ok())
+            .unwrap_or(0)
+    })
+}
+
+pub fn windows11() -> bool {
+    windows_build() >= 22000
+}
+
 pub fn reg_string(root: HKEY, path: &str, name: &str) -> Option<String> {
     let (p, n) = (wide(path), wide(name));
     let mut buf = vec![0u16; 16 * 1024];

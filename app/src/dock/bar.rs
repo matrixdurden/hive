@@ -241,8 +241,10 @@ enum Action {
     Activate(HWND),
     Minimize(HWND),
     Menu(MenuSpec),
-    /// Windows'un hızlı ayarları (Win+A): Wi-Fi, Bluetooth, ses, parlaklık, medya.
-    QuickSettings,
+    /// Windows'un hızlı ayarları (Win+A): Wi-Fi, Bluetooth, ses, parlaklık, medya. Windows
+    /// 10'da hızlı ayarlar yok: simgenin kendi paneli (ağ listesi, ses kaydırıcısı, pil
+    /// ayarları); `(x, y)` simgenin üst ortası (fiziksel piksel).
+    QuickSettings(Part, i32, i32),
     /// hive'ı dock sayfasında aç.
     Settings,
     /// Windows bildirimleri ve takvim (Win+N).
@@ -1511,7 +1513,16 @@ impl Bar {
             let x = self.place.left + ((s.l + s.r) / 2.0 * k) as i32;
             return Some(Action::Tray(x, self.place.top + ((pill_top - 8.0) * k) as i32));
         }
-        Some(if p == Part::Clock { Action::Notices } else { Action::QuickSettings })
+        if p == Part::Clock {
+            return Some(Action::Notices);
+        }
+        let slots = self.slots();
+        let s = slots.iter().find(|s| s.part == Some(p))?;
+        let k = self.k();
+        let (_, h) = self.size_dip();
+        let pill_top = h - MARGIN - self.pill_h();
+        let x = self.place.left + ((s.l + s.r) / 2.0 * k) as i32;
+        Some(Action::QuickSettings(p, x, self.place.top + ((pill_top - 8.0) * k) as i32))
     }
 
     /// Windows'un paneli (ekran boyunda saydam bir kap, içindeki panel alta yaslı) yerine konur.
@@ -1735,22 +1746,56 @@ fn menu_entries(spec: &MenuSpec) -> Vec<super::menu::Entry> {
     v
 }
 
+/// Windows 10: durum simgesinin kendi paneli. Ağ: kullanılabilir ağlar listesi; ses: klasik ses
+/// kaydırıcısı simgenin üstünde (`SndVol -f`, konum yüksek 16 bit y, düşük 16 bit x); pil:
+/// pil ayarları.
+fn win10_panel(part: Part, x: i32, y: i32) {
+    let open = |target: &str, args: Option<&str>| {
+        let t = crate::util::wide(target);
+        let a = args.map(crate::util::wide);
+        unsafe {
+            let _ = ShellExecuteW(
+                None,
+                w!("open"),
+                PCWSTR(t.as_ptr()),
+                a.as_ref().map_or(PCWSTR::null(), |a| PCWSTR(a.as_ptr())),
+                PCWSTR::null(),
+                SW_SHOWNORMAL,
+            );
+        }
+    };
+    match part {
+        Part::Net => open("ms-availablenetworks:", None),
+        Part::Volume => {
+            let packed = ((y.max(0) as u32) << 16) | (x.max(0) as u32 & 0xffff);
+            open("SndVol.exe", Some(&format!("-f {packed}")));
+        }
+        _ => open("ms-settings:batterysaver", None),
+    }
+}
+
 fn act(a: Action) {
     match a {
         Action::Open(t) => apps::open(&t),
         Action::Activate(h) => apps::activate(h),
         Action::Minimize(h) => apps::minimize(h),
         Action::Settings => crate::app::forward(Some("dock")),
-        Action::Notices => {
+        Action::Notices if crate::util::windows11() => {
             use windows::Win32::UI::Input::KeyboardAndMouse::{VK_LWIN, VK_N};
             FLYOUT.set(Some((Instant::now(), NOTICES)));
             super::press(&[VK_LWIN, VK_N]);
         }
-        Action::QuickSettings => {
+        // Windows 10'da Win+N boş: bildirimler İşlem Merkezi'nde (Win+A).
+        Action::Notices => {
+            use windows::Win32::UI::Input::KeyboardAndMouse::{VK_A, VK_LWIN};
+            super::press(&[VK_LWIN, VK_A]);
+        }
+        Action::QuickSettings(_, _, _) if crate::util::windows11() => {
             use windows::Win32::UI::Input::KeyboardAndMouse::{VK_A, VK_LWIN};
             FLYOUT.set(Some((Instant::now(), QUICK)));
             super::press(&[VK_LWIN, VK_A]);
         }
+        Action::QuickSettings(part, x, y) => win10_panel(part, x, y),
         Action::Tray(x, y) => super::tray::toggle(x, y),
         Action::Menu(spec) => {
             let hwnd = HWND(HWND_BAR.get() as *mut _);
