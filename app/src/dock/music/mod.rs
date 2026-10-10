@@ -107,6 +107,13 @@ pub fn migrate() {
     }
 }
 
+/// Dock tam ekran bir uygulamanın altında kaldı (ya da çıktı): şerit de saklanır. Dock'un kararı
+/// pencere boyutu değişikliklerini de izler (tarayıcıda video tam ekrana geçince öndeki pencere
+/// değişmez).
+pub fn set_fullscreen(on: bool) {
+    widget::set_ducked(on);
+}
+
 /// `hive --music-test [klasör]`: medya oturumlarını yazdırır; klasör verilirse şeridi her arka
 /// planla pencere açmadan PNG'ye çizer.
 pub fn probe(out: Option<&str>) -> String {

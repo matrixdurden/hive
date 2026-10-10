@@ -461,6 +461,17 @@ pub fn close() {
     SPARE.with(|sp| *sp.borrow_mut() = Some(gfx));
 }
 
+/// Açık panonun ekrandaki yeri (piksel).
+pub fn rect() -> Option<RECT> {
+    with(|s| {
+        let mut r = RECT::default();
+        unsafe {
+            let _ = GetWindowRect(s.hwnd, &mut r);
+        }
+        r
+    })
+}
+
 /// Açık panonun uygulaması.
 pub fn current() -> Option<String> {
     with(|s| s.item.clone())

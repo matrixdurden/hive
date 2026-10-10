@@ -21,7 +21,6 @@ use windows::Win32::Graphics::Gdi::*;
 use windows::Win32::Graphics::Imaging::*;
 use windows::Win32::System::Com::{CLSCTX_INPROC_SERVER, CoCreateInstance};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
-use windows::Win32::UI::Accessibility::{HWINEVENTHOOK, SetWinEventHook, UnhookWinEvent};
 use windows::Win32::UI::Input::KeyboardAndMouse::{ReleaseCapture, SetCapture, TME_LEAVE, TRACKMOUSEEVENT, TrackMouseEvent};
 use windows::Win32::UI::Shell::ShellExecuteW;
 use windows::Win32::UI::WindowsAndMessaging::*;
@@ -237,9 +236,8 @@ struct Widget {
     hover: Hit,
     pressed: Hit,
     tracking: bool,
-    /// Tam ekran bir uygulama önde: geçici olarak gizli.
+    /// Tam ekran bir uygulama önde (dock'un kararı): geçici olarak gizli.
     ducked: bool,
-    hook: HWINEVENTHOOK,
 }
 
 thread_local! {
@@ -296,30 +294,6 @@ fn dominant(px: &[u8]) -> u32 {
     let l = 0.2126 * r + 0.7152 * g + 0.0722 * b;
     let f = |v: f32| ((l + (v - l) * 1.5) * (0.55 / l.max(0.05)).clamp(0.6, 1.6)).clamp(0.0, 1.0);
     ((f(r) * 255.0) as u32) << 16 | ((f(g) * 255.0) as u32) << 8 | (f(b) * 255.0) as u32
-}
-
-fn is_desktop(h: HWND) -> bool {
-    let mut buf = [0u16; 16];
-    let n = unsafe { GetClassNameW(h, &mut buf) };
-    matches!(String::from_utf16_lossy(&buf[..n.max(0) as usize]).as_str(), "WorkerW" | "Progman")
-}
-
-/// Ön plandaki pencere bulunduğu ekranı tamamen kaplıyor mu (oyun, video).
-fn fullscreen(fg: HWND) -> bool {
-    if fg.is_invalid() || is_desktop(fg) {
-        return false;
-    }
-    unsafe {
-        let mut r = RECT::default();
-        let mon = MonitorFromWindow(fg, MONITOR_DEFAULTTONEAREST);
-        let mut mi = MONITORINFO { cbSize: size_of::<MONITORINFO>() as u32, ..Default::default() };
-        GetWindowRect(fg, &mut r).is_ok()
-            && GetMonitorInfoW(mon, &mut mi).as_bool()
-            && r.left <= mi.rcMonitor.left
-            && r.top <= mi.rcMonitor.top
-            && r.right >= mi.rcMonitor.right
-            && r.bottom >= mi.rcMonitor.bottom
-    }
 }
 
 /// Oynatıcıyı öne getirir (açık penceresi varsa, öndeyse küçültür); yoksa açar: Başlat
@@ -1107,18 +1081,6 @@ impl Widget {
         }
     }
 
-    /// Ön plan değişti: tam ekran oyunun, videonun üstünde durmaz (dock da saklanır).
-    fn foreground(&mut self, fg: HWND) {
-        let duck = fullscreen(fg) && fg != self.hwnd;
-        if duck != self.ducked {
-            self.ducked = duck;
-            self.sync_shown();
-            if !duck {
-                self.paint();
-            }
-        }
-    }
-
     fn apply(&mut self, o: Options) {
         let app = if o.app.is_empty() { self.o.app.clone() } else { o.app.clone() };
         self.o = Options { app, ..o };
@@ -1126,10 +1088,6 @@ impl Widget {
         self.sync_timer();
         self.paint();
     }
-}
-
-unsafe extern "system" fn on_foreground(_: HWINEVENTHOOK, _: u32, hwnd: HWND, _: i32, _: i32, _: u32, _: u32) {
-    with(|w| w.foreground(hwnd));
 }
 
 unsafe extern "system" fn proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
@@ -1236,8 +1194,8 @@ fn create(remote: Remote, o: Options) -> windows::core::Result<Widget> {
             hover: Hit::None,
             pressed: Hit::None,
             tracking: false,
-            ducked: false,
-            hook: HWINEVENTHOOK::default(),
+            // Dock tam ekran bir uygulamanın altındaysa şerit de saklı başlar.
+            ducked: super::super::keys::FULLSCREEN.load(std::sync::atomic::Ordering::Relaxed),
         })
     }
 }
@@ -1248,7 +1206,7 @@ pub fn start(remote: Remote, o: Options, now: Now) {
     if with(|w| w.apply(o2)).is_some() {
         return;
     }
-    let mut w = match create(remote, o) {
+    let w = match create(remote, o) {
         Ok(w) => w,
         Err(e) => {
             crate::log!("müzik: widget açılamadı: {e}");
@@ -1256,15 +1214,6 @@ pub fn start(remote: Remote, o: Options, now: Now) {
         }
     };
     unsafe {
-        w.hook = SetWinEventHook(
-            EVENT_SYSTEM_FOREGROUND,
-            EVENT_SYSTEM_FOREGROUND,
-            None,
-            Some(on_foreground),
-            0,
-            0,
-            WINEVENT_OUTOFCONTEXT,
-        );
         SetTimer(Some(w.hwnd), TIMER_DOCK, 2000, None);
     }
     W.with(|c| *c.borrow_mut() = Some(w));
@@ -1278,12 +1227,22 @@ pub fn stop() {
             let _ = KillTimer(Some(w.hwnd), TIMER_TICK);
             let _ = KillTimer(Some(w.hwnd), TIMER_DOCK);
             let _ = KillTimer(Some(w.hwnd), TIMER_WAIT);
-            if !w.hook.is_invalid() {
-                let _ = UnhookWinEvent(w.hook);
-            }
             let _ = DestroyWindow(w.hwnd);
         }
     }
+}
+
+/// Tam ekran bir uygulama önde (dock'un kararı, bkz. bar.rs): şerit saklanır, çıkınca geri gelir.
+pub fn set_ducked(on: bool) {
+    with(|w| {
+        if w.ducked != on {
+            w.ducked = on;
+            w.sync_shown();
+            if !on {
+                w.paint();
+            }
+        }
+    });
 }
 
 pub fn update(now: Now) {

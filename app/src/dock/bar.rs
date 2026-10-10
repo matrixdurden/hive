@@ -83,6 +83,8 @@ const TIMER_CLOCK: usize = 7;
 const TIMER_ICON_RETRY: usize = 8;
 /// Basılı tutulan simgenin kalkması.
 const TIMER_LIFT: usize = 9;
+/// Panoya doğru giderken yoldaki simgede durulursa ona geçiş.
+const TIMER_AIM: usize = 10;
 const HOLD_MS: u32 = 300;
 const ICON_TRIES: u8 = 4;
 
@@ -446,6 +448,8 @@ struct Bar {
     dirty: bool,
     /// Büyütmenin merkezi: imlecin simgelerin üstündeki son konumu (çıkınca büyütme oradan söner).
     mag_x: Option<f32>,
+    /// İmlecin bir önceki yeri (panoya doğru gidiş için).
+    aim_from: Option<(f32, f32)>,
     /// İmleç uygulama/klasör simgelerinin üstünde.
     over_items: bool,
     tick: Instant,
@@ -845,6 +849,8 @@ impl Bar {
     fn compute_cover(&self) -> Cover {
         let c = self.cover_now();
         super::keys::FULLSCREEN.store(c == Cover::Full, std::sync::atomic::Ordering::Relaxed);
+        // Müzik şeridi de tam ekran oyunda, videoda dock'la birlikte saklanır.
+        super::music::set_fullscreen(c == Cover::Full);
         c
     }
 
@@ -1420,7 +1426,45 @@ impl Bar {
         if self.shown < 1.0 && self.cover == Cover::Window {
             self.revealed = true;
         }
-        let hover = self.hit(x, y);
+        self.hover_at(x, y, true);
+    }
+
+    /// İmleç önizleme panosuna doğru mu gidiyor: önceki noktadan panonun alt köşelerine uzanan
+    /// üçgenin içinde ve yukarı (menülerdeki "güvenli üçgen"). Çapraz giderken yoldaki komşu
+    /// simge panoyu kapatmasın.
+    fn aiming(&self, from: (f32, f32), to: (f32, f32)) -> bool {
+        let Some(r) = stack::rect() else { return false };
+        let k = self.k();
+        let l = (r.left - self.place.left) as f32 / k - 8.0;
+        let rr = (r.right - self.place.left) as f32 / k + 8.0;
+        let b = (r.bottom - self.place.top) as f32 / k;
+        if to.1 > from.1 + 0.5 || to.1 < b {
+            return false;
+        }
+        let side = |a: (f32, f32), c: (f32, f32), p: (f32, f32)| (c.0 - a.0) * (p.1 - a.1) - (c.1 - a.1) * (p.0 - a.0);
+        let (bl, br) = ((l, b), (rr, b));
+        let (d1, d2, d3) = (side(from, bl, to), side(bl, br, to), side(br, from, to));
+        let neg = d1 < 0.0 || d2 < 0.0 || d3 < 0.0;
+        let pos = d1 > 0.0 || d2 > 0.0 || d3 > 0.0;
+        !(neg && pos)
+    }
+
+    /// İmlecin altındaki simge: üstüne gelinen değişir, önizleme açılır ya da kapanır.
+    /// `aim`: panoya doğru gidiliyorsa yoldaki simgeler yok sayılsın.
+    fn hover_at(&mut self, x: f32, y: f32, aim: bool) {
+        let mut hover = self.hit(x, y);
+        let from = self.aim_from.replace((x, y));
+        if aim
+            && let (Some(open), Some(from)) = (stack::current(), from)
+            && hover.map(|i| self.items[i].id.as_str()) != Some(open.as_str())
+            && self.aiming(from, (x, y))
+        {
+            // İmleç bu simgede durursa (panoya gitmekten vazgeçtiyse) ona geçilir.
+            hover = self.hover;
+            unsafe {
+                SetTimer(Some(self.hwnd), TIMER_AIM, 220, None);
+            }
+        }
         if hover != self.hover && hover.is_some() {
             unsafe {
                 let _ = KillTimer(Some(self.hwnd), TIMER_STACK);
@@ -1484,6 +1528,10 @@ impl Bar {
     fn mouse_leave(&mut self) {
         self.tracking = false;
         self.mouse = None;
+        self.aim_from = None;
+        unsafe {
+            let _ = KillTimer(Some(self.hwnd), TIMER_AIM);
+        }
         self.over_items = false;
         self.hover = None;
         self.hover_part = None;
@@ -1491,7 +1539,8 @@ impl Bar {
         unsafe {
             let _ = KillTimer(Some(self.hwnd), TIMER_STACK);
             if stack::current().is_some() {
-                SetTimer(Some(self.hwnd), TIMER_STACK_CLOSE, 350, None);
+                // Panoya çapraz giderken dock'tan bir an çıkılabilir: girerse kapanma iptal olur.
+                SetTimer(Some(self.hwnd), TIMER_STACK_CLOSE, 500, None);
             }
             if self.revealed {
                 SetTimer(Some(self.hwnd), TIMER_HIDE, 400, None);
@@ -1965,6 +2014,16 @@ unsafe extern "system" fn proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> 
         }
         WM_TIMER => {
             match wp.0 {
+                TIMER_AIM => {
+                    unsafe {
+                        let _ = KillTimer(Some(hwnd), TIMER_AIM);
+                    }
+                    with(|d| {
+                        if let Some((x, y)) = d.mouse {
+                            d.hover_at(x, y, false);
+                        }
+                    });
+                }
                 TIMER_LIFT => {
                     unsafe {
                         let _ = KillTimer(Some(hwnd), TIMER_LIFT);
@@ -2417,6 +2476,7 @@ fn create(settings: Settings, lines: Vec<String>) -> windows::core::Result<Bar> 
                 mag: 0.0,
                 dirty: true,
                 mag_x: None,
+                aim_from: None,
                 over_items: false,
                 tick: Instant::now(),
                 animating: false,
