@@ -403,6 +403,10 @@ struct Bar {
     /// pencere dikkat istiyordur.
     titles: HashMap<isize, (String, Instant)>,
     foreground: HWND,
+    /// Pencerelerin en son öne geldiği an (kapananlar yenilemede düşer).
+    used: HashMap<isize, Instant>,
+    /// Art arda tıklamayla pencereler arasında dolaşma: öğe, sıra, şu anki yer, son tıklama.
+    cycle: Option<(String, Vec<HWND>, usize, Instant)>,
 
     d2d: ID2D1Factory,
     wic: IWICImagingFactory,
@@ -769,6 +773,9 @@ impl Bar {
             k.extend(wins.iter().map(|w| w.hwnd.0 as isize));
         });
         self.foreground = unsafe { GetForegroundWindow() };
+        // Pencerelerin en son ne zaman öne geldiği: tıklayınca en son kullanılan açılır.
+        self.used.insert(self.foreground.0 as isize, Instant::now());
+        self.used.retain(|h, _| wins.iter().any(|w| w.hwnd.0 as isize == *h));
         let mut pinned: Vec<Item> = self
             .pins
             .iter()
@@ -1560,23 +1567,37 @@ impl Bar {
             }
             return Some(Action::Open(line));
         }
-        // Birden çok pencere: yığın açılır (açıksa kapanır), pencere oradan seçilir.
-        if item.windows.len() > 1 {
-            unsafe {
-                let _ = KillTimer(Some(self.hwnd), TIMER_STACK);
-            }
-            if stack::current().as_deref() == Some(item.id.as_str()) {
-                stack::close();
-            } else {
-                self.open_stack(i);
-            }
-            return None;
-        }
         let fg = self.foreground;
-        if item.windows.contains(&fg) {
-            return Some(Action::Minimize(fg));
+        // Tek pencere: öndeyse küçülür, değilse öne gelir.
+        if item.windows.len() == 1 {
+            return Some(if fg == item.windows[0] { Action::Minimize(fg) } else { Action::Activate(item.windows[0]) });
         }
-        Some(Action::Activate(item.windows[0]))
+        // Birden çok pencere (Windows'taki "son etkin pencere" gibi): en son kullanılan öne gelir.
+        // Uygulamanın bir penceresi zaten öndeyse art arda tıklamalar pencereler arasında en
+        // yeniden eskiye dolaşır. Hepsini görmek için simgenin üstünde durmak yeter (pano).
+        unsafe {
+            let _ = KillTimer(Some(self.hwnd), TIMER_STACK);
+        }
+        stack::close();
+        let id = item.id.clone();
+        let continuing = self
+            .cycle
+            .as_ref()
+            .is_some_and(|(cid, order, _, t)| *cid == id && t.elapsed() < Duration::from_secs(3) && order.contains(&fg));
+        if continuing {
+            let (_, order, at, t) = self.cycle.as_mut().unwrap();
+            *at = (*at + 1) % order.len();
+            *t = Instant::now();
+            return Some(Action::Activate(order[*at]));
+        }
+        // En son kullanılandan eskiye; hiç öne gelmemişler z sırasıyla (dock'un listesi üstten).
+        let mut order = item.windows.clone();
+        let never = Instant::now() - Duration::from_secs(365 * 24 * 3600);
+        order.sort_by_key(|h| std::cmp::Reverse(self.used.get(&(h.0 as isize)).copied().unwrap_or(never)));
+        let at = if order[0] == fg { 1 } else { 0 };
+        let target = order[at];
+        self.cycle = Some((id, order, at, Instant::now()));
+        Some(Action::Activate(target))
     }
 
     /// Durum simgeleri Windows'un kendi panellerini açar: ağ, ses, pil hızlı ayarları (dock'un
@@ -2445,6 +2466,8 @@ fn create(settings: Settings, lines: Vec<String>) -> windows::core::Result<Bar> 
                 titles: HashMap::new(),
                 notified: HashSet::new(),
                 foreground: HWND::default(),
+                used: HashMap::new(),
+                cycle: None,
                 d2d,
                 wic,
                 dw,
