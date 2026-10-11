@@ -1436,24 +1436,24 @@ impl Bar {
         self.hover_at(x, y, true);
     }
 
-    /// İmleç önizleme panosuna doğru mu gidiyor: önceki noktadan panonun alt köşelerine uzanan
-    /// üçgenin içinde ve yukarı (menülerdeki "güvenli üçgen"). Çapraz giderken yoldaki komşu
-    /// simge panoyu kapatmasın.
-    fn aiming(&self, from: (f32, f32), to: (f32, f32)) -> bool {
+    /// Pano açıkken imleç başka simgenin üstünden geçiyor ama panodan uzaklaşmıyor mu: belirgin
+    /// biçimde aşağı inmiyorsa (karta çapraz, sağa, sola giderken) yoldaki simge panoyu
+    /// değiştirmez. O simgede durulursa (`TIMER_AIM`) geçilir.
+    fn toward_stack(&self, from: (f32, f32), to: (f32, f32)) -> bool {
+        stack::rect().is_some() && to.1 <= from.1 + 3.0
+    }
+
+    /// İmleç pano ile dock'un kapladığı alanın içinde mi (karta giderken arada kalan boşluk
+    /// dahil): öyleyse pano kapanmaz.
+    fn near_stack(&self) -> bool {
         let Some(r) = stack::rect() else { return false };
-        let k = self.k();
-        let l = (r.left - self.place.left) as f32 / k - 8.0;
-        let rr = (r.right - self.place.left) as f32 / k + 8.0;
-        let b = (r.bottom - self.place.top) as f32 / k;
-        if to.1 > from.1 + 0.5 || to.1 < b {
-            return false;
+        let mut p = POINT::default();
+        unsafe {
+            let _ = GetCursorPos(&mut p);
         }
-        let side = |a: (f32, f32), c: (f32, f32), p: (f32, f32)| (c.0 - a.0) * (p.1 - a.1) - (c.1 - a.1) * (p.0 - a.0);
-        let (bl, br) = ((l, b), (rr, b));
-        let (d1, d2, d3) = (side(from, bl, to), side(bl, br, to), side(br, from, to));
-        let neg = d1 < 0.0 || d2 < 0.0 || d3 < 0.0;
-        let pos = d1 > 0.0 || d2 > 0.0 || d3 > 0.0;
-        !(neg && pos)
+        let (l, t) = (r.left.min(self.place.left), r.top.min(self.place.top));
+        let (rr, b) = (r.right.max(self.place.right), r.bottom.max(self.place.bottom));
+        p.x >= l - 12 && p.x <= rr + 12 && p.y >= t - 12 && p.y <= b
     }
 
     /// İmlecin altındaki simge: üstüne gelinen değişir, önizleme açılır ya da kapanır.
@@ -1464,12 +1464,12 @@ impl Bar {
         if aim
             && let (Some(open), Some(from)) = (stack::current(), from)
             && hover.map(|i| self.items[i].id.as_str()) != Some(open.as_str())
-            && self.aiming(from, (x, y))
+            && self.toward_stack(from, (x, y))
         {
             // İmleç bu simgede durursa (panoya gitmekten vazgeçtiyse) ona geçilir.
             hover = self.hover;
             unsafe {
-                SetTimer(Some(self.hwnd), TIMER_AIM, 220, None);
+                SetTimer(Some(self.hwnd), TIMER_AIM, 250, None);
             }
         }
         if hover != self.hover && hover.is_some() {
@@ -2105,10 +2105,18 @@ unsafe extern "system" fn proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> 
                         let _ = KillTimer(Some(hwnd), TIMER_STACK_CLOSE);
                     }
                     with(|d| {
-                        if !d.in_stack && d.mouse.is_none() {
-                            stack::close();
-                            d.after_stack();
+                        if d.in_stack || d.mouse.is_some() {
+                            return;
                         }
+                        if d.near_stack() {
+                            // Panoya giden yolda: biraz daha beklenir.
+                            unsafe {
+                                SetTimer(Some(hwnd), TIMER_STACK_CLOSE, 200, None);
+                            }
+                            return;
+                        }
+                        stack::close();
+                        d.after_stack();
                     });
                 }
                 TIMER_TRAY => {
@@ -2327,7 +2335,7 @@ unsafe extern "system" fn proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> 
             with(|d| {
                 d.in_stack = false;
                 unsafe {
-                    SetTimer(Some(hwnd), TIMER_STACK_CLOSE, 350, None);
+                    SetTimer(Some(hwnd), TIMER_STACK_CLOSE, 450, None);
                 }
             });
             return LRESULT(0);
