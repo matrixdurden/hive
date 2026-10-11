@@ -107,18 +107,19 @@ pub fn refresh_rate() -> Option<u32> {
 
 /// Yalnızca hızı değiştirir; çözünürlük ve konum olduğu gibi kalır. Kalıcı değildir (kayıt
 /// defterine yazılmaz): hive kapanınca Windows bir sonraki açılışta kendi ayarına döner.
-pub fn set_refresh_rate(hz: u32) -> bool {
-    let Some(mut dm) = current_mode() else { return false };
+/// Olmazsa Windows'un dönüş kodu (oturum açılırken ekran sürücüsü henüz hazır değilse
+/// DISP_CHANGE_BADMODE / FAILED gelir; çağıran yeniden dener).
+pub fn set_refresh_rate(hz: u32) -> Result<(), i32> {
+    let Some(mut dm) = current_mode() else { return Err(0) };
     if dm.dmDisplayFrequency == hz {
-        return true;
+        return Ok(());
     }
     dm.dmDisplayFrequency = hz;
     dm.dmFields = DM_DISPLAYFREQUENCY;
-    let ok = unsafe { ChangeDisplaySettingsW(Some(&dm), CDS_TYPE(0)) } == DISP_CHANGE_SUCCESSFUL;
-    if !ok {
-        log!("battery: {hz} Hz ayarlanamadı");
+    match unsafe { ChangeDisplaySettingsW(Some(&dm), CDS_TYPE(0)) } {
+        DISP_CHANGE_SUCCESSFUL => Ok(()),
+        r => Err(r.0),
     }
-    ok
 }
 
 #[derive(Clone, Copy, Debug)]

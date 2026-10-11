@@ -38,6 +38,10 @@ use crate::util::{self, wide};
 
 pub const TIMER_TICK: usize = 401;
 pub const TIMER_UI: usize = 402;
+/// Ekran hızının tutup tutmadığına bakma (vites uygulandıktan sonraki ilk dakika).
+pub const TIMER_HZ: usize = 403;
+const HZ_EVERY_MS: u32 = 3000;
+const HZ_WATCH: std::time::Duration = std::time::Duration::from_secs(90);
 const TICK_MS: u32 = 60_000;
 
 pub const PLUGGED: u8 = 0;
@@ -231,7 +235,7 @@ fn restore(cfg: &mut Config) {
     let st = power::status();
     let overlay = if st.ac { cfg.overlay_ac } else { cfg.overlay_dc };
     power::set_overlay(&overlay.unwrap_or(if st.ac { power::OVERLAY_PERFORMANCE } else { power::OVERLAY_BALANCED }));
-    power::set_refresh_rate(cfg.hz);
+    let _ = power::set_refresh_rate(cfg.hz);
     power::set_lid_dc(cfg.lid);
     power::set_cpu_max_dc(cfg.cpu);
     if let Some(b) = cfg.brightness_before.take() {
@@ -344,6 +348,14 @@ struct Layout {
 
 pub struct Battery {
     hwnd: HWND,
+    /// Vitesin istediği ekran hızı ve ona ne zamana kadar göz kulak olunacağı: oturum açılırken
+    /// ekran sürücüsü hazır olmadan Windows isteği reddeder, ya da sürücü yüklenince hızı
+    /// kendi varsayılanına (60 Hz) çeker. O süre içinde tutmazsa yeniden ayarlanır; sonrasında
+    /// kullanıcının elle yaptığı değişikliğe karışılmaz.
+    want_hz: Option<u32>,
+    hz_until: Option<std::time::Instant>,
+    /// Bu bakış süresinde ayarlama reddedildi mi (günlüğe bir kez yazılır).
+    hz_failed: bool,
     cfg: Config,
     /// Uygulanan vites.
     mode: u8,
@@ -411,6 +423,9 @@ impl Battery {
         let st = power::status();
         let mut d = Self {
             hwnd,
+            want_hz: None,
+            hz_until: None,
+            hz_failed: false,
             mode: u8::MAX,
             ac: st.ac,
             percent: st.percent,
@@ -521,7 +536,6 @@ impl Battery {
                 } else {
                     power::OVERLAY_BALANCED
                 }));
-                power::set_refresh_rate(cfg.hz);
                 power::set_lid_dc(cfg.lid);
                 power::set_cpu_max_dc(cfg.cpu);
             }
@@ -529,18 +543,19 @@ impl Battery {
             OUT => {
                 cfg.write_gpu_prefs();
                 power::set_overlay(&power::OVERLAY_BALANCED);
-                power::set_refresh_rate(cfg.hz);
                 power::set_lid_dc(power::LID_HIBERNATE);
                 power::set_cpu_max_dc(cfg.cpu);
             }
             _ => {
                 cfg.write_gpu_prefs();
                 power::set_overlay(&power::OVERLAY_EFFICIENCY);
-                power::set_refresh_rate(SURVIVAL_HZ);
                 power::set_lid_dc(power::LID_HIBERNATE);
                 power::set_cpu_max_dc(SURVIVAL_CPU);
             }
         }
+        let hz = if mode == SURVIVAL { SURVIVAL_HZ } else { cfg.hz };
+        self.want_refresh(hz);
+        let cfg = &mut self.cfg;
         // Parlaklık yalnızca hayatta kalmada kısılır; çıkınca geri gelir.
         if mode == SURVIVAL {
             if cfg.brightness_before.is_none() {
@@ -598,8 +613,47 @@ impl Battery {
         }
     }
 
+    /// Vitesin ekran hızını ayarlar ve bir süre tutup tutmadığına bakar.
+    fn want_refresh(&mut self, hz: u32) {
+        self.want_hz = Some(hz);
+        self.hz_until = Some(std::time::Instant::now() + HZ_WATCH);
+        self.hz_failed = false;
+        self.check_hz();
+        unsafe {
+            SetTimer(Some(self.hwnd), TIMER_HZ, HZ_EVERY_MS, None);
+        }
+    }
+
+    /// Ekran istenen hızda değilse ayarlar (bakış süresi içinde).
+    fn check_hz(&mut self) {
+        let Some(hz) = self.want_hz else { return };
+        if self.hz_until.is_none_or(|t| std::time::Instant::now() > t) {
+            self.hz_until = None;
+            unsafe {
+                let _ = KillTimer(Some(self.hwnd), TIMER_HZ);
+            }
+            return;
+        }
+        if power::refresh_rate() == Some(hz) {
+            return;
+        }
+        match power::set_refresh_rate(hz) {
+            Ok(()) if self.hz_failed => {
+                self.hz_failed = false;
+                log!("battery: {hz} Hz ayarlandı (yeniden denemeyle)");
+            }
+            Ok(()) => {}
+            Err(code) if !self.hz_failed => {
+                self.hz_failed = true;
+                log!("battery: {hz} Hz ayarlanamadı ({code}), yeniden denenecek");
+            }
+            Err(_) => {}
+        }
+    }
+
     pub fn timer(&mut self, id: usize) {
         match id {
+            TIMER_HZ => self.check_hz(),
             TIMER_TICK => self.tick(),
             TIMER_UI => {
                 self.bat = wmi::battery();
@@ -956,10 +1010,24 @@ impl ToolPage for Battery {
         wp: windows::Win32::Foundation::WPARAM,
         lp: windows::Win32::Foundation::LPARAM,
     ) -> Option<windows::Win32::Foundation::LRESULT> {
-        use windows::Win32::UI::WindowsAndMessaging::{PBT_POWERSETTINGCHANGE, WM_POWERBROADCAST, WM_TIMER};
+        use windows::Win32::UI::WindowsAndMessaging::{
+            PBT_APMRESUMEAUTOMATIC, PBT_POWERSETTINGCHANGE, WM_DISPLAYCHANGE, WM_POWERBROADCAST, WM_TIMER,
+        };
         match msg {
-            WM_TIMER if matches!(wp.0, TIMER_TICK | TIMER_UI) => self.timer(wp.0),
+            WM_TIMER if matches!(wp.0, TIMER_TICK | TIMER_UI | TIMER_HZ) => self.timer(wp.0),
             WM_POWERBROADCAST if wp.0 as u32 == PBT_POWERSETTINGCHANGE => self.power_broadcast(lp),
+            // Uykudan uyanınca da sürücü hızı değiştirebilir: yeniden göz kulak olunur.
+            WM_POWERBROADCAST if wp.0 as u32 == PBT_APMRESUMEAUTOMATIC => {
+                if let Some(hz) = self.want_hz {
+                    self.want_refresh(hz);
+                }
+                return None;
+            }
+            // Ekran değişti (sürücü yüklendi, monitör takıldı): bakış süresindeyse hemen bakılır.
+            WM_DISPLAYCHANGE => {
+                self.check_hz();
+                return None;
+            }
             _ => return None,
         }
         Some(windows::Win32::Foundation::LRESULT(0))
