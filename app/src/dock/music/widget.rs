@@ -1160,7 +1160,9 @@ fn create(remote: Remote, o: Options) -> windows::core::Result<Widget> {
             0,
             1,
             1,
-            None,
+            // Sahibi dock: Windows "Masaüstünü göster"de dock'u (appbar) saklamaz, sahiplendiği
+            // pencereyi de saklamaz.
+            crate::dock::window(),
             None,
             Some(inst.into()),
             None,
@@ -1241,6 +1243,19 @@ pub fn set_ducked(on: bool) {
             if !on {
                 w.paint();
             }
+        }
+    });
+}
+
+/// Görünüyorsa en üste alır: ön plan değişince (Win+D masaüstünü öne alınca) pencerelerin
+/// altında kalmasın.
+pub fn raise() {
+    with(|w| unsafe {
+        let show = (w.now.active || !w.o.hide_idle) && !w.ducked && w.fits();
+        if show {
+            // Windows saklamışsa da geri gelir.
+            let flags = SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW;
+            let _ = SetWindowPos(w.hwnd, Some(HWND_TOPMOST), 0, 0, 0, 0, flags);
         }
     });
 }

@@ -23,7 +23,7 @@ mod tray;
 
 use std::path::PathBuf;
 
-pub use bar::{Geometry, bench, geometry};
+pub use bar::{Geometry, bench, geometry, window};
 
 use windows::Win32::Foundation::HWND;
 use windows::Win32::Graphics::Gdi::InvalidateRect;

@@ -2231,6 +2231,8 @@ unsafe extern "system" fn proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> 
                     unsafe {
                         let _ = SetWindowPos(hwnd, Some(HWND_TOPMOST), 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
                     }
+                    // Müzik şeridi de ("Masaüstünü göster" masaüstünü öne alınca kaybolmasın).
+                    super::music::raise();
                 }
             });
             return LRESULT(0);
@@ -2504,6 +2506,12 @@ pub struct Geometry {
     /// Hapın sol kenarı (ekran pikseli).
     pub left: i32,
     pub theme: Theme,
+}
+
+/// Açık dock'un penceresi (müzik şeridinin sahibi).
+pub fn window() -> Option<HWND> {
+    let h = HWND_BAR.get();
+    (h != 0).then(|| HWND(h as *mut _))
 }
 
 /// Açık dock'un yeri (yoksa `None`). Arayüz iş parçacığından.

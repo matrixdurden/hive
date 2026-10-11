@@ -114,6 +114,11 @@ pub fn set_fullscreen(on: bool) {
     widget::set_ducked(on);
 }
 
+/// Şerit en üste alınır (dock kendini yeniden en üste alırken).
+pub fn raise() {
+    widget::raise();
+}
+
 /// `hive --music-test [klasör]`: medya oturumlarını yazdırır; klasör verilirse şeridi her arka
 /// planla pencere açmadan PNG'ye çizer.
 pub fn probe(out: Option<&str>) -> String {
