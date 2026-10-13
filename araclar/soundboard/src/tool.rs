@@ -22,6 +22,7 @@ pub static TOOL: Tool = Tool {
         "Your microphones go back to their previous settings and the audio service restarts for a second. Your sound list is deleted too.",
         "Mikrofonların eski ayarlarına döner, ses hizmeti bir saniyeliğine yeniden başlar. Ses listen de silinir.",
     ],
+    glyph: "\u{E8D6}",
     icons: ortak::icons!("soundboard"),
     installed: crate::installed,
     install: || setup(true),

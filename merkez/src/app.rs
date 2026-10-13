@@ -46,7 +46,7 @@ const WM_MOUSELEAVE: u32 = 0x02A3;
 const WM_NCMOUSELEAVE: u32 = 0x02A2;
 
 /// Kenar çubuğu: etiketli ve yalnızca ikon genişliği. Pencere AUTO_NARROW'dan darsa hep ikon.
-const WIDE: f32 = 208.0;
+const WIDE: f32 = 240.0;
 const NARROW: f32 = 56.0;
 const AUTO_NARROW: f32 = 640.0;
 const NAV: f32 = 40.0;
@@ -61,7 +61,13 @@ const CAP_H: f32 = HEADER;
 const CAPTIONS: f32 = CAP_W * 3.0;
 const CLOSE_RED: Color = Color::rgb(0xc42b1c);
 
-const ICON_APPS: &str = "\u{E71D}";
+const ICON_HOME: &str = "\u{E80F}";
+/// Ana sayfadaki kutucuklar.
+const TILE_W: f32 = 220.0;
+const TILE_H: f32 = 104.0;
+const TILE_GAP: f32 = 14.0;
+/// Kenar çubuğundaki "Araçlar" başlığının yüksekliği.
+const SECTION_H: f32 = 30.0;
 
 #[derive(Clone, Copy, PartialEq, Debug)]
 enum Cap {
@@ -88,6 +94,7 @@ impl Cap {
 
 #[derive(Clone, Copy, PartialEq, Debug)]
 enum Page {
+    Home,
     Tool(usize),
     Store,
     Settings,
@@ -96,6 +103,7 @@ enum Page {
 impl Page {
     fn id(self) -> &'static str {
         match self {
+            Page::Home => "home",
             Page::Tool(i) => TOOLS[i].id,
             Page::Store => "tools",
             Page::Settings => "settings",
@@ -104,6 +112,9 @@ impl Page {
 
     fn from_id(s: &str) -> Option<Page> {
         let s = s.trim();
+        if s.eq_ignore_ascii_case("home") || s.eq_ignore_ascii_case("ana") {
+            return Some(Page::Home);
+        }
         if s.eq_ignore_ascii_case("tools") || s.eq_ignore_ascii_case("araclar") {
             return Some(Page::Store);
         }
@@ -115,8 +126,9 @@ impl Page {
 
     fn label(self) -> &'static str {
         match self {
+            Page::Home => t!("Home", "Ana sayfa"),
             Page::Tool(i) => TOOLS[i].name(),
-            Page::Store => t!("Tools", "Araçlar"),
+            Page::Store => t!("Add tools", "Araç ekle"),
             Page::Settings => t!("Settings", "Ayarlar"),
         }
     }
@@ -131,7 +143,7 @@ enum Hit {
     Content,
     /// Aracın aç / kapa anahtarı.
     Switch(usize),
-    /// Açık aracın kartı: sayfasına gider.
+    /// Açık aracın kartı ya da Ana sayfadaki kutucuğu: sayfasına gider.
     Open(usize),
     Autostart,
     /// Dil: `true` Türkçe.
@@ -150,13 +162,13 @@ struct App {
     hwnd: HWND,
     gfx: Gfx,
     tray: Tray,
-    icons: Vec<ImageId>,
     /// winloom'ın kendi ikonu (kenar çubuğunun başında).
     logo: ImageId,
     page: Page,
     narrow_pref: bool,
     /// Araçlar sayfasının kaydırması (kartlar küçük pencereye sığmayınca).
-    store_scroll: f32,
+    /// Araç ekle ya da Ana sayfanın kaydırması (pencereye sığmayınca).
+    scroll: f32,
     autostart: bool,
     /// Açık araçların sayfaları ve motorları, TOOLS sırasıyla.
     tools: Vec<Option<Box<dyn ToolPage>>>,
@@ -268,19 +280,23 @@ impl App {
         self.tools[i].as_deref_mut()
     }
 
-    /// Kenar çubuğu sırasıyla sayfalar: açık araçlar, Araçlar, Ayarlar.
+    /// Kenar çubuğu sırasıyla sayfalar: Ana sayfa, açık araçlar, Araç ekle, Ayarlar.
     fn pages(&self) -> Vec<Page> {
-        (0..TOOLS.len())
-            .filter(|&i| self.installed(i))
-            .map(Page::Tool)
+        std::iter::once(Page::Home)
+            .chain((0..TOOLS.len()).filter(|&i| self.installed(i)).map(Page::Tool))
             .chain([Page::Store, Page::Settings])
             .collect()
+    }
+
+    /// Açık araçlar, kenar çubuğu sırasıyla.
+    fn live_tools(&self) -> Vec<usize> {
+        (0..TOOLS.len()).filter(|&i| self.installed(i)).collect()
     }
 
     /// Kurulu değilse araç sayfası yerine Araçlar açılır.
     fn valid(&self, page: Page) -> Page {
         match page {
-            Page::Tool(i) if !self.installed(i) => Page::Store,
+            Page::Tool(i) if !self.installed(i) => Page::Home,
             p => p,
         }
     }
@@ -308,6 +324,7 @@ impl App {
         let page = self.valid(page);
         if self.page != page {
             self.page = page;
+            self.scroll = 0.0;
             self.hover = Hit::None;
             self.save();
             self.sync_visible();
@@ -408,10 +425,13 @@ impl App {
 
     fn nav_rect(&self, page: Page, w: f32, h: f32) -> Rect {
         let sw = self.side_w(w);
+        // Dar kenar çubuğunda "Araçlar" başlığı yerine ince bir çizgi.
+        let section = if self.narrow(w) { 12.0 } else { SECTION_H };
         let t = match page {
+            Page::Home => HEADER + 4.0,
             Page::Tool(i) => {
                 let n = (0..i).filter(|&j| self.installed(j)).count();
-                HEADER + 8.0 + n as f32 * (NAV + 2.0)
+                HEADER + 4.0 + NAV + section + n as f32 * (NAV + 2.0)
             }
             Page::Store => h - 10.0 - 2.0 * NAV - 2.0,
             Page::Settings => h - 10.0 - NAV,
@@ -421,7 +441,7 @@ impl App {
 
     /// Canlı araç sayfasının başlığında adın bittiği x (sayfanın kendi köşesine göre).
     fn head_x(&self, i: usize) -> f32 {
-        PAD + 40.0 + self.gfx.measure(TOOLS[i].name(), &self.gfx.f.heading)
+        PAD + 44.0 + self.gfx.measure(TOOLS[i].name(), &self.gfx.f.heading)
     }
 
     /// Araç sayfasına boyutunu verir; kenar çubuğunun genişliğini döndürür.
@@ -439,13 +459,17 @@ impl App {
 
     fn card(&self, i: usize, w: f32) -> Rect {
         let (l, r) = (self.side_w(w) + PAGE_PAD, w - PAGE_PAD);
-        let t = HEADER + 52.0 + i as f32 * (CARD_H + 12.0) - self.store_scroll;
+        let t = HEADER + 52.0 + i as f32 * (CARD_H + 12.0) - self.scroll;
         Rect::new(l, t, r, t + CARD_H)
     }
 
-    fn store_max_scroll(&self) -> f32 {
-        let (_, h) = self.size();
-        (HEADER + 52.0 + TOOLS.len() as f32 * (CARD_H + 12.0) + 12.0 - h).max(0.0)
+    fn max_scroll(&self) -> f32 {
+        let (w, h) = self.size();
+        let bottom = match self.page {
+            Page::Home => self.live_tools().len().checked_sub(1).map_or(0.0, |k| self.tile(k, w).b + self.scroll),
+            _ => HEADER + 52.0 + TOOLS.len() as f32 * (CARD_H + 12.0),
+        };
+        (bottom + 12.0 - h).max(0.0)
     }
 
     /// Kartın aç / kapa anahtarı (sağda).
@@ -603,6 +627,14 @@ impl App {
             return Hit::Content;
         }
         match self.page {
+            Page::Home => {
+                // Kaydırılıp başlığın altına giren kutucuklar tıklanmaz.
+                if y < HEADER + 70.0 {
+                    return Hit::None;
+                }
+                let tools = self.live_tools();
+                (0..tools.len()).find(|&k| self.tile(k, w).contains(x, y)).map_or(Hit::None, |k| Hit::Open(tools[k]))
+            }
             Page::Store => {
                 if y < HEADER + 40.0 {
                     return Hit::None;
@@ -724,11 +756,13 @@ impl App {
         }
         let ic = Rect::new(r.l + 10.0, r.cy() - 12.0, r.l + 34.0, r.cy() + 12.0);
         let fg = if selected || hovered { pal().text } else { pal().muted };
-        match page {
-            Page::Tool(i) => g.image(self.icons[i], ic, 1.0),
-            Page::Store => g.text(ICON_APPS, &g.f.icon, ic, fg),
-            Page::Settings => g.text(ICON_SETTINGS, &g.f.icon, ic, fg),
-        }
+        let glyph = match page {
+            Page::Home => ICON_HOME,
+            Page::Tool(i) => TOOLS[i].glyph,
+            Page::Store => ICON_ADD,
+            Page::Settings => ICON_SETTINGS,
+        };
+        g.text(glyph, &g.f.icon, ic, fg);
         if !self.narrow(w) {
             g.text(page.label(), &g.f.text, Rect::new(r.l + 46.0, r.t, r.r - 10.0, r.b), fg);
         }
@@ -745,9 +779,14 @@ impl App {
         for p in self.pages() {
             self.paint_nav(p, w, h);
         }
-        // Araçlar ile alt bölüm arasında ince çizgi.
-        let store = self.nav_rect(Page::Store, w, h);
-        g.fill(Rect::new(14.0, store.t - 7.0, sw - 14.0, store.t - 6.0), 0.0, pal().line);
+        // Ana sayfa ile araçlar arasında "Araçlar" başlığı (dar çubukta ince çizgi).
+        let home = self.nav_rect(Page::Home, w, h);
+        if self.narrow(w) {
+            g.fill(Rect::new(14.0, home.b + 6.0, sw - 14.0, home.b + 7.0), 0.0, pal().line);
+        } else {
+            let label = Rect::new(home.l + 10.0, home.b + 6.0, sw - 12.0, home.b + SECTION_H);
+            g.text(t!("Tools", "Araçlar"), &g.f.small, label, pal().faint);
+        }
     }
 
     /// Canlı araç sayfası: başlıkta ikon ve ad, gerisini araç çizer; üstüne gelinen ikon
@@ -755,8 +794,11 @@ impl App {
     fn paint_live(&self, i: usize, sw: f32, w: f32) {
         let g = &self.gfx;
         g.translate(sw, 0.0);
-        g.image(self.icons[i], Rect::new(PAD, HEAD_CY - 14.0, PAD + 28.0, HEAD_CY + 14.0), 1.0);
-        let name = Rect::new(PAD + 40.0, HEAD_CY - 18.0, PAD + 240.0, HEAD_CY + 18.0);
+        let sq = Rect::new(PAD, HEAD_CY - 16.0, PAD + 32.0, HEAD_CY + 16.0);
+        g.fill(sq, 8.0, pal().panel);
+        g.stroke(sq, 8.0, pal().line, 1.0);
+        g.text(TOOLS[i].glyph, &g.f.icon, sq, accent());
+        let name = Rect::new(PAD + 44.0, HEAD_CY - 18.0, PAD + 260.0, HEAD_CY + 18.0);
         g.text(TOOLS[i].name(), &g.f.heading, name, pal().text);
         if let Some(p) = self.page_ref(i) {
             p.paint(g);
@@ -779,6 +821,51 @@ impl App {
         g.text(sub, &g.f.small, Rect::new(x0, HEADER + 14.0, w - PAGE_PAD, HEADER + 36.0), pal().muted);
     }
 
+    /// Ana sayfanın `k`'inci kutucuğu: içerik genişliğine sığdığı kadar sütun.
+    fn tile(&self, k: usize, w: f32) -> Rect {
+        let (l, r) = (self.side_w(w) + PAGE_PAD, w - PAGE_PAD);
+        let cols = (((r - l + TILE_GAP) / (TILE_W + TILE_GAP)).floor() as usize).clamp(1, 4);
+        let tw = (r - l - TILE_GAP * (cols - 1) as f32) / cols as f32;
+        let (col, row) = (k % cols, k / cols);
+        let x = l + col as f32 * (tw + TILE_GAP);
+        let y = HEADER + 76.0 + row as f32 * (TILE_H + TILE_GAP) - self.scroll;
+        Rect::new(x, y, x + tw, y + TILE_H)
+    }
+
+    /// Ana sayfa: selam, tarih ve açık araçların kutucukları.
+    fn paint_home(&self, w: f32, h: f32) {
+        let g = &self.gfx;
+        let x0 = self.side_w(w) + PAGE_PAD;
+        let (hour, date) = today();
+        let hello = match hour {
+            5..=11 => t!("Good morning", "Günaydın"),
+            12..=17 => t!("Good afternoon", "İyi günler"),
+            _ => t!("Good evening", "İyi akşamlar"),
+        };
+        g.text(&date, &g.f.small, Rect::new(x0, HEADER + 10.0, w - PAGE_PAD, HEADER + 30.0), pal().muted);
+        g.text(hello, &g.f.h1, Rect::new(x0, HEADER + 28.0, w - PAGE_PAD, HEADER + 64.0), pal().text);
+        let tools = self.live_tools();
+        if tools.is_empty() {
+            let r = Rect::new(x0, HEADER + 80.0, w - PAGE_PAD, HEADER + 104.0);
+            let text = t!("No tools on yet: turn some on in Add tools.", "Henüz açık araç yok: Araç ekle'den istediğini aç.");
+            g.text(text, &g.f.text, r, pal().muted);
+            return;
+        }
+        g.clip(Rect::new(self.side_w(w), HEADER + 70.0, w, h), || {
+            for (k, &i) in tools.iter().enumerate() {
+                let r = self.tile(k, w);
+                let hovered = self.hover == Hit::Open(i);
+                g.fill(r, 10.0, if hovered { pal().sel } else { pal().panel });
+                g.stroke(r, 10.0, pal().line, 1.0);
+                let ic = Rect::new(r.l + 16.0, r.t + 14.0, r.l + 40.0, r.t + 38.0);
+                g.text(TOOLS[i].glyph, &g.f.icon, ic, accent());
+                g.text(TOOLS[i].name(), &g.f.strong, Rect::new(r.l + 16.0, r.t + 46.0, r.r - 16.0, r.t + 70.0), pal().text);
+                let sub = Rect::new(r.l + 16.0, r.t + 70.0, r.r - 16.0, r.b - 12.0);
+                g.text(TOOLS[i].tagline(), &g.f.small, sub, pal().muted);
+            }
+        });
+    }
+
     fn paint_store(&self, w: f32, h: f32) {
         let g = &self.gfx;
         self.page_title(
@@ -796,7 +883,10 @@ impl App {
             // Açık aracın kartı sayfasına götürür: üstüne gelince belirginleşir.
             g.fill(c, 8.0, if self.hover == Hit::Open(i) { pal().sel } else { pal().panel });
             g.stroke(c, 8.0, pal().line, 1.0);
-            g.image(self.icons[i], Rect::new(c.l + 20.0, c.cy() - 28.0, c.l + 76.0, c.cy() + 28.0), 1.0);
+            let sq = Rect::new(c.l + 20.0, c.cy() - 26.0, c.l + 72.0, c.cy() + 26.0);
+            g.fill(sq, 10.0, pal().panel);
+            g.stroke(sq, 10.0, pal().line, 1.0);
+            g.text(tool.glyph, &g.f.icon_large, sq, if on { accent() } else { pal().muted });
 
             let sw = self.switch_rect(i, w);
             let text_r = sw.l - 96.0;
@@ -912,7 +1002,7 @@ impl App {
         setting_row(g, r, t!("Quit", "Kapat"), sub, 120.0);
         button(g, self.quit_rect(w), t!("Quit", "Çık"), None, None, self.hover == Hit::Quit);
 
-        let r = self.settings_row(5, w);
+        let r = self.settings_row(6, w);
         let title = t!("Remove winloom", "winloom'ı kaldır");
         if self.removing_self {
             let sub = t!("Removing… each tool is removed and checked in turn", "Kaldırılıyor… araçlar sırayla kaldırılıp denetleniyor");
@@ -948,6 +1038,7 @@ impl App {
         match (self.page, self.tool_live()) {
             (_, Some(i)) => g.clip(Rect::new(sw, 0.0, w, h), || self.paint_live(i, sw, w)),
             (Page::Settings, _) => self.paint_settings(w),
+            (Page::Home, _) => self.paint_home(w, h),
             _ => self.paint_store(w, h),
         }
 
@@ -1161,7 +1252,7 @@ impl App {
             }
             WM_SIZE => {
                 self.hover = Hit::None;
-                self.store_scroll = self.store_scroll.min(self.store_max_scroll());
+                self.scroll = self.scroll.min(self.max_scroll());
                 self.sync_visible();
                 self.redraw();
             }
@@ -1258,8 +1349,8 @@ impl App {
                     && let Some(p) = live.and_then(|i| self.tools[i].as_deref_mut())
                 {
                     p.wheel(&self.gfx, x - sw, y, delta);
-                } else if x >= sw && live.is_none() && self.page == Page::Store {
-                    self.store_scroll = (self.store_scroll - delta * 60.0).clamp(0.0, self.store_max_scroll());
+                } else if x >= sw && live.is_none() && matches!(self.page, Page::Store | Page::Home) {
+                    self.scroll = (self.scroll - delta * 60.0).clamp(0.0, self.max_scroll());
                     self.hover = self.hit(x, y);
                     self.redraw();
                 }
@@ -1494,7 +1585,6 @@ pub fn run(hidden: bool, tab: Option<String>) -> Res<()> {
 
         let mut gfx = Gfx::new()?;
         gfx.set_transparent(mica);
-        let icons = TOOLS.iter().map(|t| gfx.load_image(t.icons)).collect::<Res<Vec<_>>>()?;
         let logo = gfx.load_image(&[
             (24, include_bytes!("../ikon/icon-24.png")),
             (32, include_bytes!("../ikon/icon-32.png")),
@@ -1505,11 +1595,10 @@ pub fn run(hidden: bool, tab: Option<String>) -> Res<()> {
             hwnd,
             gfx,
             tray: Tray::new(hwnd, WM_TRAY),
-            icons,
             logo,
             page: Page::Store,
             narrow_pref: cfg.narrow,
-            store_scroll: 0.0,
+            scroll: 0.0,
             autostart: autostart(),
             tools: (0..tools::COUNT).map(|_| None).collect(),
             busy: [None; tools::COUNT],
@@ -1535,8 +1624,7 @@ pub fn run(hidden: bool, tab: Option<String>) -> Res<()> {
         crate::shell::migrate_autostart();
         app.autostart = autostart();
         // İstenen ya da son açık sekme; kurulu araç yoksa Araçlar.
-        let first = (0..TOOLS.len()).find(|&i| app.installed(i)).map_or(Page::Store, Page::Tool);
-        let page = tab.as_deref().and_then(Page::from_id).or_else(|| Page::from_id(&cfg.tab)).unwrap_or(first);
+        let page = tab.as_deref().and_then(Page::from_id).or_else(|| Page::from_id(&cfg.tab)).unwrap_or(Page::Home);
         app.page = app.valid(page);
         log!("başladı: sekme {}, kurulu {:?}", app.page.id(), (0..tools::COUNT).map(|i| app.installed(i)).collect::<Vec<_>>());
         APP.with(|a| *a.borrow_mut() = Some(app));
@@ -1557,4 +1645,23 @@ pub fn run(hidden: bool, tab: Option<String>) -> Res<()> {
         }
         Ok(())
     }
+}
+
+/// Yerel saat (0..23) ve bugünün tarihi: "Pazartesi, 13 Ekim".
+fn today() -> (u16, String) {
+    let t = unsafe { windows::Win32::System::SystemInformation::GetLocalTime() };
+    let (days, months): ([&str; 7], [&str; 12]) = if ortak::i18n::turkish() {
+        (
+            ["Pazar", "Pazartesi", "Salı", "Çarşamba", "Perşembe", "Cuma", "Cumartesi"],
+            ["Ocak", "Şubat", "Mart", "Nisan", "Mayıs", "Haziran", "Temmuz", "Ağustos", "Eylül", "Ekim", "Kasım", "Aralık"],
+        )
+    } else {
+        (
+            ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"],
+            ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"],
+        )
+    };
+    let day = days[(t.wDayOfWeek as usize).min(6)];
+    let month = months[(t.wMonth as usize).clamp(1, 12) - 1];
+    (t.wHour, format!("{day}, {} {month}", t.wDay))
 }

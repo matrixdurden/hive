@@ -12,6 +12,7 @@ pub static TOOL: Tool = Tool {
         "Its shortcuts are released, and music keeps playing from the speakers again when your headphones drop.",
         "Kısayolları bırakılır; kulaklık kopunca müzik yine hoparlörden çalmaya devam eder.",
     ],
+    glyph: "\u{E7F6}",
     icons: ortak::icons!("audio"),
     installed: crate::installed,
     install: crate::install,

@@ -12,6 +12,7 @@ pub static TOOL: Tool = Tool {
         "Your wallpaper goes back to the Windows one. Wallpapers you added and their settings are deleted too.",
         "Duvar kâğıdı Windows'unkine döner. Eklediğin duvar kâğıtları ve ayarları da silinir.",
     ],
+    glyph: "\u{E771}",
     icons: ortak::icons!("wallpaper"),
     installed: crate::installed,
     install: crate::install,

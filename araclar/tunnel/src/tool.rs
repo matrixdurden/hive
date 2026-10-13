@@ -24,6 +24,7 @@ pub static TOOL: Tool = Tool {
         "Tünel kapanır; hizmet, ağ bağdaştırıcısı ve sunucu bağlantın silinir.",
     ],
     downloads: true,
+    glyph: "\u{E705}",
     icons: ortak::icons!("tunnel"),
     installed: crate::installed,
     install,

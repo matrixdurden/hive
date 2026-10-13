@@ -18,6 +18,7 @@ pub static TOOL: Tool = Tool {
         "The dock and its music strip close; the Windows taskbar and your desktop icons come back as they were.",
         "Dock ve müzik şeridi kapanır; Windows görev çubuğu ve masaüstü simgelerin eski haline döner.",
     ],
+    glyph: "\u{E90E}",
     icons: ortak::icons!("dock"),
     installed: crate::installed,
     install: crate::install,

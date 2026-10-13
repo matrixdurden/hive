@@ -21,6 +21,9 @@ pub struct Tool {
     pub off_note: [&'static str; 2],
     /// Açarken bir şey indirir (düğmede "İndiriliyor…").
     pub downloads: bool,
+    /// Arayüzdeki simgesi: Segoe Fluent Icons kod noktası, tek renk (kenar çubuğu, sayfa başlığı,
+    /// kutucuklar). Renkli PNG'ler yalnızca Başlat menüsü kısayollarında.
+    pub glyph: &'static str,
     /// (piksel, PNG): `icons!("<id>")` aracın `ikon/` klasöründen gömer.
     pub icons: &'static [(u32, &'static [u8])],
 
@@ -55,6 +58,7 @@ impl Tool {
         note: ["", ""],
         off_note: ["", ""],
         downloads: false,
+        glyph: "\u{E74C}",
         icons: &[],
         installed: || false,
         install: || Ok(()),

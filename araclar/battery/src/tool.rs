@@ -12,6 +12,7 @@ pub static TOOL: Tool = Tool {
         "Screen, power and lid settings go back to what they were; the GPU preferences it wrote and its measurements are deleted.",
         "Ekran, güç ve kapak ayarları eski haline döner; yazdığı GPU tercihleri ve ölçümleri silinir.",
     ],
+    glyph: "\u{E83F}",
     icons: ortak::icons!("battery"),
     installed: crate::installed,
     install: crate::install,

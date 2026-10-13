@@ -58,22 +58,23 @@ impl Theme {
 }
 
 const CLAUDE: Palette = Palette {
-    bg: Color::rgb(0x1f1e1d),
-    layer: Color::rgb(0x262624),
+    bg: Color::rgb(0x1b1a18),
+    layer: Color::rgb(0x161514),
     layer_line: Color(0xdedcd1, 0.08),
     hover: Color(0xf0eee6, 0.06),
     sel: Color(0xf0eee6, 0.09),
     line: Color(0xdedcd1, 0.12),
     panel: Color(0xf0eee6, 0.045),
-    text: Color::rgb(0xfaf9f5),
-    muted: Color::rgb(0xc2c0b6),
-    faint: Color::rgb(0x8f8d86),
+    text: Color::rgb(0xf2f0ec),
+    muted: Color::rgb(0xa8a49d),
+    faint: Color::rgb(0x8c877f),
     green: Color::rgb(0x7ec27a),
     red: Color::rgb(0xf08a7e),
     tip: Color::rgb(0x30302e),
     knob: Color::rgb(0x3a3a37),
     accent: Color::rgb(0xd97757),
-    on_accent: Color::rgb(0xffffff),
+    // Beyaz yazı kil turuncusunun üstünde okunmuyor (3:1): koyu yazı.
+    on_accent: Color::rgb(0x1a1310),
     mica: false,
 };
 
