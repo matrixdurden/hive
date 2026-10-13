@@ -1,13 +1,13 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
 <rect x="4" y="4" width="120" height="120" rx="28" fill="#0f0f10"/>
 <rect x="4.75" y="4.75" width="118.5" height="118.5" rx="27.25" fill="none" stroke="#fff" stroke-opacity=".12" stroke-width="1.5"/>
-<rect x="30.0" y="55.5" width="68.0" height="13.0" rx="6.5" fill="#f0a98a"/>
-<rect x="30.0" y="79.5" width="68.0" height="13.0" rx="6.5" fill="#f0a98a"/>
-<rect x="33.5" y="30.0" width="13.0" height="74.0" rx="6.5" fill="#d97757"/>
-<rect x="57.5" y="30.0" width="13.0" height="74.0" rx="6.5" fill="#d97757"/>
-<rect x="81.5" y="30.0" width="13.0" height="74.0" rx="6.5" fill="#d97757"/>
-<rect x="22.0" y="23.5" width="84.0" height="13.0" rx="6.5" fill="#d97757"/>
-<rect x="33.5" y="79.5" width="13.0" height="13.0" fill="#f0a98a"/>
-<rect x="57.5" y="55.5" width="13.0" height="13.0" fill="#f0a98a"/>
-<rect x="81.5" y="79.5" width="13.0" height="13.0" fill="#f0a98a"/>
+<rect x="30.0" y="55.5" width="68.0" height="13.0" rx="6.5" fill="#ededed"/>
+<rect x="30.0" y="79.5" width="68.0" height="13.0" rx="6.5" fill="#ededed"/>
+<rect x="33.5" y="30.0" width="13.0" height="74.0" rx="6.5" fill="#a3a3a3"/>
+<rect x="57.5" y="30.0" width="13.0" height="74.0" rx="6.5" fill="#a3a3a3"/>
+<rect x="81.5" y="30.0" width="13.0" height="74.0" rx="6.5" fill="#a3a3a3"/>
+<rect x="22.0" y="23.5" width="84.0" height="13.0" rx="6.5" fill="#a3a3a3"/>
+<rect x="33.5" y="79.5" width="13.0" height="13.0" fill="#ededed"/>
+<rect x="57.5" y="55.5" width="13.0" height="13.0" fill="#ededed"/>
+<rect x="81.5" y="79.5" width="13.0" height="13.0" fill="#ededed"/>
 </svg>

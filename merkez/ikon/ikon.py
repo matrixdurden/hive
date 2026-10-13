@@ -2,7 +2,7 @@
 """ikon/icon.svg ile aynı şekli bağımlılıksız çizer: ikon/icon-*.png ve ikon/icon.ico.
 
 winloom ikonu: koyu yuvarlak kare içinde bir tezgâh: üstteki kirişten sarkan üç dikey iplik ve
-aralarından bir altından bir üstünden geçen iki yatay iplik. Tek renk ailesi, tek şekil.
+aralarından bir altından bir üstünden geçen iki yatay iplik. Renk yok: griler, tek şekil.
 Çalıştır: python3 merkez/ikon/ikon.py
 """
 
@@ -12,9 +12,9 @@ from pathlib import Path
 
 ASSETS = Path(__file__).resolve().parent
 
-# Tek vurgu rengi: arayüzün varsayılan (Claude teması) vurgusu; yatay iplikler biraz açık.
-WARP = 0xD97757
-WEFT = 0xF0A98A
+# Arayüz gibi sade: renk yok, griler; yatay iplikler daha açık (dokuma okunsun).
+WARP = 0xA3A3A3
+WEFT = 0xEDEDED
 BG = 0x0F0F10
 
 T = 13.0                 # iplik kalınlığı
