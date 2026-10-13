@@ -856,8 +856,6 @@ impl Bar {
     fn compute_cover(&self) -> Cover {
         let c = self.cover_now();
         super::keys::FULLSCREEN.store(c == Cover::Full, std::sync::atomic::Ordering::Relaxed);
-        // Müzik şeridi de tam ekran oyunda, videoda dock'la birlikte saklanır.
-        super::music::set_fullscreen(c == Cover::Full);
         c
     }
 
@@ -2260,8 +2258,6 @@ unsafe extern "system" fn proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> 
                     unsafe {
                         let _ = SetWindowPos(hwnd, Some(HWND_TOPMOST), 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
                     }
-                    // Müzik şeridi de ("Masaüstünü göster" masaüstünü öne alınca kaybolmasın).
-                    super::music::raise();
                 }
             });
             return LRESULT(0);
@@ -2523,44 +2519,6 @@ fn create(settings: Settings, lines: Vec<String>) -> windows::core::Result<Bar> 
             })
         }
     }
-}
-
-/// Dock'un ekrandaki yeri ve görünüşü: müzik widget'ı yanına oturur.
-#[derive(Clone, Copy)]
-pub struct Geometry {
-    pub monitor: RECT,
-    pub dpi: f32,
-    /// Hapın yüksekliği, ekranın altından uzaklığı ve köşe yarıçapı (DIP).
-    pub pill_h: f32,
-    pub margin: f32,
-    pub radius: f32,
-    /// Hapın sol kenarı (ekran pikseli).
-    pub left: i32,
-    pub theme: Theme,
-}
-
-/// Açık dock'un penceresi (müzik şeridinin sahibi).
-pub fn window() -> Option<HWND> {
-    let h = HWND_BAR.get();
-    (h != 0).then(|| HWND(h as *mut _))
-}
-
-/// Açık dock'un yeri (yoksa `None`). Arayüz iş parçacığından.
-pub fn geometry() -> Option<Geometry> {
-    BAR.with(|d| {
-        let d = d.try_borrow().ok()?;
-        let d = d.as_ref().filter(|d| d.live && d.monitor.bottom > d.monitor.top)?;
-        let r = d.screen_rect();
-        Some(Geometry {
-            monitor: d.monitor,
-            dpi: d.dpi,
-            pill_h: d.pill_h(),
-            margin: MARGIN,
-            radius: RADIUS,
-            left: r.left,
-            theme: d.theme,
-        })
-    })
 }
 
 /// Dock'u açar (zaten açıksa ayarları uygular). Arayüz iş parçacığından çağrılır.

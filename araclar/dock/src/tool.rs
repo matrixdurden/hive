@@ -13,8 +13,8 @@ pub static TOOL: Tool = Tool {
         "Görev çubuğunun yerine geçer · kapatınca görev çubuğu geri gelir",
     ],
     off_note: [
-        "The dock and its music strip close; the Windows taskbar and your desktop icons come back as they were.",
-        "Dock ve müzik şeridi kapanır; Windows görev çubuğu ve masaüstü simgelerin eski haline döner.",
+        "The dock closes; the Windows taskbar and your desktop icons come back as they were.",
+        "Dock kapanır; Windows görev çubuğu ve masaüstü simgelerin eski haline döner.",
     ],
     glyph: "\u{E90E}",
     icons: ortak::icons!("dock"),
@@ -36,11 +36,6 @@ fn cli(args: &[String]) -> Option<i32> {
         "--dock-test" | "--dock-dene" => {
             tool::console(true);
             print!("{}", crate::probe());
-        }
-        "--music-test" | "--muzik-dene" => {
-            tool::console(false);
-            dpi();
-            print!("{}", crate::music::probe(arg(1)));
         }
         "--stack-test" => {
             tool::console(true);

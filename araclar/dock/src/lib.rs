@@ -2,7 +2,6 @@
 //! sabitlenenler (uygulama, klasör, ne sabitlenirse), yanlarında açık olanlar; sağ uçta ağ, ses,
 //! pil ve saat. Masaüstü simgeleri de istenirse gizlenir.
 //!
-//! Dock'un solunda çalan şarkının şeridi (music/): Spotify, kapak, düğmeler.
 //!
 //! Motor winloom sürecinin içinde (bar.rs). Kurmak ayar dosyasını ve dock'un ilk listesini
 //! (görev çubuğuna sabitlenmiş kısayollar) yazar.
@@ -18,7 +17,6 @@ mod apps;
 mod bar;
 pub mod jump;
 mod menu;
-pub mod music;
 pub mod stack;
 mod status;
 mod keys;
@@ -28,7 +26,7 @@ mod tray;
 
 use std::path::PathBuf;
 
-pub use bar::{Geometry, bench, geometry, window};
+pub use bar::bench;
 
 use windows::Win32::Foundation::HWND;
 use windows::Win32::Graphics::Gdi::InvalidateRect;
@@ -244,22 +242,6 @@ pub fn press(keys: &[windows::Win32::UI::Input::KeyboardAndMouse::VIRTUAL_KEY]) 
     }
 }
 
-/// Uygulama kimliği (AppUserModelID ya da exe adı, "Spotify.exe" gibi) bu olan açık pencereyi
-/// öne getirir; zaten öndeyse küçültür (görev çubuğu gibi). Açık penceresi yoksa `false`.
-pub fn focus_app(id: &str) -> bool {
-    let Some(w) = apps::windows().into_iter().find(|w| {
-        w.aumid.as_deref().is_some_and(|a| a.eq_ignore_ascii_case(id)) || w.exe_name().eq_ignore_ascii_case(id)
-    }) else {
-        return false;
-    };
-    if unsafe { windows::Win32::UI::WindowsAndMessaging::GetForegroundWindow() } == w.hwnd {
-        apps::minimize(w.hwnd);
-    } else {
-        apps::activate(w.hwnd);
-    }
-    true
-}
-
 /// `winloom --dock-test`
 pub fn probe() -> String {
     let pins = if pins_file().exists() { load_pins() } else { seed() };
@@ -274,16 +256,10 @@ const R_OPACITY: u32 = 1;
 const R_LOCK: u32 = 2;
 const R_CORNER_TL: u32 = 3;
 const R_CORNER_BR: u32 = 4;
-const R_MUSIC: u32 = 5;
-const R_STYLE: u32 = 6;
-const R_PROGRESS: u32 = 7;
-const R_OTHERS: u32 = 8;
-const R_HIDE_IDLE: u32 = 9;
 
 pub struct Dock {
     hwnd: HWND,
     settings: Settings,
-    music: music::Music,
     hover: form::Hit,
     pressed: form::Hit,
     /// Sürüklenen kaydırıcının satırı (bırakınca kaydedilir).
@@ -304,7 +280,6 @@ impl Dock {
         Self {
             hwnd,
             settings,
-            music: music::Music::start(hwnd, settings.opacity),
             hover: form::Hit::None,
             pressed: form::Hit::None,
             dragging: None,
@@ -322,17 +297,10 @@ impl Dock {
         }
     }
 
-    /// Müzik kapalıyken altındaki ayarlar sönük durur ve tıklanmaz.
-    fn enabled(&self, id: u32) -> bool {
-        !matches!(id, R_STYLE | R_PROGRESS | R_OTHERS | R_HIDE_IDLE) || self.music.settings.show
-    }
-
     fn items(&self) -> Vec<Item> {
         let s = &self.settings;
-        let m = &self.music.settings;
         let (lo, hi, _) = SIZES;
-        let row = |id: u32, title: &str, sub: &str, ctl: Ctl| Item::Row(Row::new(id, title, sub, ctl).dim(!self.enabled(id)));
-        let style = music::Style::ALL.iter().position(|&x| x == m.style).unwrap_or(0);
+        let row = |id: u32, title: &str, sub: &str, ctl: Ctl| Item::Row(Row::new(id, title, sub, ctl));
         vec![
             Item::Section("Dock".into()),
             row(
@@ -344,7 +312,7 @@ impl Dock {
             row(
                 R_OPACITY,
                 t!("Opacity", "Saydamlık"),
-                t!("Of the dock and the music strip; icons and text stay sharp", "Dock'un ve müzik şeridinin; simgeler ve yazılar hep net"),
+                t!("Icons and text stay sharp", "Simgeler ve yazılar hep net"),
                 Ctl::Slider((s.opacity as f32 - 30.0) / 70.0, format!("%{}", s.opacity)),
             ),
             row(
@@ -375,43 +343,6 @@ impl Dock {
                 ),
                 Ctl::Toggle(s.corner_br),
             ),
-            Item::Section(t!("Music strip", "Müzik şeridi").into()),
-            row(
-                R_MUSIC,
-                t!("Now playing", "Çalan şarkı"),
-                t!("Spotify left of the dock; click it to bring Spotify forward", "Dock'un solunda Spotify; tıklayınca Spotify öne gelir"),
-                Ctl::Toggle(m.show),
-            ),
-            row(
-                R_STYLE,
-                t!("Background", "Arka plan"),
-                t!("The cover blurred, its color, or plain like the dock", "Kapağın bulanık hali, rengi ya da dock gibi düz"),
-                Ctl::Seg(
-                    vec![t!("Cover", "Kapak").into(), t!("Color", "Renk").into(), t!("Like the dock", "Dock gibi").into()],
-                    style,
-                ),
-            ),
-            row(
-                R_PROGRESS,
-                t!("Progress line", "İlerleme çizgisi"),
-                t!("A thin line under the song; click it to seek", "Şarkının altında ince bir çizgi; tıklayıp atlayabilirsin"),
-                Ctl::Toggle(m.progress),
-            ),
-            row(
-                R_OTHERS,
-                t!("Other players too", "Diğer oynatıcılar da"),
-                t!(
-                    "When Spotify isn't open, show what the browser or another app is playing",
-                    "Spotify açık değilken tarayıcının ya da başka bir uygulamanın çaldığını göster"
-                ),
-                Ctl::Toggle(m.others),
-            ),
-            row(
-                R_HIDE_IDLE,
-                t!("Hide when nothing plays", "Bir şey çalmıyorken gizle"),
-                t!("Otherwise it waits with a shortcut that opens Spotify", "Kapalıysa Spotify'ı açan bir kısayolla bekler"),
-                Ctl::Toggle(m.hide_idle),
-            ),
         ]
     }
 
@@ -423,13 +354,12 @@ impl Dock {
         (self.form().bottom() - 24.0 + self.scroll + 12.0 - self.h).max(0.0)
     }
 
-    /// Başlık bandının altında, sönük satırlar hariç.
+    /// Başlık bandının altında.
     fn hit(&self, g: &Gfx, x: f32, y: f32) -> form::Hit {
         if y < HEADER {
             return form::Hit::None;
         }
-        let hit = self.form().hit(g, x, y);
-        if hit.id().is_some_and(|id| self.enabled(id)) { hit } else { form::Hit::None }
+        self.form().hit(g, x, y)
     }
 
     fn set_slider(&mut self, id: u32, x: f32) {
@@ -445,10 +375,9 @@ impl Dock {
         } else {
             let v = (30.0 + t * 70.0).round() as u32;
             if v != self.settings.opacity {
-                // Sürüklerken dock da şerit de canlı değişsin (dosyaya bırakınca yazılır).
+                // Sürüklerken dock canlı değişsin (dosyaya bırakınca yazılır).
                 self.settings.opacity = v;
                 bar::apply(self.settings);
-                self.music.set_opacity(v);
                 self.redraw();
             }
         }
@@ -463,45 +392,19 @@ impl Dock {
     }
 
     fn click(&mut self, hit: form::Hit) {
-        let (s, m) = (&mut self.settings, &mut self.music.settings);
+        let s = &mut self.settings;
         match hit {
             form::Hit::Toggle(R_CORNER_TL) => s.corner_tl = !s.corner_tl,
             form::Hit::Toggle(R_CORNER_BR) => s.corner_br = !s.corner_br,
             form::Hit::Toggle(R_LOCK) => s.locked = !s.locked,
-            form::Hit::Toggle(id @ (R_MUSIC | R_PROGRESS | R_OTHERS | R_HIDE_IDLE)) => {
-                let v = match id {
-                    R_MUSIC => &mut m.show,
-                    R_PROGRESS => &mut m.progress,
-                    R_OTHERS => &mut m.others,
-                    _ => &mut m.hide_idle,
-                };
-                *v = !*v;
-                self.music.commit();
-                self.redraw();
-                return;
-            }
-            form::Hit::Seg(R_STYLE, k) => {
-                m.style = music::Style::ALL[k];
-                self.music.commit();
-                self.redraw();
-                return;
-            }
             _ => return,
         }
         self.commit();
     }
 
     pub fn paint(&self, g: &Gfx) {
-        let m = &self.music.settings;
-        let n = &self.music.now;
-        let head = if m.show && n.active {
-            let who = if n.artist.is_empty() { n.title.clone() } else { format!("{} · {}", n.title, n.artist) };
-            format!("{} · {who}", t!("Dock on", "Dock açık"))
-        } else {
-            t!("Dock on · always visible, maximized windows end above it", "Dock açık · hep görünür, büyütülen pencereler onun üstünde biter")
-                .to_string()
-        };
-        status(g, self.head_x + 16.0, HEAD_CY, pal().green, &head, pal().muted, self.head_r - 8.0);
+        let head = t!("Dock on · always visible, maximized windows end above it", "Dock açık · hep görünür, büyütülen pencereler onun üstünde biter");
+        status(g, self.head_x + 16.0, HEAD_CY, pal().green, head, pal().muted, self.head_r - 8.0);
         let form = self.form();
         g.clip(Rect::new(0.0, HEADER, self.w, self.h), || form.paint(g, self.hover, self.dragging));
     }
@@ -509,10 +412,6 @@ impl Dock {
 
 impl ToolPage for Dock {
     fn summary(&self) -> Option<(String, String)> {
-        let n = &self.music.now;
-        if self.music.settings.show && n.active {
-            return Some((n.title.clone(), n.artist.clone()));
-        }
         Some((t!("On", "Açık").into(), t!("In place of the taskbar", "Görev çubuğunun yerinde").into()))
     }
 
@@ -526,21 +425,6 @@ impl ToolPage for Dock {
 
     fn paint(&self, g: &Gfx) {
         Dock::paint(self, g)
-    }
-
-    fn message(
-        &mut self,
-        _g: &mut Gfx,
-        msg: u32,
-        _wp: windows::Win32::Foundation::WPARAM,
-        _lp: windows::Win32::Foundation::LPARAM,
-    ) -> Option<windows::Win32::Foundation::LRESULT> {
-        if msg != music::WM_MEDIA {
-            return None;
-        }
-        self.music.media_changed();
-        self.redraw();
-        Some(windows::Win32::Foundation::LRESULT(0))
     }
 
     fn mouse_move(&mut self, g: &Gfx, x: f32, y: f32) {
