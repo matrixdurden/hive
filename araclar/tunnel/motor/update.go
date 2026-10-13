@@ -20,7 +20,7 @@ import (
 // rabbithole update replaces the installed binary with the latest release and
 // restarts what was running. Keys, users and the link stay as they are.
 
-const releases = "https://github.com/matrixdurden/rabbithole/releases"
+const releases = "https://github.com/matrixdurden/winloom/releases"
 
 var tagRe = regexp.MustCompile(`^v\d+\.\d+\.\d+$`)
 
@@ -34,7 +34,7 @@ func cmdUpdate() error {
 		if legacyServerInstalled() || legacyClientInstalled() {
 			return cmdAdopt() // this binary is already the latest
 		}
-		return fmt.Errorf("rabbithole is not set up on this computer; see %s", "https://github.com/matrixdurden/rabbithole")
+		return fmt.Errorf("rabbithole is not set up on this computer; see %s", "https://github.com/matrixdurden/winloom")
 	}
 	latest, err := latestTag()
 	if err != nil {

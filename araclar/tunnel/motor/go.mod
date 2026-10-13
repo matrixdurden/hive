@@ -1,4 +1,4 @@
-module github.com/matrixdurden/rabbithole
+module github.com/matrixdurden/winloom/araclar/tunnel/motor
 
 go 1.27.1
 

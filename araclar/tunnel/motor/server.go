@@ -463,7 +463,7 @@ func userNames(s *ServerState) string {
 	return strings.Join(names, ", ")
 }
 
-const scripts = "https://raw.githubusercontent.com/matrixdurden/rabbithole/main"
+const scripts = "https://raw.githubusercontent.com/matrixdurden/winloom/main/araclar/tunnel/motor"
 
 func printLink(l Link) {
 	fmt.Printf("\n  %sLink for %s:%s\n\n  %s\n\n", cBold, l.Name, cReset, l)

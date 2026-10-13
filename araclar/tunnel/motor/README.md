@@ -3,7 +3,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/matrixdurden/rabbithole/releases/latest"><img src="https://img.shields.io/github/v/release/matrixdurden/rabbithole?style=flat-square&label=release&color=a78bfa&labelColor=16131f" alt="Latest release"></a>
+  <a href="https://github.com/matrixdurden/winloom/releases/latest"><img src="https://img.shields.io/github/v/release/matrixdurden/winloom?style=flat-square&label=release&color=a78bfa&labelColor=16131f" alt="Latest release"></a>
   <img src="https://img.shields.io/badge/runs%20on-Windows%20%C2%B7%20Linux%20%C2%B7%20phones-a78bfa?style=flat-square&labelColor=16131f" alt="Runs on Windows, Linux and phones">
   <a href="https://github.com/SagerNet/sing-box"><img src="https://img.shields.io/badge/engine-sing--box-a78bfa?style=flat-square&labelColor=16131f" alt="Engine: sing-box"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-GPL--3.0-a78bfa?style=flat-square&labelColor=16131f" alt="License: GPL-3.0"></a>
@@ -19,6 +19,8 @@
 </p>
 
 <br>
+
+rabbithole is the engine behind [winloom](https://github.com/matrixdurden/winloom)'s VPN page, and works on its own too: on a Linux server, on a computer without winloom, and on phones.
 
 ## Two modes
 
@@ -37,7 +39,7 @@
 Only for `rabbithole on`. On a Linux machine with systemd that the internet reaches on TCP port 443:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/matrixdurden/rabbithole/main/install.sh | sh -s -- server
+curl -fsSL https://raw.githubusercontent.com/matrixdurden/winloom/main/araclar/tunnel/motor/install.sh | sh -s -- server
 ```
 
 It asks for your sudo password, sets everything up, tests itself and prints a link.
@@ -47,14 +49,14 @@ It asks for your sudo password, sets everything up, tests itself and prints a li
 **Windows**: open PowerShell, run this, and paste the link when asked, or press Enter for `rabbithole dpi` only:
 
 ```powershell
-irm https://raw.githubusercontent.com/matrixdurden/rabbithole/main/install.ps1 | iex
+irm https://raw.githubusercontent.com/matrixdurden/winloom/main/araclar/tunnel/motor/install.ps1 | iex
 ```
 
 **Linux**:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/matrixdurden/rabbithole/main/install.sh | sh -s -- client 'vless://…'
-curl -fsSL https://raw.githubusercontent.com/matrixdurden/rabbithole/main/install.sh | sh -s -- dpi
+curl -fsSL https://raw.githubusercontent.com/matrixdurden/winloom/main/araclar/tunnel/motor/install.sh | sh -s -- client 'vless://…'
+curl -fsSL https://raw.githubusercontent.com/matrixdurden/winloom/main/araclar/tunnel/motor/install.sh | sh -s -- dpi
 ```
 
 A link is checked before anything is changed. Windows asks for administrator permission once; you can add a link later with `rabbithole client`.
@@ -65,7 +67,7 @@ Phones run both modes in the official [sing-box](https://sing-box.sagernet.org/c
 
 | Mode | How |
 | --- | --- |
-| **dpi** | In sing-box, add a remote profile with `https://github.com/matrixdurden/rabbithole/releases/latest/download/rabbithole-dpi.json`, or run `rabbithole phone` on a computer and scan the QR code it shows with the phone's camera. The app keeps the profile up to date. |
+| **dpi** | In sing-box, add a remote profile with `https://github.com/matrixdurden/winloom/releases/latest/download/rabbithole-dpi.json`, or run `rabbithole phone` on a computer and scan the QR code it shows with the phone's camera. The app keeps the profile up to date. |
 | **on** | `rabbithole phone` on a computer that has a link, or `rabbithole phone 'vless://…'` anywhere, puts a `.bpf` file on the desktop. Send it to the phone and open it with sing-box. |
 
 > [!CAUTION]
@@ -139,7 +141,7 @@ With Go:
 go test -tags with_utls,with_gvisor,badlinkname,tfogo_checklinkname0 -ldflags=-checklinkname=0 .
 ```
 
-Pushing a `v*` tag builds and publishes a release, which the install scripts download.
+rabbithole ships with winloom: `make release` in winloom's root builds it and attaches it to the winloom release, which the install scripts, `rabbithole update` and the phone profile download from.
 
 <br>
 

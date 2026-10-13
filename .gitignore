@@ -1,5 +1,3 @@
 /target
 *.exe
 *.dll
-# Ayrı depo; yalnızca aynı klasörde duruyor.
-/rabbithole/

@@ -1,29 +1,29 @@
 #!/bin/sh
 # Downloads rabbithole for this Linux machine, checks it, and runs it:
 #
-#   curl -fsSL https://raw.githubusercontent.com/matrixdurden/rabbithole/main/install.sh | sh -s -- server
-#   curl -fsSL https://raw.githubusercontent.com/matrixdurden/rabbithole/main/install.sh | sh -s -- client 'vless://…'
-#   curl -fsSL https://raw.githubusercontent.com/matrixdurden/rabbithole/main/install.sh | sh -s -- dpi
-#   curl -fsSL https://raw.githubusercontent.com/matrixdurden/rabbithole/main/install.sh | sh -s -- update
+#   curl -fsSL https://raw.githubusercontent.com/matrixdurden/winloom/main/araclar/tunnel/motor/install.sh | sh -s -- server
+#   curl -fsSL https://raw.githubusercontent.com/matrixdurden/winloom/main/araclar/tunnel/motor/install.sh | sh -s -- client 'vless://…'
+#   curl -fsSL https://raw.githubusercontent.com/matrixdurden/winloom/main/araclar/tunnel/motor/install.sh | sh -s -- dpi
+#   curl -fsSL https://raw.githubusercontent.com/matrixdurden/winloom/main/araclar/tunnel/motor/install.sh | sh -s -- update
 #
 # rabbithole installs itself to /usr/local/bin; `rabbithole remove` takes everything away again.
 set -eu
 
-base=https://github.com/matrixdurden/rabbithole/releases/latest/download
+base=https://github.com/matrixdurden/winloom/releases/latest/download
 
 say() { printf '%s\n' "$*" >&2; }
 die() { say "rabbithole: $*"; exit 1; }
 
 if [ $# -eq 0 ]; then
   say "usage:"
-  say "  curl -fsSL https://raw.githubusercontent.com/matrixdurden/rabbithole/main/install.sh | sh -s -- server"
-  say "  curl -fsSL https://raw.githubusercontent.com/matrixdurden/rabbithole/main/install.sh | sh -s -- client 'vless://…'"
-  say "  curl -fsSL https://raw.githubusercontent.com/matrixdurden/rabbithole/main/install.sh | sh -s -- dpi"
-  say "  curl -fsSL https://raw.githubusercontent.com/matrixdurden/rabbithole/main/install.sh | sh -s -- update"
+  say "  curl -fsSL https://raw.githubusercontent.com/matrixdurden/winloom/main/araclar/tunnel/motor/install.sh | sh -s -- server"
+  say "  curl -fsSL https://raw.githubusercontent.com/matrixdurden/winloom/main/araclar/tunnel/motor/install.sh | sh -s -- client 'vless://…'"
+  say "  curl -fsSL https://raw.githubusercontent.com/matrixdurden/winloom/main/araclar/tunnel/motor/install.sh | sh -s -- dpi"
+  say "  curl -fsSL https://raw.githubusercontent.com/matrixdurden/winloom/main/araclar/tunnel/motor/install.sh | sh -s -- update"
   exit 2
 fi
 
-[ "$(uname -s)" = Linux ] || die "this script is for Linux; on Windows run: irm https://raw.githubusercontent.com/matrixdurden/rabbithole/main/install.ps1 | iex"
+[ "$(uname -s)" = Linux ] || die "this script is for Linux; on Windows run: irm https://raw.githubusercontent.com/matrixdurden/winloom/main/araclar/tunnel/motor/install.ps1 | iex"
 case "$(uname -m)" in
   x86_64 | amd64) arch=amd64 ;;
   aarch64 | arm64) arch=arm64 ;;

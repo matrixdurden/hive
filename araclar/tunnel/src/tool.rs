@@ -1,5 +1,5 @@
-//! VPN'in (tunnel) winloom'a tanımı. Motoru rabbithole ayrı depoda: açınca GitHub'daki son sürümü
-//! indirilir, SHA-256'sı doğrulanır, kendi kurulumu çalışır.
+//! VPN'in (tunnel) winloom'a tanımı. Motoru rabbithole (`motor/`, Go) her winloom yayınının yanında
+//! yayımlanır: açınca son yayındaki indirilir, SHA-256'sı doğrulanır, kendi kurulumu çalışır.
 
 use std::os::windows::process::CommandExt;
 use std::process::{Command, Stdio};
@@ -37,7 +37,7 @@ pub static TOOL: Tool = Tool {
 /// açılır (rabbithole'un kendi kurulumu da bağlantı verilmezse böyle yapar).
 fn install() -> Result<(), String> {
     let asset = "rabbithole-windows-amd64.exe";
-    let base = "https://github.com/matrixdurden/rabbithole/releases/latest/download/";
+    let base = "https://github.com/matrixdurden/winloom/releases/latest/download/";
     let sums = net::download(&format!("{base}checksums.txt")).map_err(|e| e.to_string())?;
     let expected = String::from_utf8_lossy(&sums)
         .lines()

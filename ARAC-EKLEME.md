@@ -22,8 +22,9 @@ winloom/
 - **Hafif:** winloom'ın içinde çalışır. Pil, Ses aygıtları, Dock, Tıklayıcı ve engram bu
   türden. Sayfa ve iş aynı crate'te durur.
 - **Ağır:** işin bir kısmı kendi sürecinde çalışır, winloom onu açar ve kapatır. Duvar kâğıdı
-  (`motor/`, winloom.exe'nin içinde taşınır, açılınca diske yazılır) ve VPN (rabbithole, açılınca
-  GitHub'dan indirilir) bu türden. Ekran kartı, sistem hizmeti gibi riskli işler buraya girer:
+  (`motor/`, winloom.exe'nin içinde taşınır, açılınca diske yazılır) ve VPN (`motor/`, Go ile yazılmış
+  rabbithole; 38 MB olduğu için gömülmez, her winloom yayınının yanında yayımlanır ve VPN açılınca
+  oradan indirilir) bu türden. Ekran kartı, sistem hizmeti gibi riskli işler buraya girer:
   çökerse winloom'ı ve öbür araçları düşürmez.
 
 **Arayüz her zaman winloom'ın penceresinde.** Araç kendi uygulama penceresini açmaz; ekranları

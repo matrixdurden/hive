@@ -1,4 +1,5 @@
-//! tunnel (VPN): ağ engellerini aşan tünel. Motoru bir Windows hizmeti (`rabbithole`); kullanıcılar
+//! tunnel (VPN): ağ engellerini aşan tünel. Motoru bir Windows hizmeti (`rabbithole`, kodu `motor/`,
+//! her winloom yayınıyla birlikte yayımlanır); kullanıcılar
 //! onu yönetici izni olmadan başlatıp durdurabilir. Sayfa durumu hizmet yöneticisinden ve
 //! `%ProgramData%\tunnel` dosyalarından okur; yönetici isteyen işler (sunucu bağlantısı,
 //! Windows ile başlat) ve ağ testi için `tunnel.exe` çalıştırılır.
@@ -48,6 +49,20 @@ pub fn exe() -> PathBuf {
 
 pub fn data_dir() -> PathBuf {
     std::env::var_os("ProgramData").map_or_else(|| PathBuf::from(r"C:\ProgramData"), PathBuf::from).join("rabbithole")
+}
+
+/// `v0.5.0` → (0, 5, 0); geliştirme derlemesi (`dev`, `v0.5.0-3-gabc`) sayılmaz.
+fn parse_version(v: &str) -> Option<(u32, u32, u32)> {
+    let mut it = v.trim().strip_prefix('v').unwrap_or(v.trim()).split('.').map(|p| p.parse().ok());
+    let r = (it.next()??, it.next()??, it.next()??);
+    it.next().is_none().then_some(r)
+}
+
+/// Kurulu motorun sürümü (`rabbithole version`).
+fn engine_version() -> Option<String> {
+    let out = command(&["version"]).output().ok()?;
+    let v = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    (out.status.success() && !v.is_empty()).then_some(v)
 }
 
 /// Hizmet kurulu mu (winloom'da "kurulu" sayılmak için).
@@ -273,6 +288,7 @@ const R_SERVER: u32 = 1;
 const R_LINK: u32 = 2;
 const R_AUTOSTART: u32 = 3;
 const R_TEST: u32 = 4;
+const R_ENGINE: u32 = 5;
 /// Ağ testinin durum satırı (Kapat) ve raporu (kendi çizdiğimiz alan).
 const D_STATUS: u32 = 10;
 const D_REPORT: u32 = 11;
@@ -290,6 +306,8 @@ pub struct Tunnel {
     st: Status,
     /// Sunucuya TCP bağlantı süresi (ms), sunucu modunda açıkken.
     latency: Arc<Mutex<Option<u32>>>,
+    /// Kurulu motorun sürümü; winloom'dan eskiyse sayfa güncellemeyi önerir.
+    engine: Arc<Mutex<Option<String>>>,
     /// Süren iş ve sonucu.
     busy: Option<&'static str>,
     result: Arc<Mutex<Option<Result<String, String>>>>,
@@ -313,6 +331,7 @@ impl Tunnel {
             hwnd,
             st: read_status(),
             latency: Arc::default(),
+            engine: Arc::default(),
             busy: None,
             result: Arc::default(),
             message: None,
@@ -362,6 +381,7 @@ impl Tunnel {
 
     pub fn done(&mut self) {
         self.busy = None;
+        self.check_engine();
         if let Some(r) = self.result.lock().unwrap().take() {
             self.message = match r {
                 Ok(m) if m.is_empty() => None,
@@ -411,6 +431,30 @@ impl Tunnel {
 
     fn link_ok(&self) -> bool {
         self.link.text.trim().starts_with("vless://")
+    }
+
+    /// Motorun sürümünü arka planda okur.
+    fn check_engine(&self) {
+        let (engine, hwnd) = (self.engine.clone(), self.hwnd.0 as usize);
+        std::thread::spawn(move || {
+            *engine.lock().unwrap() = engine_version();
+            unsafe {
+                let _ = InvalidateRect(Some(HWND(hwnd as *mut _)), None, false);
+            }
+        });
+    }
+
+    /// Motor bu winloom'dan eskiyse kurulu sürümü.
+    fn engine_outdated(&self) -> Option<String> {
+        let v = self.engine.lock().unwrap().clone()?;
+        (parse_version(&v)? < parse_version(env!("CARGO_PKG_VERSION"))?).then_some(v)
+    }
+
+    /// Motoru son yayına getirir: `rabbithole update` indirir, doğrular, yönetici izniyle kurar
+    /// ve çalışan modu yeniden açar.
+    fn update_engine(&mut self) {
+        let updated = t!("VPN engine updated", "VPN motoru güncellendi");
+        self.spawn(t!("Updating the engine…", "Motor güncelleniyor…"), move || run(&["update"]).map(|_| updated.into()));
     }
 
     fn toggle_autostart(&mut self) {
@@ -549,6 +593,14 @@ impl Tunnel {
                     Ctl::Button(t!("Test", "Test et").into()),
                 )),
             ];
+            if let Some(v) = self.engine_outdated() {
+                items.push(Item::Row(Row::new(
+                    R_ENGINE,
+                    t!("Engine update", "Motor güncellemesi"),
+                    format!("{v} → v{} · {}", env!("CARGO_PKG_VERSION"), t!("needs administrator", "yönetici izni ister")),
+                    Ctl::Button(t!("Update", "Güncelle").into()),
+                )));
+            }
             if let Some((m, err)) = self.note() {
                 items.push(Item::Note(m, err));
             }
@@ -672,6 +724,7 @@ impl Tunnel {
         if visible && !self.visible {
             self.refresh();
             self.ping();
+            self.check_engine();
         }
         self.visible = visible;
         unsafe {
@@ -768,6 +821,7 @@ impl ToolPage for Tunnel {
             Hit::Form(form::Hit::Toggle(R_AUTOSTART)) => self.toggle_autostart(),
             Hit::Save => self.add_link(),
             Hit::Form(form::Hit::Button(R_TEST)) => self.run_doctor(),
+            Hit::Form(form::Hit::Button(R_ENGINE)) => self.update_engine(),
             Hit::Form(form::Hit::Button(D_STATUS)) => self.close_doctor(),
             _ => {}
         }
