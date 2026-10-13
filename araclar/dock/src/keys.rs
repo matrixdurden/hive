@@ -133,7 +133,9 @@ unsafe extern "system" fn mouse(code: i32, wp: WPARAM, lp: LPARAM) -> LRESULT {
 /// ekran yoksa köşenin kısayoluna basılır. Tuşlar kancanın dışında (kendi iş parçacığında)
 /// gönderilir: kanca dönmeden klavye kancası çalışamaz.
 fn fire(br: bool) {
-    if !(if br { CORNER_BR.load(Ordering::Relaxed) } else { CORNER_TL.load(Ordering::Relaxed) }) || FULLSCREEN.load(Ordering::Relaxed) {
+    if !(if br { CORNER_BR.load(Ordering::Relaxed) } else { CORNER_TL.load(Ordering::Relaxed) }) || FULLSCREEN.load(Ordering::Relaxed)
+        || ortak::hub::SCREEN_BUSY.load(Ordering::Relaxed)
+    {
         return;
     }
     let held = |v: VIRTUAL_KEY| unsafe { GetAsyncKeyState(v.0 as i32) } as u16 & 0x8000 != 0;

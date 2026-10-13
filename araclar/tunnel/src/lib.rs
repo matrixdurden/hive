@@ -650,13 +650,6 @@ impl Tunnel {
     }
 
     pub fn paint(&self, g: &Gfx) {
-        // Başlık: yalnızca durum.
-        let dot = match (self.busy, self.st.state) {
-            (None, Some(State::On)) => pal().green,
-            (Some(_), _) | (_, Some(State::Starting | State::Stopping)) => pal().muted,
-            _ => pal().faint,
-        };
-        status(g, self.head_x + 16.0, HEAD_CY, dot, &self.state_text().0, pal().muted, self.head_r - 8.0);
 
         let f = self.form();
         let hover = if let Hit::Form(h) = self.hover { h } else { form::Hit::None };

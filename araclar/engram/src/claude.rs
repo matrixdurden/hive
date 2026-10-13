@@ -15,18 +15,25 @@ const URL: &str = "https://api.anthropic.com/v1/messages";
 pub struct Tool {
     pub name: &'static str,
     pub description: &'static str,
-    /// JSON şeması (`additionalProperties: false` ve `required` ile; `strict` eklenir).
+    /// JSON şeması (`additionalProperties: false` ve `required` ile).
     pub schema: Value,
 }
 
+/// API bir istekte en çok bu kadar `strict` aracı kabul ediyor (fazlası HTTP 400).
+const MAX_STRICT: usize = 20;
+
 impl Tool {
-    fn json(&self) -> Value {
-        json!({
+    /// `strict`: girdisi şemaya birebir uysun (ilk `MAX_STRICT` araçta).
+    fn json(&self, strict: bool) -> Value {
+        let mut v = json!({
             "name": self.name,
             "description": self.description,
             "input_schema": self.schema,
-            "strict": true,
-        })
+        });
+        if strict {
+            v["strict"] = json!(true);
+        }
+        v
     }
 }
 
@@ -113,7 +120,7 @@ pub fn stream(req: &Request, on_event: &mut dyn FnMut(Event) -> bool) -> Res<Rep
         "fallbacks": "default",
     });
     if !req.tools.is_empty() || !req.raw_tools.is_empty() {
-        let mut tools: Vec<Value> = req.tools.iter().map(Tool::json).collect();
+        let mut tools: Vec<Value> = req.tools.iter().enumerate().map(|(i, t)| t.json(i < MAX_STRICT)).collect();
         tools.extend(req.raw_tools.iter().cloned());
         body["tools"] = Value::Array(tools);
         body["tool_choice"] = json!({"type": "auto"});

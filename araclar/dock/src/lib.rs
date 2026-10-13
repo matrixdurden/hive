@@ -403,8 +403,6 @@ impl Dock {
     }
 
     pub fn paint(&self, g: &Gfx) {
-        let head = t!("Dock on · always visible, maximized windows end above it", "Dock açık · hep görünür, büyütülen pencereler onun üstünde biter");
-        status(g, self.head_x + 16.0, HEAD_CY, pal().green, head, pal().muted, self.head_r - 8.0);
         let form = self.form();
         g.clip(Rect::new(0.0, HEADER, self.w, self.h), || form.paint(g, self.hover, self.dragging));
     }

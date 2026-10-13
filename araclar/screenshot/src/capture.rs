@@ -1,7 +1,9 @@
 //! Yakalama: bütün ekranlar bir kez kopyalanır (donmuş görüntü), üstünde tam ekran bir pencere
-//! kararmış hâlini gösterir; seçilen alan aydınlık, köşesinde boyutu. Fare kıpırdadıkça yalnızca
-//! değişen bölge yeniden çizilir (4K'da da akıcı). Bırakınca seçilen alan panoya (istenirse
-//! PNG olarak klasöre) gider, pencere kapanır. Hepsi arayüz iş parçacığında, GDI ile.
+//! kararmış hâlini gösterir; seçilen alan aydınlık, köşesinde boyutu. Seçim bırakılınca yerinde
+//! kalır: içinde tek renk kalemle çizilir, Ctrl+C (ya da Enter) panoya kopyalar, Ctrl+S klasöre
+//! PNG olarak kaydeder (panoya da), Ctrl+Z son çizgiyi geri alır, Esc vazgeçer; seçimin dışında
+//! sürüklemek yeni seçim başlatır. Fare kıpırdadıkça yalnızca değişen bölge yeniden çizilir (4K'da
+//! da akıcı). Açıkken öbür araçlar ekran köşelerine tepki vermez. Hepsi arayüz iş parçacığında, GDI.
 
 use std::cell::RefCell;
 use std::path::PathBuf;
@@ -24,6 +26,9 @@ use ortak::util::wide;
 const CLASS: PCWSTR = w!("winloom-ekran-goruntusu");
 /// Karartma: donmuş görüntünün üstüne bu saydamlıkta siyah (0..255).
 const DIM: u8 = 110;
+/// Kalemin rengi (COLORREF 0x00BBGGRR: kırmızı) ve kalınlığı (DIP).
+const PEN: u32 = 0x003a45ff;
+const PEN_W: i32 = 3;
 
 /// Donmuş görüntü ve seçim (koordinatlar pencerenin, yani sanal ekranın köşesine göre piksel).
 struct Shot {
@@ -35,10 +40,19 @@ struct Shot {
     dim: (HDC, HBITMAP),
     buf: (HDC, HBITMAP),
     font: HFONT,
+    /// Kalem (ekran pikseli kalınlığında).
+    pen: HPEN,
+    pen_w: i32,
+    /// Sürüklenen seçimin başladığı yer.
     anchor: Option<POINT>,
     sel: Option<RECT>,
-    /// Bırakınca kaydedilecek klasör (yoksa yalnızca panoya).
-    dir: Option<PathBuf>,
+    /// Seçim bırakıldı: içinde çizilir, kısayollar çalışır.
+    placed: bool,
+    /// Çizgiler (pencere pikseli); sonuncusu çizilmekte olabilir.
+    strokes: Vec<Vec<POINT>>,
+    drawing: bool,
+    /// Ctrl+S'nin kaydettiği klasör.
+    dir: PathBuf,
 }
 
 thread_local! {
@@ -46,7 +60,7 @@ thread_local! {
 }
 
 /// Ekranı dondurur ve seçimi başlatır (zaten açıksa bir şey yapmaz).
-pub fn start(dir: Option<PathBuf>) {
+pub fn start(dir: PathBuf) {
     if SHOT.with_borrow(|s| s.is_some()) {
         return;
     }
@@ -103,9 +117,31 @@ pub fn start(dir: Option<PathBuf>) {
             }
             return;
         };
-        let px = (13 * GetDpiForWindow(hwnd).max(96) / 72) as i32;
+        let dpi = GetDpiForWindow(hwnd).max(96);
+        let pen_w = (PEN_W * dpi as i32 / 96).max(2);
+        let pen = CreatePen(PS_SOLID, pen_w, COLORREF(PEN));
+        let px = (13 * dpi / 72) as i32;
         let font = CreateFontW(-px, 0, 0, 0, FW_SEMIBOLD.0 as i32, 0, 0, 0, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, 0, w!("Segoe UI"));
-        SHOT.with_borrow_mut(|s| *s = Some(Shot { hwnd, w, h, src, dim, buf, font, anchor: None, sel: None, dir }));
+        SHOT.with_borrow_mut(|s| {
+            *s = Some(Shot {
+                hwnd,
+                w,
+                h,
+                src,
+                dim,
+                buf,
+                font,
+                pen,
+                pen_w,
+                anchor: None,
+                sel: None,
+                placed: false,
+                strokes: Vec::new(),
+                drawing: false,
+                dir,
+            })
+        });
+        ortak::hub::SCREEN_BUSY.store(true, std::sync::atomic::Ordering::Relaxed);
         let _ = ShowWindow(hwnd, SW_SHOW);
         let _ = SetForegroundWindow(hwnd);
         let _ = SetFocus(Some(hwnd));
@@ -120,9 +156,9 @@ fn union(a: RECT, b: RECT) -> RECT {
     RECT { left: a.left.min(b.left), top: a.top.min(b.top), right: a.right.max(b.right), bottom: a.bottom.max(b.bottom) }
 }
 
-/// Seçimin ve boyut etiketinin kapladığı yer (yeniden çizim için biraz geniş).
+/// Seçimin, boyut etiketinin ve altındaki ipucunun kapladığı yer (yeniden çizim için geniş).
 fn footprint(r: RECT) -> RECT {
-    RECT { left: r.left - 4, top: r.top - 48, right: r.right + 240, bottom: r.bottom + 48 }
+    RECT { left: r.left - 4, top: r.top - 48, right: r.right.max(r.left + 560) + 8, bottom: r.bottom + 56 }
 }
 
 impl Shot {
@@ -138,6 +174,7 @@ impl Shot {
             let _ = BitBlt(dc, l, t, r - l, b - t, Some(self.dim.0), l, t, SRCCOPY);
             let Some(s) = self.sel else { return };
             let _ = BitBlt(dc, s.left, s.top, s.right - s.left, s.bottom - s.top, Some(self.src.0), s.left, s.top, SRCCOPY);
+            self.draw_strokes(dc, 0, 0);
             let white = CreateSolidBrush(COLORREF(0x00ededed));
             let _ = FrameRect(dc, &s, white);
             // Boyut: seçimin sol üstünün hemen üstünde (yer yoksa içinde).
@@ -154,9 +191,68 @@ impl Shot {
             SetBkMode(dc, TRANSPARENT);
             SetTextColor(dc, COLORREF(0x00ededed));
             DrawTextW(dc, &mut text, &mut label, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+            // Seçim yerleşince altında ne yapılabileceği (yer yoksa içinde).
+            if self.placed {
+                let mut hint = wide(t!(
+                    "Draw inside · Ctrl+C copy · Ctrl+S save · Ctrl+Z undo · Esc",
+                    "İçinde çiz · Ctrl+C kopyala · Ctrl+S kaydet · Ctrl+Z geri al · Esc"
+                ));
+                hint.pop();
+                let mut m = RECT::default();
+                DrawTextW(dc, &mut hint, &mut m, DT_CALCRECT | DT_SINGLELINE);
+                let (hw, hh) = (m.right - m.left + 16, m.bottom - m.top + 8);
+                let top = if s.bottom + hh + 6 <= self.h { s.bottom + 6 } else { s.bottom - hh - 6 };
+                let mut r = RECT { left: s.left, top, right: s.left + hw, bottom: top + hh };
+                FillRect(dc, &r, back);
+                DrawTextW(dc, &mut hint, &mut r, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+            }
             SelectObject(dc, old);
             let _ = DeleteObject(white.into());
             let _ = DeleteObject(back.into());
+        }
+    }
+
+    /// Çizgileri `dc`'ye çizer; `(dx, dy)`: pencere pikselinden hedefe kaydırma.
+    fn draw_strokes(&self, dc: HDC, dx: i32, dy: i32) {
+        unsafe {
+            let old = SelectObject(dc, self.pen.into());
+            for st in &self.strokes {
+                let Some(first) = st.first() else { continue };
+                let _ = MoveToEx(dc, first.x - dx, first.y - dy, None);
+                if st.len() == 1 {
+                    let _ = LineTo(dc, first.x - dx + 1, first.y - dy);
+                }
+                for p in &st[1..] {
+                    let _ = LineTo(dc, p.x - dx, p.y - dy);
+                }
+            }
+            SelectObject(dc, old);
+        }
+    }
+
+    /// Çizginin son parçasını tampona ekler ve yalnızca o bölgeyi yeniden çizdirir.
+    fn add_point(&mut self, p: POINT) {
+        let Some(st) = self.strokes.last_mut() else { return };
+        let prev = *st.last().unwrap_or(&p);
+        st.push(p);
+        let m = self.pen_w + 2;
+        let area = RECT { left: prev.x.min(p.x) - m, top: prev.y.min(p.y) - m, right: prev.x.max(p.x) + m, bottom: prev.y.max(p.y) + m };
+        self.compose(area);
+        unsafe {
+            let _ = InvalidateRect(Some(self.hwnd), Some(&area), false);
+        }
+    }
+
+    /// Son çizgiyi geri alır.
+    fn undo(&mut self) {
+        if self.strokes.pop().is_some()
+            && let Some(s) = self.sel
+        {
+            let area = footprint(s);
+            self.compose(area);
+            unsafe {
+                let _ = InvalidateRect(Some(self.hwnd), Some(&area), false);
+            }
         }
     }
 
@@ -184,6 +280,7 @@ impl Shot {
             let bmp = CreateCompatibleBitmap(self.src.0, w, h);
             SelectObject(dc, bmp.into());
             let _ = BitBlt(dc, 0, 0, w, h, Some(self.src.0), r.left, r.top, SRCCOPY);
+            self.draw_strokes(dc, r.left, r.top);
             let mut bi = BITMAPINFO {
                 bmiHeader: BITMAPINFOHEADER {
                     biSize: size_of::<BITMAPINFOHEADER>() as u32,
@@ -206,16 +303,16 @@ impl Shot {
         (w, h, out)
     }
 
-    /// Seçileni panoya (ve istenirse klasöre) verir.
-    fn deliver(&self, r: RECT) {
+    /// Seçileni panoya verir; `save`: klasöre de kaydeder.
+    fn deliver(&self, r: RECT, save: bool) {
         let (w, h, px) = self.pixels(r);
         if let Err(e) = to_clipboard(self.hwnd, w, h, &px) {
             ortak::log!("ekran görüntüsü panoya konamadı: {e}");
             return;
         }
         let mut text = t!("Copied", "Kopyalandı").to_string();
-        if let Some(dir) = &self.dir {
-            match save_png(dir, w, h, &px) {
+        if save {
+            match save_png(&self.dir, w, h, &px) {
                 Ok(name) => text = t!(format!("Copied · saved as {name}"), format!("Kopyalandı · {name} olarak kaydedildi")),
                 Err(e) => ortak::log!("ekran görüntüsü kaydedilemedi: {e}"),
             }
@@ -297,14 +394,16 @@ fn save_png(dir: &std::path::Path, w: i32, h: i32, px: &[u8]) -> windows::core::
     Ok(name)
 }
 
-/// Pencereyi kapatır ve donmuş görüntüyü bırakır; `deliver` verilirse önce o alan gönderilir.
-fn finish(deliver: Option<RECT>) {
+/// Pencereyi kapatır ve donmuş görüntüyü bırakır; `deliver` verilirse önce o alan gönderilir
+/// (`save`: klasöre de).
+fn finish(deliver: Option<RECT>, save: bool) {
     let Some(shot) = SHOT.with_borrow_mut(Option::take) else { return };
+    ortak::hub::SCREEN_BUSY.store(false, std::sync::atomic::Ordering::Relaxed);
     unsafe {
         let _ = ShowWindow(shot.hwnd, SW_HIDE);
     }
     if let Some(r) = deliver.filter(|r| r.right > r.left && r.bottom > r.top) {
-        shot.deliver(r);
+        shot.deliver(r, save);
     }
     unsafe {
         let _ = DestroyWindow(shot.hwnd);
@@ -313,6 +412,7 @@ fn finish(deliver: Option<RECT>) {
             let _ = DeleteObject(bmp.into());
         }
         let _ = DeleteObject(shot.font.into());
+        let _ = DeleteObject(shot.pen.into());
     }
 }
 
@@ -341,19 +441,37 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
         WM_ERASEBKGND => LRESULT(1),
         WM_LBUTTONDOWN => {
             unsafe { SetCapture(hwnd) };
+            let p = point(lp);
             SHOT.with_borrow_mut(|s| {
-                if let Some(s) = s {
-                    s.anchor = Some(point(lp));
+                let Some(s) = s else { return };
+                match s.sel {
+                    // Yerleşmiş seçimin içinde: çizgi başlar.
+                    Some(r) if s.placed && p.x >= r.left && p.x < r.right && p.y >= r.top && p.y < r.bottom => {
+                        s.strokes.push(vec![p]);
+                        s.drawing = true;
+                        s.add_point(p);
+                    }
+                    // Dışında: yeni seçim (çizgiler gider).
+                    _ => {
+                        s.strokes.clear();
+                        s.placed = false;
+                        s.anchor = Some(p);
+                    }
                 }
             });
             LRESULT(0)
         }
         WM_MOUSEMOVE => {
             SHOT.with_borrow_mut(|s| {
-                if let Some(s) = s
-                    && let Some(a) = s.anchor
-                {
-                    s.set_sel(Some(norm(a, point(lp))));
+                let Some(s) = s else { return };
+                let p = point(lp);
+                if s.drawing {
+                    // Çizgi seçimin dışına taşmaz.
+                    if let Some(r) = s.sel {
+                        s.add_point(POINT { x: p.x.clamp(r.left, r.right - 1), y: p.y.clamp(r.top, r.bottom - 1) });
+                    }
+                } else if let Some(a) = s.anchor {
+                    s.set_sel(Some(norm(a, p)));
                 }
             });
             LRESULT(0)
@@ -362,32 +480,50 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
             unsafe {
                 let _ = ReleaseCapture();
             }
-            // Sürüklemeden tıklamak: imlecin olduğu ekranın tamamı.
-            let pick = SHOT.with_borrow(|s| {
-                s.as_ref().map(|s| match s.sel {
+            SHOT.with_borrow_mut(|s| {
+                let Some(s) = s else { return };
+                if std::mem::take(&mut s.drawing) {
+                    return;
+                }
+                if s.anchor.take().is_none() {
+                    return;
+                }
+                // Sürüklemeden tıklamak: imlecin olduğu ekranın tamamı.
+                let r = match s.sel {
                     Some(r) if r.right - r.left > 3 && r.bottom - r.top > 3 => r,
                     _ => monitor_at(point(lp), hwnd),
-                })
+                };
+                s.placed = true;
+                s.set_sel(Some(r));
             });
-            finish(pick);
             LRESULT(0)
         }
         WM_RBUTTONUP => {
-            finish(None);
+            finish(None, false);
             LRESULT(0)
         }
         WM_KEYDOWN => {
+            let ctrl = unsafe { GetKeyState(VK_CONTROL.0 as i32) } < 0;
+            let sel = SHOT.with_borrow(|s| s.as_ref().and_then(|s| s.sel.filter(|_| s.placed)));
             match VIRTUAL_KEY(wp.0 as u16) {
-                VK_ESCAPE => finish(None),
+                VK_ESCAPE => finish(None, false),
+                VK_RETURN if sel.is_some() => finish(sel, false),
+                // Seçim yoksa Enter imlecin olduğu ekranı alır.
                 VK_RETURN => {
                     let mut p = POINT::default();
                     unsafe {
                         let _ = GetCursorPos(&mut p);
                         let _ = ScreenToClient(hwnd, &mut p);
                     }
-                    let pick = SHOT.with_borrow(|s| s.as_ref().map(|s| s.sel.unwrap_or_else(|| monitor_at(p, hwnd))));
-                    finish(pick);
+                    finish(Some(monitor_at(p, hwnd)), false);
                 }
+                VK_C if ctrl && sel.is_some() => finish(sel, false),
+                VK_S if ctrl && sel.is_some() => finish(sel, true),
+                VK_Z if ctrl => SHOT.with_borrow_mut(|s| {
+                    if let Some(s) = s {
+                        s.undo();
+                    }
+                }),
                 _ => {}
             }
             LRESULT(0)
@@ -395,7 +531,7 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
         // Başka bir pencere öne geçerse (Alt+Tab) yakalama biter.
         WM_ACTIVATE if (wp.0 & 0xFFFF) as u32 == WA_INACTIVE => {
             if SHOT.with_borrow(|s| s.as_ref().is_some_and(|s| s.hwnd == hwnd)) {
-                finish(None);
+                finish(None, false);
             }
             LRESULT(0)
         }

@@ -20,6 +20,10 @@ pub const WM_EXIT: u32 = WM_APP + 5;
 
 static PENDING: Mutex<Option<String>> = Mutex::new(None);
 
+/// Ekranı tutan bir araç açık (ekran görüntüsü seçimi): öbür araçlar ekran kenarı / köşe
+/// hareketlerine tepki vermez (dock'un etkin köşeleri).
+pub static SCREEN_BUSY: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
 /// winloom bir mesajı işlerken gelen sekme isteği: sonra uygulanmak üzere saklanır.
 pub fn set_tab(tab: String) {
     *PENDING.lock().unwrap() = Some(tab);

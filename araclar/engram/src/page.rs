@@ -207,15 +207,8 @@ impl Engram {
         }
     }
 
-    /// Başlıkta durum; altında sade sekmeler (seçilinin altında çizgi).
+    /// Başlığın altında sade sekmeler (seçilinin altında çizgi).
     fn paint_nav(&self, g: &Gfx) {
-        if let Some((state, how)) = self.summary() {
-            let s = self.shared.borrow();
-            let busy = s.brain.busy || !matches!(s.voice_state, crate::voice::State::Idle);
-            let dot = if busy { pal().green } else { pal().faint };
-            drop(s);
-            status(g, self.head_x + 16.0, HEAD_CY, dot, &format!("{state} · {how}"), pal().muted, self.head_r - 8.0);
-        }
         let selected = Tab::ALL.iter().position(|&t| t == self.tab).unwrap_or(0);
         let hover = Tab::ALL.iter().position(|&t| self.hover == Hit::Nav(t));
         ortak::form::paint_tabs(g, &Self::tab_labels(), selected, hover, self.w);

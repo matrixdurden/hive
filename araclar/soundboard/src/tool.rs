@@ -1,4 +1,5 @@
-//! Ses efektlerinin (soundboard) winloom'a tanımı. Açmak mikrofon efektini bağlamaktır (yönetici).
+//! Ses efektlerinin (soundboard) winloom'a tanımı. Açmak mikrofon efektini bağlamaktır (yönetici);
+//! aynı kurulum sonraki mikrofonlar izin sormadan bağlansın diye bir görev kaydeder (`task`).
 
 use windows::Win32::System::Com::{COINIT_APARTMENTTHREADED, CoInitializeEx};
 
@@ -40,10 +41,14 @@ fn leftovers() -> Vec<String> {
     let exists = |p: std::path::PathBuf| p.exists().then(|| p.display().to_string());
     let mut l = crate::install::leftovers();
     l.extend([crate::data_dir()].into_iter().filter_map(exists));
+    if crate::task::exists() {
+        l.push(format!(r"{}\{}", t!("Task Scheduler", "Görev Zamanlayıcı"), crate::task::name()));
+    }
     l
 }
 
-/// Mikrofon efektini yükseltilmiş bir kopyayla (`--soundboard-kur` / `--soundboard-kaldir`) bağlar ya da çözer.
+/// Mikrofon efektini yükseltilmiş bir kopyayla (`--soundboard-kur` / `--soundboard-kaldir`) bağlar ya da çözer;
+/// o kopya görevi de kaydeder ya da siler.
 fn setup(install: bool) -> Result<(), String> {
     unsafe {
         let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);

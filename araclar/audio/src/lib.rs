@@ -723,13 +723,6 @@ impl Audio {
     }
 
     pub fn paint(&self, g: &Gfx) {
-        let watching = self.enumerator.is_some();
-        let (dot, head) = match () {
-            _ if !watching => (pal().red, t!("Cannot read audio devices", "Ses cihazları okunamıyor")),
-            _ if self.muted => (pal().red, t!("Microphone off · all microphones", "Mikrofon kapalı · bütün mikrofonlar")),
-            _ => (pal().green, t!("Music pauses when headphones drop", "Kulaklık kopunca müzik durur")),
-        };
-        status(g, self.head_x + 16.0, HEAD_CY, dot, head, pal().muted, self.head_r - 8.0);
         let f = self.form();
         g.clip(Rect::new(0.0, HEADER, self.w, self.h), || f.paint(g, self.hover, None));
     }

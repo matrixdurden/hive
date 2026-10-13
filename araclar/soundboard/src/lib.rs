@@ -1,13 +1,16 @@
 //! soundboard sayfası. Motor (çözme, ortak bellek, kulaklık) motor/'da ve
 //! winloom sürecinde çalışır; mikrofon efekti (APO) audiodg.exe içinde.
 //!
-//! Başlıkta mikrofonun durumu, altında üç sekme (ortak kitin sekmeleri):
-//! - Seslerim: ses kutularından ızgara; tıklamak çalar / durdurur, kutuda kısayolu, adı düzenle,
-//!   kaldır. Üstte "Dosya ekle" ve "Son 10 saniye" (bilgisayarda az önce çalanı listeye ekler).
-//! - Ses bul: Myinstants araması. Sonuca tıklamak onu kulaklıkta çalar (yalnızca sana, mikrofona
-//!   gitmez), "Ekle" listeye indirir.
-//! - Ayarlar (sayfa kiti): mikrofon bağlantısı, iki ses düzeyi, hepsini susturmanın ve son 10
+//! Başlıkta yalnızca winloom'ın çizdiği ikon ve ad; altında iki sekme (ortak kitin sekmeleri):
+//! - Sesler: üstte arama kutusu, yanında "Dosya ekle" ve "Son 10 saniye" (bilgisayarda az önce
+//!   çalanı listeye ekler). Altında seslerin listesi: tıklamak çalar / durdurur, sağda kısayolu,
+//!   üstüne gelince adı düzenle ve kaldır. Yazılan listeyi süzer; yazı varken altında
+//!   Myinstants'ın sonuçları: tıklamak kulaklıkta dinletir (mikrofona gitmez), "Ekle" indirir.
+//! - Ayarlar (sayfa kiti): mikrofonun durumu, iki ses düzeyi, hepsini susturmanın ve son 10
 //!   saniyenin kısayolları.
+//!
+//! Efekti takılı olmayan bir mikrofon görülünce kurulumun kaydettiği görev çalıştırılır (`task`):
+//! yönetici izni sorulmadan bağlanır.
 
 #[macro_use]
 extern crate ortak;
@@ -16,9 +19,11 @@ mod tool;
 pub use tool::TOOL;
 
 mod myinstants;
+mod task;
 
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 use windows::Win32::Foundation::*;
 use windows::Win32::Graphics::Gdi::InvalidateRect;
@@ -45,7 +50,6 @@ use soundboard_engine::bus::{self, Bus};
 use soundboard_engine::clip::{self, Clipper};
 use soundboard_engine::config::{self, Config, Sound};
 use soundboard_engine::decode::EXTENSIONS;
-use soundboard_engine::install::Mic;
 use soundboard_engine::monitor::Monitor;
 use soundboard_engine::player::{Player, Playing};
 pub use soundboard_engine::{data_dir, install, installed, probe};
@@ -64,6 +68,11 @@ pub const TIMER_STATUS: usize = 102;
 /// Yazmayı bırakınca arama.
 pub const TIMER_SEARCH: usize = 103;
 const SEARCH_DELAY: u32 = 450;
+/// Mikrofonun durumuna bakma aralığı: sayfa ekrandayken ve değilken (yeni mikrofon yine bağlansın).
+const STATUS_SHOWN: u32 = 1500;
+const STATUS_HIDDEN: u32 = 10_000;
+/// Görevin kendiliğinden çalıştırılması arasında en az bu kadar.
+const AUTO_GAP: Duration = Duration::from_secs(30);
 /// Kısayol kimlikleri: durdur, son 10 saniye ve her ses (1100 + sıra).
 pub const HK_STOP: i32 = 1001;
 /// Bu aracın kısayol aralığının sonu: Ses aygıtlarının kısayolları buradan başlar.
@@ -75,37 +84,52 @@ pub const HK_SOUND: i32 = 1100;
 pub const ARG_INSTALL: &str = "--soundboard-kur";
 pub const ARG_UNINSTALL: &str = "--soundboard-kaldir";
 
+/// Bağlamanın sonucu (WM_INSTALLED'in wParam'ı).
+const SETUP_OK: usize = 0;
+const SETUP_FAILED: usize = 1;
+const SETUP_DENIED: usize = 2;
+/// Kendiliğinden çalıştırılan görev bağlayamadı / görev yok: sessizce "Yeniden bağla"ya kalır.
+const SETUP_QUIET: usize = 3;
+const SETUP_NO_TASK: usize = 4;
+
 const ICON_CLIP: &str = "\u{E7C8}";
 const ICON_STOP: &str = "\u{E71A}";
 const ICON_RENAME: &str = "\u{E70F}";
-const ICON_KEYBOARD: &str = "\u{E765}";
 
-/// Sayfa kitindeki satırların kimlikleri; arama sonuçları sıralarıyla (`R_FOUND + n`).
+/// Sayfa kitindeki satırların kimlikleri; Myinstants sonuçları ve sesler sıralarıyla
+/// (`R_FOUND + n`, `R_SOUND + n`).
 const R_MIC: u32 = 1;
 const R_MIC_LEVEL: u32 = 2;
 const R_EAR_LEVEL: u32 = 3;
 const R_STOP: u32 = 4;
 const R_CLIP: u32 = 5;
-const R_SEARCH: u32 = 6;
+const R_TOOLBAR: u32 = 6;
 const R_FOUND: u32 = 1_000;
-/// İçeriğin sekmelerden uzaklığı; araç çubuğu ve arama kutusunun yüksekliği.
+const R_SOUND: u32 = 100_000;
+/// İçeriğin sekmelerden uzaklığı; arama satırının yüksekliği.
 const TOP_GAP: f32 = 16.0;
 const TOOLBAR_H: f32 = 34.0;
-const SEARCH_H: f32 = 34.0;
-/// Ses kutuları: en dar genişlik, yükseklik, aradaki boşluk ve köşe.
-const TILE_MIN_W: f32 = 180.0;
-const TILE_H: f32 = 96.0;
-const TILE_GAP: f32 = 12.0;
-const TILE_RADIUS: f32 = 10.0;
+/// Ses satırının sağı: kısayol kutucuğu ve (üstüne gelince) adı düzenle, kaldır.
+const SOUND_CTL: f32 = 200.0;
+const ICONS_W: f32 = 64.0;
 /// Tekerin bir adımı.
 const WHEEL_STEP: f32 = 60.0;
 /// Arama kutusunun ve ses adının en çok karakteri.
 const QUERY_MAX: usize = 60;
 const NAME_MAX: usize = 80;
 
-/// `--soundboard-kur` / `--soundboard-kaldir`: yükseltilmiş olarak çalışır, çıkış kodu sonucu bildirir.
+/// `--soundboard-kur` / `--soundboard-kaldir`: yükseltilmiş olarak çalışır, çıkış kodu sonucu
+/// bildirir. Kurulum izin sormadan bağlamanın görevini de kaydeder, kaldırma siler.
 pub fn setup(install: bool) -> i32 {
-    match soundboard_engine::setup(install) {
+    let r = soundboard_engine::setup(install);
+    if !install {
+        task::delete();
+    } else if r.is_ok()
+        && let Err(e) = task::register()
+    {
+        log!("mikrofon görevi kaydedilemedi: {e}");
+    }
+    match r {
         Ok(()) => {
             log!("soundboard {} tamam", if install { "kurulumu" } else { "kaldırma" });
             0
@@ -118,9 +142,18 @@ pub fn setup(install: bool) -> i32 {
     }
 }
 
-/// Satır kimliğinden sonucun sırası.
+/// Satır kimliğinden Myinstants sonucunun sırası.
 fn found_index(id: u32) -> Option<usize> {
-    (id >= R_FOUND).then(|| (id - R_FOUND) as usize)
+    (R_FOUND..R_SOUND).contains(&id).then(|| (id - R_FOUND) as usize)
+}
+
+/// Satır kimliğinden sesin sırası.
+fn sound_index(id: u32) -> Option<usize> {
+    (id >= R_SOUND).then(|| (id - R_SOUND) as usize)
+}
+
+fn sound_id(n: usize) -> u32 {
+    R_SOUND + n as u32
 }
 
 /// Kaydırıcı satırının düzeyi: 0 mikrofon, 1 kulaklık.
@@ -132,67 +165,35 @@ fn level_index(id: u32) -> usize {
 #[derive(Clone, Copy, PartialEq, Debug)]
 enum Tab {
     Sounds,
-    Find,
     Settings,
 }
 
 impl Tab {
-    const ALL: [Tab; 3] = [Tab::Sounds, Tab::Find, Tab::Settings];
+    const ALL: [Tab; 2] = [Tab::Sounds, Tab::Settings];
 
     fn label(self) -> &'static str {
         match self {
-            Tab::Sounds => t!("My sounds", "Seslerim"),
-            Tab::Find => t!("Find sounds", "Ses bul"),
+            Tab::Sounds => t!("Sounds", "Sesler"),
             Tab::Settings => t!("Settings", "Ayarlar"),
         }
     }
 }
 
-fn tab_labels() -> [&'static str; 3] {
+fn tab_labels() -> [&'static str; 2] {
     Tab::ALL.map(Tab::label)
 }
 
-/// Adı iki satıra böler: ilk satıra (`w1` genişliğe) sığan sözcükler, kalanı ikinci satır
-/// (o da sığmazsa çizerken "…" ile kesilir).
-fn two_lines(g: &Gfx, s: &str, w1: f32) -> (String, String) {
-    let font = &g.f.strong;
-    if g.measure(s, font) <= w1 {
-        return (s.into(), String::new());
-    }
-    let mut first = String::new();
-    // Boşluk, tire ve alt çizgiden bölünür (dosya adları "deha-alacarte-sub-alert" gibi).
-    for word in s.split_inclusive([' ', '-', '_']) {
-        let next = format!("{first}{word}");
-        if g.measure(next.trim_end(), font) > w1 {
-            break;
-        }
-        first = next;
-    }
-    // Tek uzun sözcük: harf harf.
-    if first.is_empty() {
-        for c in s.chars() {
-            let next = format!("{first}{c}");
-            if g.measure(&next, font) > w1 {
-                break;
-            }
-            first = next;
-        }
-    }
-    let rest = s[first.len()..].trim_start().to_string();
-    (first.trim_end().into(), rest)
-}
-
-/// Tıklanan / üstüne gelinen: sekme, kit (Ses bul, Ayarlar) ya da Seslerim'deki bir şey.
+/// Tıklanan / üstüne gelinen: sekme, kit ya da sayfanın kendi çizdikleri.
 #[derive(Clone, Copy, PartialEq, Debug)]
 enum Hit {
     None,
     Tab(Tab),
     Form(form::Hit),
-    /// Seslerim'in "Dosya ekle" ve "Son 10 saniye" düğmeleri.
+    /// Arama kutusu, "Dosya ekle" ve "Son 10 saniye".
+    Search,
     Add,
     Clip,
-    /// Ses kutusu ve üstündekiler: kısayol, adı düzenle, kaldır.
-    Tile(usize),
+    /// Ses satırının sağındakiler: kısayol, adı düzenle, kaldır.
     Key(usize),
     Rename(usize),
     Remove(usize),
@@ -207,18 +208,20 @@ impl Hit {
         }
     }
 
-    /// Kitin gördüğü.
+    /// Kitin gördüğü: ses satırının sağındakiler satırın kendisi sayılır (satır belirgin kalsın).
     fn form(self) -> form::Hit {
         match self {
             Hit::Form(h) => h,
+            Hit::Key(n) | Hit::Rename(n) | Hit::Remove(n) => form::Hit::Row(sound_id(n)),
             _ => form::Hit::None,
         }
     }
 
-    /// Hangi ses kutusunda (kutunun üstündekiler de kutu sayılır: kutu belirgin kalsın).
-    fn tile(self) -> Option<usize> {
+    /// Hangi ses satırında.
+    fn sound(self) -> Option<usize> {
         match self {
-            Hit::Tile(n) | Hit::Key(n) | Hit::Rename(n) | Hit::Remove(n) => Some(n),
+            Hit::Form(form::Hit::Row(id)) => sound_index(id),
+            Hit::Key(n) | Hit::Rename(n) | Hit::Remove(n) => Some(n),
             _ => None,
         }
     }
@@ -235,7 +238,7 @@ enum MicState {
     Unknown,
     Missing,
     Detached,
-    Attached(String),
+    Attached,
     Busy,
 }
 
@@ -331,7 +334,14 @@ pub struct Soundboard {
     stop: Option<Hotkey>,
     stop_conflict: bool,
     playing: Vec<Playing>,
+    /// Varsayılan mikrofon: durumu, adı ve kayıt defterindeki GUID'i.
     mic: MicState,
+    mic_name: String,
+    mic_guid: String,
+    /// Kendiliğinden bağlama: denenen mikrofonlar, son deneme ve görevin olmadığı (eski kurulum).
+    auto_tried: Vec<String>,
+    auto_last: Option<Instant>,
+    no_task: bool,
     active: bool,
     hover: Hit,
     pressed: Hit,
@@ -340,22 +350,20 @@ pub struct Soundboard {
     bind: Option<Bind>,
     /// Seçili sekme (sayfa yaşadıkça hatırlanır) ve her sekmenin kaydırması.
     tab: Tab,
-    scroll: [f32; 3],
+    scroll: [f32; 2],
     registered: Vec<i32>,
     modal: Option<Modal>,
     dll_current: bool,
-    /// Sayfanın boyutu ve başlık yazısının bittiği x (winloom her olaydan önce verir).
+    /// Sayfanın boyutu (winloom her olaydan önce verir).
     w: f32,
     h: f32,
-    head_x: f32,
-    head_r: f32,
-    /// Sayfa ekranda mı (zamanlayıcılar yalnızca o zaman çalışır).
+    /// Sayfa ekranda mı.
     visible: bool,
     /// Son 10 saniye: bilgisayarın sesini (yalnızca ses çalarken) izleyen motor.
     clipper: Clipper,
     clip: Option<Hotkey>,
     clip_conflict: bool,
-    /// Ses bul: arama kutusu (odaktayken yazılanlar buraya gelir) ve sonuçlar.
+    /// Arama kutusu (odaktayken yazılanlar buraya gelir): seslerini süzer ve Myinstants'ta arar.
     search: TextField,
     found: Vec<Found>,
     find_state: FindState,
@@ -391,6 +399,19 @@ fn open_bus() -> &'static Bus {
     }
 }
 
+/// Arama satırının parçaları: kutu, "Dosya ekle", "Son 10 saniye" (sağa yaslı).
+fn toolbar_rects(g: &Gfx, r: Rect, clip_label: &str) -> (Rect, Rect, Rect) {
+    let clip = button_rect_right(g, r.r, r.t, clip_label, true);
+    let add = button_rect_right(g, clip.l - 8.0, r.t, t!("Add files", "Dosya ekle"), true);
+    (Rect::new(r.l, r.t, add.l - 12.0, r.b), add, clip)
+}
+
+/// Ses satırının sağındaki ikonlar (kitin kontrol alanında, en sağda): (adı düzenle, kaldır).
+fn row_icons(c: Rect) -> (Rect, Rect) {
+    let remove = Rect::new(c.r - 26.0, c.cy() - 13.0, c.r, c.cy() + 13.0);
+    (Rect::new(remove.l - 30.0, remove.t, remove.l - 4.0, remove.b), remove)
+}
+
 impl Soundboard {
     pub fn start(hwnd: HWND) -> Self {
         let cfg = Config::load();
@@ -412,20 +433,23 @@ impl Soundboard {
             stop_conflict: false,
             playing: Vec::new(),
             mic: MicState::Unknown,
+            mic_name: String::new(),
+            mic_guid: String::new(),
+            auto_tried: Vec::new(),
+            auto_last: None,
+            no_task: false,
             active: false,
             hover: Hit::None,
             pressed: Hit::None,
             drag: None,
             bind: None,
             tab: Tab::Sounds,
-            scroll: [0.0; 3],
+            scroll: [0.0; 2],
             registered: Vec::new(),
             modal: None,
             dll_current: install::current(),
             w: 0.0,
             h: 0.0,
-            head_x: 0.0,
-            head_r: 0.0,
             visible: false,
             clipper: Clipper::start(),
             clip: cfg.clip,
@@ -442,15 +466,14 @@ impl Soundboard {
         };
         l.register();
         l.refresh_mic();
+        l.update_timers();
         log!("soundboard: {} ses, mikrofon {}, kulaklık {}", l.items.len(), l.level[0], l.level[1]);
         l
     }
 
-    pub fn layout(&mut self, w: f32, h: f32, head_x: f32, head_r: f32) {
+    pub fn layout(&mut self, w: f32, h: f32) {
         self.w = w;
         self.h = h;
-        self.head_x = head_x;
-        self.head_r = head_r;
         self.clamp_scroll();
     }
 
@@ -570,8 +593,20 @@ impl Soundboard {
         }
         if self.items.len() != before {
             self.save();
+            self.clamp_scroll();
             self.redraw();
         }
+    }
+
+    /// Arama kutusundaki (küçük harfle, kırpılmış).
+    fn query(&self) -> String {
+        self.search.text.trim().to_lowercase()
+    }
+
+    /// Aramaya uyan seslerin sıraları (arama boşsa hepsi).
+    fn shown(&self) -> Vec<usize> {
+        let q = self.query();
+        (0..self.items.len()).filter(|&n| q.is_empty() || self.items[n].name().to_lowercase().contains(&q)).collect()
     }
 
     // --- Ad düzenleme ---
@@ -684,47 +719,72 @@ impl Soundboard {
 
     // --- Mikrofon durumu ---
 
+    /// Varsayılan mikrofona bakar. Efekt takılı değilse görevi kendiliğinden çalıştırır: her
+    /// mikrofon için bir kez, en sık 30 saniyede bir (bağlamak ses hizmetini yeniden başlatır).
     fn refresh_mic(&mut self) {
         if matches!(self.mic, MicState::Busy) {
             return;
         }
-        self.mic = match install::default_mic() {
-            None => MicState::Missing,
-            Some(Mic { guid, name, .. }) if self.dll_current && install::attached(&guid) => MicState::Attached(name),
-            Some(_) => MicState::Detached,
-        };
+        match install::default_mic() {
+            None => self.mic = MicState::Missing,
+            Some(m) => {
+                let attached = self.dll_current && install::attached(&m.guid);
+                self.mic = if attached { MicState::Attached } else { MicState::Detached };
+                self.mic_name = m.name;
+                self.mic_guid = m.guid;
+            }
+        }
         self.active = self.bus.since_beat() < 1.0;
+        let auto = !self.no_task
+            && !self.auto_tried.contains(&self.mic_guid)
+            && self.auto_last.is_none_or(|t| t.elapsed() >= AUTO_GAP);
+        if matches!(self.mic, MicState::Detached) && auto {
+            log!("mikrofon bağlı değil ({}), görev çalıştırılıyor", self.mic_name);
+            self.auto_tried.push(self.mic_guid.clone());
+            self.auto_last = Some(Instant::now());
+            self.connect(false);
+        }
         self.redraw();
     }
 
-    /// Mikrofona bağlar ya da ayırır (yönetici izni ister). Bitince WM_INSTALLED gelir.
-    pub fn run_setup(&mut self, install: bool) {
+    /// Mikrofona bağlar: önce izin sormayan görevle. Kullanıcı istediyse (`manual`, "Yeniden
+    /// bağla") görev yoksa ya da başaramazsa yönetici izni istenir; o kurulum görevi de kaydeder.
+    /// Bitince WM_INSTALLED gelir.
+    fn connect(&mut self, manual: bool) {
         self.mic = MicState::Busy;
         self.redraw();
         let hwnd = self.hwnd.0 as usize;
-        let arg = if install { ARG_INSTALL } else { ARG_UNINSTALL };
         std::thread::spawn(move || {
             unsafe {
                 let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
             }
-            let code = match install::run_elevated(arg) {
-                Ok(true) => 0,
-                Ok(false) => 1,
-                // Kullanıcı yönetici iznini reddetti.
-                Err(_) => 2,
+            let ran = task::run();
+            if let Err(e) = &ran {
+                log!("mikrofon görevi çalıştırılamadı: {e}");
+            }
+            let code = match ran {
+                Ok(true) => SETUP_OK,
+                Ok(false) if !manual => SETUP_QUIET,
+                Err(_) if !manual => SETUP_NO_TASK,
+                _ => match install::run_elevated(ARG_INSTALL) {
+                    Ok(true) => SETUP_OK,
+                    Ok(false) => SETUP_FAILED,
+                    // Kullanıcı yönetici iznini reddetti.
+                    Err(_) => SETUP_DENIED,
+                },
             };
             post(hwnd, WM_INSTALLED, code);
         });
     }
 
-    /// Mikrofonun kısa durumu (başlık ve ana sayfadaki kutucuk).
+    /// Mikrofonun kısa durumu (ana sayfadaki kutucuk).
     fn mic_label(&self) -> &'static str {
         match &self.mic {
             MicState::Unknown => "",
             MicState::Missing => t!("No microphone", "Mikrofon yok"),
             MicState::Busy => t!("Connecting…", "Bağlanıyor…"),
             MicState::Detached => t!("Not connected to the microphone", "Mikrofona bağlı değil"),
-            MicState::Attached(_) => t!("Connected to the microphone", "Mikrofona bağlı"),
+            MicState::Attached => t!("Connected to the microphone", "Mikrofona bağlı"),
         }
     }
 
@@ -751,28 +811,31 @@ impl Soundboard {
     }
 
     fn mic_row(&self) -> Row {
+        let name = match self.mic_name.is_empty() {
+            true => t!("Microphone", "Mikrofon").to_string(),
+            false => self.mic_name.clone(),
+        };
         let (title, sub, ctl) = match &self.mic {
-            MicState::Attached(name) => (
-                name.clone(),
+            MicState::Attached if self.active => {
+                (name, t!("Connected · an app is listening now", "Bağlı · şu an bir uygulama dinliyor"), Ctl::None)
+            }
+            MicState::Attached => (
+                name,
                 t!("Connected · your sounds go out through this microphone", "Bağlı · seslerin bu mikrofondan karşı tarafa gider"),
                 Ctl::None,
             ),
+            MicState::Busy => (name, t!("Connecting…", "Bağlanıyor…"), Ctl::None),
             MicState::Detached => (
-                t!("Microphone", "Mikrofon").into(),
+                name,
                 t!("Not connected · for now only you hear your sounds", "Bağlı değil · seslerini şimdilik yalnızca sen duyarsın"),
-                Ctl::Primary(t!("Connect microphone", "Mikrofona bağla").into()),
+                Ctl::Button(t!("Reconnect", "Yeniden bağla").into()),
             ),
             MicState::Missing => (
                 t!("No microphone", "Mikrofon yok").into(),
                 t!("Windows has no default recording device", "Windows'ta varsayılan bir kayıt aygıtı yok"),
                 Ctl::None,
             ),
-            MicState::Busy => (
-                t!("Microphone", "Mikrofon").into(),
-                t!("Connecting… administrator permission is asked", "Bağlanıyor… yönetici izni istenir"),
-                Ctl::None,
-            ),
-            MicState::Unknown => (t!("Microphone", "Mikrofon").into(), "", Ctl::None),
+            MicState::Unknown => (name, "", Ctl::None),
         };
         Row::new(R_MIC, title, sub, ctl).icon(ICON_MIC).dim(matches!(self.mic, MicState::Missing))
     }
@@ -831,10 +894,58 @@ impl Soundboard {
         v
     }
 
-    /// Ses bul: arama kutusu (sayfa çizer), sonuçlar ve altında durum.
-    fn find_items(&self) -> Vec<form::Item> {
-        use form::Item::{Custom, Note};
-        let mut v = vec![Custom(R_SEARCH, SEARCH_H)];
+    /// Sesler: arama satırı (sayfa çizer), seslerin (süzülmüş) listesi; arama varken altında
+    /// Myinstants'ın sonuçları.
+    fn sounds_items(&self) -> Vec<form::Item> {
+        use form::Item::{Custom, Note, Section};
+        let mut v = vec![Custom(R_TOOLBAR, TOOLBAR_H)];
+        let searching = !self.query().is_empty();
+        if self.items.is_empty() && !searching {
+            v.push(Note(
+                t!(
+                    "No sounds yet · drop sound files here, use Add files or type above to find one on Myinstants",
+                    "Henüz ses yok · ses dosyalarını buraya sürükle, Dosya ekle'ye bas ya da yukarıya yazıp Myinstants'ta bul"
+                )
+                .into(),
+                false,
+            ));
+            return v;
+        }
+        if !self.items.is_empty() {
+            if searching {
+                v.push(Section(t!("Your sounds", "Seslerin").into()));
+            }
+            let shown = self.shown();
+            if shown.is_empty() {
+                v.push(Note(t!("None of your sounds match", "Seslerinde eşleşen yok").into(), false));
+            }
+            for n in shown {
+                v.push(form::Item::Row(self.sound_row(n)));
+            }
+        }
+        if searching {
+            v.push(Section("Myinstants".into()));
+            v.extend(self.found_items());
+        }
+        v
+    }
+
+    /// Ses satırı: soldaki çal / durdur işaretini, kısayolu ve ikonları sayfa çizer.
+    fn sound_row(&self, n: usize) -> Row {
+        let item = &self.items[n];
+        // Adı düzenlenirken yerinde kutu çizilir.
+        let (title, sub) = match () {
+            _ if self.renaming(n) => (String::new(), ""),
+            _ if item.missing => (item.name().to_string(), t!("File not found", "Dosya bulunamadı")),
+            _ => (item.name().to_string(), ""),
+        };
+        // Boş ikon: yer ayrılır, işaret rengine göre sayfada çizilir.
+        Row::new(sound_id(n), title, sub, Ctl::Space(SOUND_CTL)).icon(" ").clickable().dim(item.missing)
+    }
+
+    /// Myinstants: sonuçlar ve altında durum.
+    fn found_items(&self) -> Vec<form::Item> {
+        let mut v = Vec::new();
         for (n, f) in self.found.iter().enumerate() {
             let playing = self.preview.as_deref() == Some(f.url.as_str());
             let waiting = self.want_preview.as_deref() == Some(f.url.as_str());
@@ -865,7 +976,7 @@ impl Soundboard {
             _ => None,
         };
         if let Some((text, err)) = note {
-            v.push(Note(text, err));
+            v.push(form::Item::Note(text, err));
         }
         v
     }
@@ -875,22 +986,18 @@ impl Soundboard {
         HEADER + TABS_H + TOP_GAP - self.scroll[self.tab as usize]
     }
 
-    /// Seçili sekmenin kiti; Seslerim'in kendi ızgarası var (`None`).
-    fn form(&self) -> Option<Form> {
+    /// Seçili sekmenin kiti.
+    fn form(&self) -> Form {
         let items = match self.tab {
-            Tab::Sounds => return None,
-            Tab::Find => self.find_items(),
+            Tab::Sounds => self.sounds_items(),
             Tab::Settings => self.settings_items(),
         };
-        Some(Form::new(items, PAD, self.w - PAD, self.content_top()))
+        Form::new(items, PAD, self.w - PAD, self.content_top())
     }
 
     fn max_scroll(&self) -> f32 {
-        let bottom = match self.form() {
-            // Kitin sonundaki boşluk yerine biraz pay.
-            Some(f) => f.bottom() - 24.0 + 12.0,
-            None => self.sounds_bottom() + TOP_GAP,
-        };
+        // Kitin sonundaki boşluk yerine biraz pay.
+        let bottom = self.form().bottom() - 24.0 + 12.0;
         (bottom + self.scroll[self.tab as usize] - self.h).max(0.0)
     }
 
@@ -907,90 +1014,12 @@ impl Soundboard {
         self.end_bind(None);
         self.end_rename(true);
         self.search.blur();
-        // Önizlemenin durdurulduğu yer Ses bul'da: oradan çıkınca susar.
         self.stop_preview();
         self.tab = tab;
         if !matches!(self.hover, Hit::Tab(_)) {
             self.hover = Hit::None;
         }
-        // Ses bul ilk açılışta Myinstants'ın öne çıkanlarıyla dolar.
-        if tab == Tab::Find && matches!(self.find_state, FindState::Idle) {
-            self.search_now();
-        }
         self.redraw();
-    }
-
-    // --- Seslerim: araç çubuğu ve ses kutuları ---
-
-    /// "Dosya ekle" ve "Son 10 saniye": liste varsa üstte sağda, boşsa ortada.
-    fn add_buttons(&self, g: &Gfx) -> (Rect, Rect) {
-        let (add, clip) = (t!("Add files", "Dosya ekle"), self.clip_label());
-        if self.items.is_empty() {
-            let (a, c) = (button_rect(g, 0.0, 0.0, add, true), button_rect(g, 0.0, 0.0, &clip, true));
-            let l = (self.w - a.w() - 8.0 - c.w()) / 2.0;
-            let t = self.empty_top() + 36.0;
-            (button_rect(g, l, t, add, true), button_rect(g, l + a.w() + 8.0, t, &clip, true))
-        } else {
-            let t = self.content_top();
-            let c = button_rect_right(g, self.w - PAD, t, &clip, true);
-            (button_rect_right(g, c.l - 8.0, t, add, true), c)
-        }
-    }
-
-    /// Boş listede yazının üstü (içerik alanının ortasında).
-    fn empty_top(&self) -> f32 {
-        (HEADER + TABS_H + self.h) / 2.0 - 36.0
-    }
-
-    /// Izgara: sütun sayısı, kutu genişliği ve ilk sıranın üstü (araç çubuğunun altı).
-    fn grid(&self) -> (usize, f32, f32) {
-        let avail = (self.w - 2.0 * PAD).max(TILE_MIN_W);
-        let cols = (((avail + TILE_GAP) / (TILE_MIN_W + TILE_GAP)).floor() as usize).max(1);
-        let tw = (avail - TILE_GAP * (cols - 1) as f32) / cols as f32;
-        (cols, tw, self.content_top() + TOOLBAR_H + TOP_GAP)
-    }
-
-    fn tile_rect(&self, n: usize) -> Rect {
-        let (cols, tw, top) = self.grid();
-        let (l, t) = (PAD + (n % cols) as f32 * (tw + TILE_GAP), top + (n / cols) as f32 * (TILE_H + TILE_GAP));
-        Rect::new(l, t, l + tw, t + TILE_H)
-    }
-
-    fn sounds_bottom(&self) -> f32 {
-        if self.items.is_empty() {
-            return self.content_top();
-        }
-        let (cols, _, top) = self.grid();
-        top + self.items.len().div_ceil(cols) as f32 * (TILE_H + TILE_GAP) - TILE_GAP
-    }
-
-    /// Kutunun sağ üstündeki ikonlar: (adı düzenle, kaldır).
-    fn tile_icons(p: Rect) -> (Rect, Rect) {
-        let remove = Rect::new(p.r - 32.0, p.t + 8.0, p.r - 8.0, p.t + 32.0);
-        (Rect::new(remove.l - 28.0, remove.t, remove.l - 4.0, remove.b), remove)
-    }
-
-    /// Kutunun altındaki kısayol satırının ortası.
-    fn key_cy(p: Rect) -> f32 {
-        p.b - 26.0
-    }
-
-    /// Kısayolu olmayan kutuda (üstüne gelince) klavye ikonu.
-    fn key_glyph(p: Rect) -> Rect {
-        let cy = Self::key_cy(p);
-        Rect::new(p.l + 8.0, cy - 12.0, p.l + 32.0, cy + 12.0)
-    }
-
-    /// Kısayol kutucuğu (kısayol varsa ya da atanıyorsa), yoksa klavye ikonu.
-    fn key_rect(&self, g: &Gfx, n: usize, p: Rect) -> Rect {
-        let binding = self.bind == Some(Bind::Sound(n));
-        match self.items.get(n) {
-            Some(i) if i.hotkey.is_some() || binding => {
-                let c = chip_rect(g, 0.0, Self::key_cy(p), &self.chip_text(i.hotkey, binding));
-                Rect::new(p.l + 14.0, c.t, p.l + 14.0 + c.w(), c.b)
-            }
-            _ => Self::key_glyph(p),
-        }
     }
 
     /// Kısayol kutucuğunun renkleri: (yazı, çerçeve).
@@ -1003,28 +1032,10 @@ impl Soundboard {
         }
     }
 
-    fn sounds_hit(&self, g: &Gfx, x: f32, y: f32) -> Hit {
-        let (add, clip) = self.add_buttons(g);
-        if add.contains(x, y) {
-            return Hit::Add;
-        }
-        if clip.contains(x, y) {
-            return Hit::Clip;
-        }
-        for n in 0..self.items.len() {
-            let p = self.tile_rect(n);
-            if !p.contains(x, y) {
-                continue;
-            }
-            let (rename, remove) = Self::tile_icons(p);
-            return match () {
-                _ if remove.contains(x, y) => Hit::Remove(n),
-                _ if rename.contains(x, y) => Hit::Rename(n),
-                _ if !self.renaming(n) && self.key_rect(g, n, p).contains(x, y) => Hit::Key(n),
-                _ => Hit::Tile(n),
-            };
-        }
-        Hit::None
+    /// Ses satırının kısayol kutucuğu (ikonların solunda).
+    fn key_rect(&self, g: &Gfx, n: usize, c: Rect) -> Rect {
+        let binding = self.bind == Some(Bind::Sound(n));
+        chip_rect(g, c.r - ICONS_W, c.cy(), &self.chip_text(self.items[n].hotkey, binding))
     }
 
     fn hit(&self, g: &Gfx, x: f32, y: f32) -> Hit {
@@ -1034,124 +1045,105 @@ impl Soundboard {
         if y < HEADER + TABS_H {
             return form::tab_at(g, &tab_labels(), x, y).map_or(Hit::None, |k| Hit::Tab(Tab::ALL[k]));
         }
-        match self.form() {
-            None => self.sounds_hit(g, x, y),
-            Some(f) => match f.hit(g, x, y) {
-                form::Hit::None => Hit::None,
-                h => Hit::Form(h),
-            },
+        let f = self.form();
+        match f.hit(g, x, y) {
+            form::Hit::None => Hit::None,
+            form::Hit::Custom(R_TOOLBAR) => {
+                let Some(r) = f.custom(R_TOOLBAR) else { return Hit::None };
+                let (field, add, clip) = toolbar_rects(g, r, &self.clip_label());
+                match () {
+                    _ if field.contains(x, y) => Hit::Search,
+                    _ if add.contains(x, y) => Hit::Add,
+                    _ if clip.contains(x, y) => Hit::Clip,
+                    _ => Hit::None,
+                }
+            }
+            form::Hit::Row(id) if let Some(n) = sound_index(id) => {
+                let Some(c) = f.control(id) else { return Hit::Form(form::Hit::Row(id)) };
+                let (rename, remove) = row_icons(c);
+                match () {
+                    _ if remove.contains(x, y) => Hit::Remove(n),
+                    _ if rename.contains(x, y) => Hit::Rename(n),
+                    _ if !self.renaming(n) && self.key_rect(g, n, c).contains(x, y) => Hit::Key(n),
+                    _ => Hit::Form(form::Hit::Row(id)),
+                }
+            }
+            h => Hit::Form(h),
         }
     }
 
     // --- Çizim ---
 
     pub fn paint(&self, g: &Gfx) {
-        // Başlık: mikrofonun durumu.
-        let label = self.mic_label();
-        if !label.is_empty() {
-            let (dot, text) = match &self.mic {
-                MicState::Attached(_) if self.active => {
-                    (pal().green, format!("{label} · {}", t!("an app is listening", "bir uygulama dinliyor")))
-                }
-                MicState::Attached(_) => (pal().faint, format!("{label} · {}", t!("nothing is listening", "şu an dinleyen yok"))),
-                MicState::Busy => (accent(), label.into()),
-                _ => (pal().faint, label.into()),
-            };
-            status(g, self.head_x + 14.0, HEAD_CY, dot, &text, pal().muted, self.head_r - 8.0);
-        }
-
-        g.clip(Rect::new(0.0, HEADER + TABS_H, self.w, self.h), || match self.form() {
-            None => self.paint_sounds(g),
-            Some(f) => {
-                f.paint(g, self.hover.form(), self.drag);
-                if let Some(r) = f.custom(R_SEARCH) {
-                    self.search.paint(g, r, t!("Search Myinstants…", "Myinstants'ta ara…"));
-                }
+        let f = self.form();
+        g.clip(Rect::new(0.0, HEADER + TABS_H, self.w, self.h), || {
+            f.paint(g, self.hover.form(), self.drag);
+            if self.tab == Tab::Sounds {
+                self.paint_sounds(g, &f);
             }
         });
         let hover = Tab::ALL.iter().position(|&t| self.hover == Hit::Tab(t));
         form::paint_tabs(g, &tab_labels(), self.tab as usize, hover, self.w);
     }
 
-    /// Seslerim: araç çubuğu (ya da boş listede ortada yazı) ve ses kutuları.
-    fn paint_sounds(&self, g: &Gfx) {
-        let (add, clip) = self.add_buttons(g);
-        if self.items.is_empty() {
-            let t = self.empty_top();
-            let text = t!(
-                "No sounds yet · drop sound files here or find some in Find sounds",
-                "Henüz ses yok · ses dosyalarını buraya sürükle ya da Ses bul'da ara"
-            );
-            text_center(g, text, &g.f.text, self.w / 2.0, t, t + 24.0, pal().muted);
-        } else {
-            let n = self.items.len();
-            g.text(&t!(format!("{n} sounds"), format!("{n} ses")), &g.f.text, Rect::new(PAD + 2.0, add.t, add.l - 16.0, add.b), pal().muted);
+    /// Sesler: arama satırı ve ses satırlarının sayfaya kalan parçaları.
+    fn paint_sounds(&self, g: &Gfx, f: &Form) {
+        if let Some(r) = f.custom(R_TOOLBAR) {
+            let clip_label = self.clip_label();
+            let (field, add, clip) = toolbar_rects(g, r, &clip_label);
+            self.search.paint(g, field, t!("Search your sounds or find one on Myinstants", "Seslerinde ara ya da Myinstants'ta bul"));
+            button(g, add, t!("Add files", "Dosya ekle"), Some(ICON_ADD), None, self.hover == Hit::Add);
+            button(g, clip, &clip_label, Some(ICON_CLIP), None, self.hover == Hit::Clip);
         }
-        button(g, add, t!("Add files", "Dosya ekle"), Some(ICON_ADD), None, self.hover == Hit::Add);
-        button(g, clip, &self.clip_label(), Some(ICON_CLIP), None, self.hover == Hit::Clip);
-        for n in 0..self.items.len() {
-            let p = self.tile_rect(n);
-            if p.b >= HEADER + TABS_H && p.t <= self.h {
-                self.paint_tile(g, n, p);
+        for n in self.shown() {
+            let id = sound_id(n);
+            if let (Some(r), Some(c)) = (f.row(id), f.control(id))
+                && r.b >= HEADER + TABS_H
+                && r.t <= self.h
+            {
+                self.paint_sound(g, n, r, c);
             }
         }
     }
 
-    /// Ses kutusu: ad (iki satıra kadar), altında kısayol; çalarken vurgu çerçeve ve ilerleme.
-    fn paint_tile(&self, g: &Gfx, n: usize, p: Rect) {
+    /// Ses satırı: solda çal / durdur (çalarken vurgu renginde, altta ilerleme çizgisi), sağda
+    /// kısayol; üstüne gelince adı düzenle ve kaldır.
+    fn paint_sound(&self, g: &Gfx, n: usize, r: Rect, c: Rect) {
         let item = &self.items[n];
-        let hovered = self.hover.tile() == Some(n);
-        let pressed = self.pressed == Hit::Tile(n) && self.hover == Hit::Tile(n);
+        let hovered = self.hover.sound() == Some(n);
         let editing = self.rename.as_ref().filter(|(i, _)| *i == n).map(|(_, f)| f);
         let binding = self.bind == Some(Bind::Sound(n));
         let playing = self.playing.iter().find(|p| p.id == item.id);
 
-        g.fill(p, TILE_RADIUS, pal().panel);
-        if pressed {
-            g.fill(p, TILE_RADIUS, pal().sel);
-        } else if hovered {
-            g.fill(p, TILE_RADIUS, pal().hover);
-        }
-        match playing {
-            Some(_) => g.stroke(p, TILE_RADIUS, accent(), 2.0),
-            None => g.stroke(p, TILE_RADIUS, pal().line, 1.0),
+        let (glyph, color) = match () {
+            _ if playing.is_some() => (ICON_STOP, accent()),
+            _ if item.missing => (ICON_PLAY, pal().faint),
+            _ if hovered => (ICON_PLAY, pal().text),
+            _ => (ICON_PLAY, pal().muted),
+        };
+        let x = r.l + 16.0;
+        g.text(glyph, &g.f.icon_small, Rect::new(x, r.t, x + 20.0, r.b), color);
+        if let Some(pl) = playing
+            && pl.duration > 0.0
+        {
+            let t = (pl.started.elapsed().as_secs_f64() / pl.duration).clamp(0.0, 1.0) as f32;
+            let (l, rr) = (r.l + 16.0, r.r - 16.0);
+            g.fill(Rect::new(l, r.b - 3.0, l + (rr - l) * t, r.b - 1.0), 1.0, accent());
         }
 
-        let (rename, remove) = Self::tile_icons(p);
-        let l = p.l + 14.0;
-        let line1 = Rect::new(l, p.t + 12.0, rename.l - 4.0, p.t + 32.0);
-        let line2 = Rect::new(l, p.t + 32.0, p.r - 14.0, p.t + 52.0);
         if let Some(field) = editing {
-            field.paint(g, Rect::new(p.l + 8.0, p.t + 8.0, rename.l - 6.0, p.t + 42.0), &item.stem);
-        } else if item.missing {
-            g.text(item.name(), &g.f.strong, line1, pal().faint);
-            g.text(t!("File not found", "Dosya bulunamadı"), &g.f.small, line2, pal().faint);
-        } else {
-            let (a, b) = two_lines(g, item.name(), line1.w());
-            g.text(&a, &g.f.strong, line1, pal().text);
-            g.text(&b, &g.f.strong, line2, pal().text);
+            field.paint(g, Rect::new(x + 22.0, r.cy() - 17.0, c.l - 8.0, r.cy() + 17.0), &item.stem);
         }
         if hovered || editing.is_some() {
-            icon_button(g, rename, ICON_RENAME, if editing.is_some() { pal().text } else { pal().faint }, self.hover == Hit::Rename(n));
+            let (rename, remove) = row_icons(c);
+            let rename_color = if editing.is_some() { pal().text } else { pal().faint };
+            icon_button(g, rename, ICON_RENAME, rename_color, self.hover == Hit::Rename(n));
             icon_button(g, remove, ICON_REMOVE, pal().faint, self.hover == Hit::Remove(n));
         }
-
-        if item.hotkey.is_some() || binding {
-            let (c, b) = self.chip_colors(binding, item.conflict, self.hover == Hit::Key(n));
-            chip(g, self.key_rect(g, n, p), &self.chip_text(item.hotkey, binding), c, b);
-        } else if hovered && editing.is_none() {
-            icon_button(g, Self::key_glyph(p), ICON_KEYBOARD, pal().faint, self.hover == Hit::Key(n));
-        }
-
-        if let Some(pl) = playing {
-            let cy = Self::key_cy(p);
-            g.text(ICON_STOP, &g.f.icon_small, Rect::new(p.r - 34.0, cy - 11.0, p.r - 12.0, cy + 11.0), accent());
-            if pl.duration > 0.0 {
-                let t = (pl.started.elapsed().as_secs_f64() / pl.duration).clamp(0.0, 1.0) as f32;
-                let bar = Rect::new(p.l + 12.0, p.b - 6.0, p.r - 12.0, p.b - 4.0);
-                g.fill(bar, 1.0, pal().line);
-                g.fill(Rect::new(bar.l, bar.t, bar.l + bar.w() * t, bar.b), 1.0, accent());
-            }
+        // Kısayolu yoksa kutucuk yalnızca üstüne gelince görünür.
+        if editing.is_none() && (item.hotkey.is_some() || binding || hovered) {
+            let (fg, border) = self.chip_colors(binding, item.conflict, self.hover == Hit::Key(n));
+            chip(g, self.key_rect(g, n, c), &self.chip_text(item.hotkey, binding), fg, border);
         }
     }
 
@@ -1164,9 +1156,6 @@ impl Soundboard {
                 i.missing = !i.path.is_file();
             }
             self.refresh_mic();
-            if self.tab == Tab::Find && matches!(self.find_state, FindState::Idle) {
-                self.search_now();
-            }
         }
         if !visible {
             self.end_bind(None);
@@ -1187,11 +1176,7 @@ impl Soundboard {
             } else {
                 let _ = KillTimer(Some(self.hwnd), TIMER_ANIM);
             }
-            if self.visible {
-                SetTimer(Some(self.hwnd), TIMER_STATUS, 1500, None);
-            } else {
-                let _ = KillTimer(Some(self.hwnd), TIMER_STATUS);
-            }
+            SetTimer(Some(self.hwnd), TIMER_STATUS, if self.visible { STATUS_SHOWN } else { STATUS_HIDDEN }, None);
         }
     }
 
@@ -1199,7 +1184,7 @@ impl Soundboard {
 
     pub fn mouse_move(&mut self, g: &Gfx, x: f32, y: f32) {
         if let Some(id) = self.drag {
-            if let Some(v) = self.form().and_then(|f| f.slider_value(id, x)) {
+            if let Some(v) = self.form().slider_value(id, x) {
                 self.set_level(level_index(id), (v * 100.0).round() as u32);
             }
             return;
@@ -1224,14 +1209,14 @@ impl Soundboard {
         if self.bind.is_some() && !matches!(hit, Hit::Key(_) | Hit::Form(form::Hit::Chip(_))) {
             self.end_bind(None);
         }
-        // Düzenlenen kutunun dışına tıklamak adı kaydeder.
+        // Düzenlenen satırın dışına tıklamak adı kaydeder.
         if let Some((n, _)) = &self.rename
-            && hit.tile() != Some(*n)
+            && hit.sound() != Some(*n)
         {
             self.end_rename(true);
         }
         // Arama kutusu basınca odak alır; başka yere basınca bırakır.
-        if hit == Hit::Form(form::Hit::Custom(R_SEARCH)) {
+        if hit == Hit::Search {
             self.search.focus(false);
             unsafe {
                 let _ = SetFocus(Some(self.hwnd));
@@ -1264,25 +1249,28 @@ impl Soundboard {
             Hit::Tab(t) => self.select(t),
             Hit::Add => self.modal = Some(Modal::AddFiles),
             Hit::Clip => self.save_clip(),
-            Hit::Tile(n) if !self.renaming(n) => self.toggle(n),
             Hit::Key(n) => self.start_bind(Bind::Sound(n)),
             Hit::Rename(n) if self.renaming(n) => self.end_rename(true),
             Hit::Rename(n) => self.start_rename(n),
             Hit::Remove(n) => self.remove(n),
             Hit::Form(h) => self.form_click(h),
-            Hit::Tile(_) | Hit::None => {}
+            Hit::Search | Hit::None => {}
         }
     }
 
     fn form_click(&mut self, h: form::Hit) {
         match h {
-            form::Hit::Button(R_MIC) if matches!(self.mic, MicState::Detached) => self.run_setup(true),
+            form::Hit::Button(R_MIC) if matches!(self.mic, MicState::Detached) => self.connect(true),
             form::Hit::Row(R_STOP) => self.player.stop_all(),
             form::Hit::Chip(R_STOP) => self.start_bind(Bind::Stop),
             form::Hit::Row(R_CLIP) => self.save_clip(),
             form::Hit::Chip(R_CLIP) => self.start_bind(Bind::Clip),
             form::Hit::Row(id) => {
-                if let Some(n) = found_index(id) {
+                if let Some(n) = sound_index(id) {
+                    if !self.renaming(n) {
+                        self.toggle(n);
+                    }
+                } else if let Some(n) = found_index(id) {
                     self.toggle_preview(n);
                 }
             }
@@ -1303,9 +1291,9 @@ impl Soundboard {
         self.redraw();
     }
 
-    /// Kısayol atanıyorsa tuşu yakalar (`true`). Ctrl+F Ses bul'un arama kutusuna gider; Ctrl+Tab
-    /// ve Ctrl+1..3 sekmeler arasında geçer. Kutudayken Esc önce seçimi, sonra önizlemeyi, sonra
-    /// yazıyı siler, sonra kutuyu bırakır; dışında Esc her şeyi susturur.
+    /// Kısayol atanıyorsa tuşu yakalar (`true`). Ctrl+F arama kutusuna gider; Ctrl+Tab ve
+    /// Ctrl+1..2 sekmeler arasında geçer. Kutudayken Enter tek eşleşen sesi çalar (yoksa hemen
+    /// arar), Esc önce yazıyı siler, sonra kutuyu bırakır; dışında Esc her şeyi susturur.
     pub fn key(&mut self, vk: u16) -> bool {
         if self.bind.is_some() {
             if !hotkey::is_modifier(vk) {
@@ -1346,17 +1334,19 @@ impl Soundboard {
         if self.search.focused {
             let before = self.search.text.clone();
             match self.search.key(vk, ctrl) {
-                FieldKey::Enter => self.search_now(),
+                FieldKey::Enter => match self.shown()[..] {
+                    [n] if !self.query().is_empty() => self.toggle(n),
+                    _ => self.search_now(),
+                },
                 FieldKey::Escape => {
-                    match () {
-                        _ if std::mem::take(&mut self.search.selected) => {}
-                        _ if self.preview.is_some() || self.want_preview.is_some() => self.stop_preview(),
-                        _ if !self.search.text.is_empty() => self.clear_query(),
-                        _ => self.search.blur(),
+                    if self.search.text.is_empty() {
+                        self.search.blur();
+                    } else {
+                        self.clear_query();
                     }
                     self.redraw();
                 }
-                FieldKey::Handled if self.search.text != before => self.schedule_search(),
+                FieldKey::Handled if self.search.text != before => self.query_changed(),
                 FieldKey::Handled => self.redraw(),
                 FieldKey::Ignored => return false,
             }
@@ -1405,24 +1395,29 @@ impl Soundboard {
         self.redraw();
     }
 
-    /// Kurulum bitti: 0 tamam, 1 hata, 2 izin verilmedi.
+    /// Bağlama bitti (`SETUP_*`). Görev yoksa bir daha kendiliğinden denenmez.
     pub fn setup_done(&mut self, code: usize) {
         self.dll_current = install::current();
+        if code == SETUP_NO_TASK {
+            self.no_task = true;
+        }
         self.mic = MicState::Unknown;
         self.refresh_mic();
-        if code == 1 {
-            error_box(t!(
+        match code {
+            SETUP_FAILED => error_box(t!(
                 "Could not connect to the microphone.\n\nDetails: %LOCALAPPDATA%\\Programs\\winloom\\winloom.log",
                 "Mikrofona bağlanamadı.\n\nAyrıntılar: %LOCALAPPDATA%\\Programs\\winloom\\winloom.log"
-            ));
+            )),
+            SETUP_DENIED => log!("mikrofona bağlanmak için yönetici izni verilmedi"),
+            _ => {}
         }
     }
 }
 
-// --- Ses bul: arama kutusu, Myinstants, önizleme ---
+// --- Arama: seslerini süzer, Myinstants'ta arar; önizleme ---
 
 impl Soundboard {
-    /// Arama kutusu odaktayken yazılanlar oraya gider.
+    /// Arama kutusu ya da düzenlenen ad odaktayken yazılanlar oraya gider.
     pub fn char(&mut self, c: char) -> bool {
         if let Some((_, f)) = &mut self.rename {
             if f.char(c) {
@@ -1433,31 +1428,45 @@ impl Soundboard {
         if self.bind.is_some() || !self.search.char(c) {
             return false;
         }
-        self.schedule_search();
+        self.query_changed();
         true
     }
 
-    /// Ctrl+F: Ses bul'a geçer ve arama kutusuna odaklanır (yazılan seçili); kutu en üstte.
+    /// Ctrl+F: Sesler'e geçer ve arama kutusuna odaklanır (yazılan seçili); kutu en üstte.
     fn focus_search(&mut self) {
-        self.select(Tab::Find);
+        self.select(Tab::Sounds);
         self.search.focus(true);
         unsafe {
             let _ = SetFocus(Some(self.hwnd));
         }
-        self.scroll[Tab::Find as usize] = 0.0;
+        self.scroll[Tab::Sounds as usize] = 0.0;
         self.redraw();
     }
 
     fn clear_query(&mut self) {
         self.search.set("");
-        self.search_now();
+        self.query_changed();
     }
 
-    /// Yazmayı bırakınca arar.
-    fn schedule_search(&mut self) {
-        unsafe {
-            SetTimer(Some(self.hwnd), TIMER_SEARCH, SEARCH_DELAY, None);
+    /// Yazı değişti: liste hemen süzülür, Myinstants yazmayı bırakınca aranır. Boşsa web
+    /// sonuçları gider.
+    fn query_changed(&mut self) {
+        if self.query().is_empty() {
+            unsafe {
+                let _ = KillTimer(Some(self.hwnd), TIMER_SEARCH);
+            }
+            // Yoldaki aramanın sonucu yok sayılsın.
+            self.search_seq += 1;
+            self.found.clear();
+            self.find_state = FindState::Idle;
+            self.stop_preview();
+        } else {
+            self.find_state = FindState::Loading;
+            unsafe {
+                SetTimer(Some(self.hwnd), TIMER_SEARCH, SEARCH_DELAY, None);
+            }
         }
+        self.clamp_scroll();
         self.redraw();
     }
 
@@ -1465,10 +1474,13 @@ impl Soundboard {
         unsafe {
             let _ = KillTimer(Some(self.hwnd), TIMER_SEARCH);
         }
+        let query = self.query();
+        if query.is_empty() {
+            return;
+        }
         self.search_seq += 1;
         self.find_state = FindState::Loading;
-        let (seq, query, out, hwnd) =
-            (self.search_seq, self.search.text.clone(), self.searched.clone(), self.hwnd.0 as usize);
+        let (seq, out, hwnd) = (self.search_seq, self.searched.clone(), self.hwnd.0 as usize);
         std::thread::spawn(move || {
             let r = myinstants::search(&query).map_err(|e| e.to_string());
             *out.lock().unwrap() = Some((seq, r));
@@ -1700,8 +1712,8 @@ impl ToolPage for Soundboard {
     fn take_file_dialog(&mut self) -> Option<ortak::ui::FileDialog> {
         self.modal.take().map(|Modal::AddFiles| file_dialog as ortak::ui::FileDialog)
     }
-    fn layout(&mut self, w: f32, h: f32, head_x: f32, head_r: f32) {
-        Soundboard::layout(self, w, h, head_x, head_r)
+    fn layout(&mut self, w: f32, h: f32, _head_x: f32, _head_r: f32) {
+        Soundboard::layout(self, w, h)
     }
     fn interactive(&self, g: &Gfx, x: f32, y: f32) -> bool {
         self.hit(g, x, y) != Hit::None
@@ -1734,14 +1746,10 @@ impl ToolPage for Soundboard {
         Soundboard::set_visible(self, visible)
     }
     fn tip(&self) -> Option<(Rect, String)> {
-        let tile = |n| self.tile_rect(n);
+        let icons = |n: usize| self.form().control(sound_id(n)).map(row_icons);
         match self.hover {
-            Hit::Rename(n) => Some((Self::tile_icons(tile(n)).0, t!("Rename", "Adını değiştir").into())),
-            Hit::Remove(n) => Some((Self::tile_icons(tile(n)).1, t!("Remove", "Kaldır").into())),
-            // Kısayolu yoksa klavye ikonu: ne işe yaradığı söylenir.
-            Hit::Key(n) if self.items.get(n).is_some_and(|i| i.hotkey.is_none()) && self.bind != Some(Bind::Sound(n)) => {
-                Some((Self::key_glyph(tile(n)), t!("Set a shortcut", "Kısayol ata").into()))
-            }
+            Hit::Rename(n) => Some((icons(n)?.0, t!("Rename", "Adını değiştir").into())),
+            Hit::Remove(n) => Some((icons(n)?.1, t!("Remove", "Kaldır").into())),
             _ => None,
         }
     }

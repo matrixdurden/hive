@@ -721,32 +721,6 @@ impl Clicker {
     // --- Çizim ---
 
     pub fn paint(&self, g: &Gfx) {
-        let key = self.key_name();
-        let (dot, head, color) = match () {
-            _ if !self.settings.enabled => (
-                pal().faint,
-                t!("Off · the key does nothing until you turn it on", "Kapalı · açana kadar tuş bir şey yapmaz").to_string(),
-                pal().muted,
-            ),
-            _ if self.conflict() => (
-                pal().red,
-                t!(format!("{key} is taken by another app: pick another key"), format!("{key} başka bir uygulamada: başka tuş seç")),
-                pal().muted,
-            ),
-            _ if self.settings.key.is_none() => {
-                (pal().faint, t!("Pick a key to start", "Başlamak için bir tuş seç").to_string(), pal().muted)
-            }
-            _ if self.running() => (pal().green, self.run_text(), pal().text),
-            _ if self.settings.mode == Mode::Hold => {
-                (pal().faint, t!(format!("Hold {key} to click"), format!("Tıklamak için {key} tuşunu basılı tut")), pal().muted)
-            }
-            _ => (
-                pal().faint,
-                t!(format!("Press {key} to start, again to stop"), format!("{key} başlatır, yine {key} durdurur")),
-                pal().muted,
-            ),
-        };
-        status(g, self.head_x + 16.0, HEAD_CY, dot, &head, color, self.head_r - 8.0);
 
         let form = self.form();
         g.clip(Rect::new(0.0, HEADER, self.w, self.h), || form.paint(g, self.hover, self.drag));

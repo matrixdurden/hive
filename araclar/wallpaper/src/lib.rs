@@ -807,9 +807,6 @@ impl Wallpaper {
     }
 
     pub fn paint(&self, g: &Gfx) {
-        // Başlık: yalnızca durum.
-        let dot = if self.st.reason.is_empty() { pal().green } else { pal().muted };
-        status(g, self.head_x + 16.0, HEAD_CY, dot, &self.status_text(), pal().muted, self.head_r - 8.0);
 
         let f = self.form();
         let hover = if let Hit::Form(h) = self.hover { h } else { form::Hit::None };

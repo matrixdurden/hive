@@ -343,7 +343,8 @@ impl Key {
     }
 }
 
-fn install_dir() -> PathBuf {
+/// Program Files\lyrebird: mikrofon efektinin DLL'i (yalnızca yöneticinin yazabildiği yer).
+pub fn install_dir() -> PathBuf {
     let base = std::env::var_os("ProgramW6432")
         .or_else(|| std::env::var_os("ProgramFiles"))
         .unwrap_or(r"C:\Program Files".into());

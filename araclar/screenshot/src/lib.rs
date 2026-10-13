@@ -1,8 +1,8 @@
-//! Ekran görüntüsü: kısayola (Print Screen) basınca ekran donar, sürükleyip seçtiğin alan
-//! bırakınca panoya kopyalanır (istersen Resimler'e de kaydedilir). Tek tıklama imlecin olduğu
-//! ekranın tamamını alır; Esc ya da sağ tık vazgeçer. Araç çubuğu, çizim yok.
+//! Ekran görüntüsü: kısayola (Print Screen) basınca ekran donar; alanı sürükleyip seçersin (tek
+//! tıklama imlecin olduğu ekranın tamamı), içine tek renk kalemle çizebilirsin. Ctrl+C panoya
+//! kopyalar, Ctrl+S Resimler\Ekran görüntüleri'ne kaydeder; Esc ya da sağ tık vazgeçer.
 //!
-//! Sayfa: kısayol, bırakınca ne olacağı, kayıt klasörü.
+//! Sayfa: kısayol, kayıt klasörü.
 
 #[macro_use]
 extern crate ortak;
@@ -30,7 +30,6 @@ const DEFAULT_KEY: &str = "PrtScn";
 
 /// Sayfanın satırları.
 const R_KEY: u32 = 1;
-const R_SAVE: u32 = 2;
 const R_FOLDER: u32 = 3;
 
 fn dir() -> PathBuf {
@@ -49,18 +48,14 @@ fn shots_dir() -> PathBuf {
 
 struct Settings {
     key: Option<Hotkey>,
-    /// Bırakınca panoya kopyalamanın yanında dosyaya da kaydet.
-    save: bool,
 }
 
 impl Settings {
     fn load() -> Self {
-        let mut s = Settings { key: Hotkey::parse(DEFAULT_KEY), save: false };
+        let mut s = Settings { key: Hotkey::parse(DEFAULT_KEY) };
         for line in std::fs::read_to_string(ini()).unwrap_or_default().lines() {
-            match line.split_once('=') {
-                Some(("kisayol", v)) => s.key = Hotkey::parse(v),
-                Some(("kaydet", v)) => s.save = v.trim() == "1",
-                _ => {}
+            if let Some(("kisayol", v)) = line.split_once('=') {
+                s.key = Hotkey::parse(v);
             }
         }
         s
@@ -69,7 +64,7 @@ impl Settings {
     fn save(&self) {
         let key = self.key.map(|k| k.to_string()).unwrap_or_default();
         let _ = std::fs::create_dir_all(dir());
-        let _ = std::fs::write(ini(), format!("kisayol={key}\nkaydet={}\n", self.save as u8));
+        let _ = std::fs::write(ini(), format!("kisayol={key}\n"));
     }
 }
 
@@ -157,26 +152,21 @@ impl Screenshot {
     }
 
     fn form(&self) -> Form {
-        let s = &self.settings;
         let chip = if self.bind { t!("press a key", "tuşa bas").to_string() } else { self.key_name() };
         let key_sub = if self.conflict() {
             t!("Another app is using this key: pick another", "Bu tuş başka bir uygulamada: başka tuş seç")
         } else {
-            t!("The screen freezes; drag an area and let go", "Ekran donar; alanı sürükle, bırak")
+            t!(
+                "The screen freezes: drag an area, draw in it, Ctrl+C copies, Ctrl+S saves",
+                "Ekran donar: alanı sürükle, içine çiz; Ctrl+C kopyalar, Ctrl+S kaydeder"
+            )
         };
         let items = vec![
             Item::Section(t!("Shortcut", "Kısayol").into()),
             Item::Row(Row::new(R_KEY, t!("Take a screenshot", "Ekran görüntüsü al"), key_sub, Ctl::Chip(chip, self.bind))),
-            Item::Section(t!("When you let go", "Bırakınca").into()),
-            Item::Row(Row::new(
-                R_SAVE,
-                t!("Result", "Sonuç"),
-                t!("A click without dragging takes the whole screen", "Sürüklemeden tıklamak bütün ekranı alır"),
-                Ctl::Seg(vec![t!("Copy", "Kopyala").into(), t!("Copy and save", "Kopyala ve kaydet").into()], s.save as usize),
-            )),
+            Item::Section(t!("Saving", "Kaydetme").into()),
             Item::Row(
-                Row::new(R_FOLDER, t!("Folder", "Klasör"), shots_dir().display().to_string(), Ctl::Button(t!("Open", "Aç").into()))
-                    .dim(!s.save),
+                Row::new(R_FOLDER, t!("Folder", "Klasör"), shots_dir().display().to_string(), Ctl::Button(t!("Open", "Aç").into())),
             ),
         ];
         Form::new(items, PAD, self.w - PAD, HEADER + 16.0 - self.scroll)
@@ -190,11 +180,6 @@ impl Screenshot {
         match hit {
             form::Hit::Chip(R_KEY) => {
                 self.bind = !self.bind;
-                self.redraw();
-            }
-            form::Hit::Seg(R_SAVE, k) => {
-                self.settings.save = k == 1;
-                self.settings.save();
                 self.redraw();
             }
             form::Hit::Button(R_FOLDER) => {
@@ -215,8 +200,7 @@ impl Screenshot {
     }
 
     fn shoot(&self) {
-        let dir = self.settings.save.then(shots_dir);
-        capture::start(dir);
+        capture::start(shots_dir());
     }
 }
 
@@ -238,12 +222,6 @@ impl ToolPage for Screenshot {
     }
 
     fn paint(&self, g: &Gfx) {
-        let (dot, text) = match () {
-            _ if self.settings.key.is_none() => (pal().faint, t!("Pick a key to start", "Başlamak için bir tuş seç").to_string()),
-            _ if self.conflict() => (pal().red, t!(format!("{} is taken by another app", self.key_name()), format!("{} başka bir uygulamada", self.key_name()))),
-            _ => (pal().green, t!(format!("Press {} to take a screenshot", self.key_name()), format!("{} ile ekran görüntüsü al", self.key_name()))),
-        };
-        status(g, self.head_x + 16.0, HEAD_CY, dot, &text, pal().muted, self.head_r - 8.0);
         g.clip(Rect::new(0.0, HEADER, self.w, self.h), || self.form().paint(g, self.hover, None));
     }
 
@@ -324,7 +302,6 @@ impl ToolPage for Screenshot {
     }
 
     fn summary(&self) -> Option<(String, String)> {
-        let what = if self.settings.save { t!("Copies and saves", "Kopyalar ve kaydeder") } else { t!("Copies to the clipboard", "Panoya kopyalar") };
-        Some((self.key_name(), what.into()))
+        Some((self.key_name(), t!("Ctrl+C copies · Ctrl+S saves", "Ctrl+C kopyalar · Ctrl+S kaydeder").into()))
     }
 }

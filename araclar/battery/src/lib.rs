@@ -379,11 +379,6 @@ fn hm(hours: f64) -> String {
     format!("{} {} {} {}", m / 60, t!("h", "sa"), m % 60, t!("min", "dk"))
 }
 
-fn watts(mw: i64) -> String {
-    let s = format!("{:.1} W", mw as f64 / 1000.0);
-    if ortak::i18n::turkish() { s.replace('.', ",") } else { s }
-}
-
 impl Battery {
     pub fn start(hwnd: HWND) -> Self {
         let cfg = Config::load();
@@ -715,28 +710,6 @@ impl Battery {
         Some((usable / rate, base, measured))
     }
 
-    fn status_text(&self) -> String {
-        if self.ac {
-            return format!("{} · %{}", t!("Plugged in", "Şarjda"), self.percent);
-        }
-        let s = match self.remaining() {
-            Some((h, rate, true)) => format!(
-                "{} {} {} · %{} · {} {}",
-                t!("at least", "en az"),
-                hm(h),
-                t!("left", "kaldı"),
-                self.percent,
-                t!("avg", "ort."),
-                watts(rate as i64)
-            ),
-            Some((h, _, false)) => {
-                format!("~{} {} · %{} · {}", hm(h), t!("left", "kaldı"), self.percent, t!("measuring…", "ölçülüyor…"))
-            }
-            None => format!("{} · %{}", t!("On battery", "Pilde"), self.percent),
-        };
-        s
-    }
-
     // --- Yerleşim ---
 
     fn threshold_labels() -> Vec<String> {
@@ -805,8 +778,6 @@ impl Battery {
     // --- Çizim ---
 
     pub fn paint(&self, g: &Gfx) {
-        let dot = if self.ac { pal().green } else { accent() };
-        status(g, self.head_x + 16.0, HEAD_CY, dot, &self.status_text(), pal().muted, self.head_r - 8.0);
         let hover = if let Hit::Form(f) = self.hover { f } else { form::Hit::None };
         let f = self.form();
         g.clip(Rect::new(0.0, HEADER, self.w, self.h), || f.paint(g, hover, None));
