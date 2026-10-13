@@ -17,8 +17,8 @@ use crate::gfx::{Gfx, Rect};
 use crate::log;
 use crate::ui::*;
 
-/// Başlığın altındaki sekme şeridi (Sohbet · Hafıza · Ayarlar).
-const TABS: f32 = 40.0;
+/// Başlığın altındaki sekme şeridi (Sohbet · Hafıza · Ayarlar): ortak kitteki.
+const TABS: f32 = ortak::form::TABS_H;
 /// Ses notunun değişip değişmediğine bakan zamanlayıcı.
 const NOTE_TIMER: usize = 0x6e74;
 
@@ -180,18 +180,8 @@ impl Engram {
 
     // --- Yerleşim ---
 
-    /// Başlığın altındaki sekmeler: (sayfa, yer).
-    fn nav_rects(&self, g: &Gfx) -> Vec<(Tab, Rect)> {
-        let mut x = PAD;
-        Tab::ALL
-            .iter()
-            .map(|&t| {
-                let wi = g.measure(t.label(), &g.f.button) + 24.0;
-                let r = Rect::new(x, HEADER, x + wi, HEADER + TABS);
-                x += wi + 4.0;
-                (t, r)
-            })
-            .collect()
+    fn tab_labels() -> Vec<&'static str> {
+        Tab::ALL.iter().map(|t| t.label()).collect()
     }
 
     /// Alt sayfaya boyutunu verir: sekme şeridinin altındaki alan (alt sayfa kendi köşesinden
@@ -206,7 +196,7 @@ impl Engram {
             return Hit::None;
         }
         if y < HEADER + TABS {
-            return self.nav_rects(g).into_iter().find(|(_, r)| r.contains(x, y)).map_or(Hit::None, |(t, _)| Hit::Nav(t));
+            return ortak::form::tab_at(g, &Self::tab_labels(), x, y).map_or(Hit::None, |k| Hit::Nav(Tab::ALL[k]));
         }
         Hit::Content
     }
@@ -226,15 +216,9 @@ impl Engram {
             drop(s);
             status(g, self.head_x + 16.0, HEAD_CY, dot, &format!("{state} · {how}"), pal().muted, self.head_r - 8.0);
         }
-        g.fill(Rect::new(0.0, HEADER + TABS - 1.0, self.w, HEADER + TABS), 0.0, pal().line);
-        for (t, r) in self.nav_rects(g) {
-            let selected = self.tab == t;
-            let hovered = self.hover == Hit::Nav(t);
-            g.text(t.label(), &g.f.button, r, if selected || hovered { pal().text } else { pal().muted });
-            if selected {
-                g.fill(Rect::new(r.l + 8.0, r.b - 3.0, r.r - 8.0, r.b - 1.0), 1.0, accent());
-            }
-        }
+        let selected = Tab::ALL.iter().position(|&t| t == self.tab).unwrap_or(0);
+        let hover = Tab::ALL.iter().position(|&t| self.hover == Hit::Nav(t));
+        ortak::form::paint_tabs(g, &Self::tab_labels(), selected, hover, self.w);
     }
 
     // --- İstekler ---

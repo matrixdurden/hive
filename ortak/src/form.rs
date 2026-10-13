@@ -368,3 +368,43 @@ impl Form {
         }
     }
 }
+
+// --- Sekmeler ---
+//
+// Alt ekranları olan sayfalar (Matrix, Ses efektleri) başlığın hemen altında sade sekmeler
+// kullanır: yazı, seçilinin altında vurgu çizgisi, şeridin altında ince çizgi. İçerik
+// `HEADER + TABS_H`'tan başlar.
+
+/// Sekme şeridinin yüksekliği.
+pub const TABS_H: f32 = 40.0;
+
+/// Sekmelerin yeri: başlığın hemen altında, sol kenardan.
+pub fn tab_rects(g: &Gfx, labels: &[&str]) -> Vec<Rect> {
+    let mut x = PAD;
+    labels
+        .iter()
+        .map(|l| {
+            let w = g.measure(l, &g.f.button) + 24.0;
+            let r = Rect::new(x, HEADER, x + w, HEADER + TABS_H);
+            x += w + 4.0;
+            r
+        })
+        .collect()
+}
+
+/// İmlecin üstünde olduğu sekme.
+pub fn tab_at(g: &Gfx, labels: &[&str], x: f32, y: f32) -> Option<usize> {
+    tab_rects(g, labels).iter().position(|r| r.contains(x, y))
+}
+
+/// `w`: sayfanın genişliği (alttaki çizgi için).
+pub fn paint_tabs(g: &Gfx, labels: &[&str], selected: usize, hover: Option<usize>, w: f32) {
+    g.fill(Rect::new(0.0, HEADER + TABS_H - 1.0, w, HEADER + TABS_H), 0.0, pal().line);
+    for (k, (r, label)) in tab_rects(g, labels).iter().zip(labels).enumerate() {
+        let on = k == selected;
+        g.text(label, &g.f.button, *r, if on || hover == Some(k) { pal().text } else { pal().muted });
+        if on {
+            g.fill(Rect::new(r.l + 8.0, r.b - 3.0, r.r - 8.0, r.b - 1.0), 1.0, accent());
+        }
+    }
+}
