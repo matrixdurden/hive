@@ -1,0 +1,11 @@
+[package]
+name = "screenshot"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "winloom aracı · Ekran görüntüsü: alanı seç, bırak, panoda"
+
+[dependencies]
+ortak.workspace = true
+windows.workspace = true
+windows-core.workspace = true

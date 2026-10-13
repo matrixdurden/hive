@@ -27,6 +27,7 @@ fn key_name(vk: u16) -> Option<String> {
         VK_LEFT => "Left",
         VK_RIGHT => "Right",
         VK_PAUSE => "Pause",
+        VK_SNAPSHOT => "PrtScn",
         VK_SCROLL => "ScrLk",
         VK_MULTIPLY => "Num*",
         VK_ADD => "Num+",

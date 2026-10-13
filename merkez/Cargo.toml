@@ -18,3 +18,4 @@ audio = { path = "../araclar/audio" }
 dock = { path = "../araclar/dock" }
 clicker = { path = "../araclar/clicker" }
 engram = { path = "../araclar/engram" }
+screenshot = { path = "../araclar/screenshot" }

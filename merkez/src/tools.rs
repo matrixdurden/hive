@@ -17,6 +17,7 @@ pub const TOOLS: &[&Tool] = &[
     &audio::TOOL,
     &dock::TOOL,
     &clicker::TOOL,
+    &screenshot::TOOL,
     &engram::TOOL,
 ];
 pub const COUNT: usize = TOOLS.len();
