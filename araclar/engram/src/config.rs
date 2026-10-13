@@ -55,7 +55,6 @@ pub struct Config {
     pub gemini_key: String,
     pub gemini_voice: String,
     pub model: String,
-    pub night_model: String,
     /// Sohbette düşünme derinliği: low | medium | high.
     pub effort: String,
     /// ElevenLabs ses kimliği ve modeli.
@@ -68,9 +67,6 @@ pub struct Config {
     pub name: String,
     pub wake_word: String,
     pub wake: bool,
-    /// Gece toparlama saati "SS:DD" ve son çalıştığı gün.
-    pub night_at: String,
-    pub night_last: String,
     /// Aylık API bütçesi (dolar), yalnızca gösterim için.
     pub budget: f64,
     /// Fare/klavye kontrolü açık mı (ekrana bakmak hep açık).
@@ -103,7 +99,6 @@ impl Default for Config {
             gemini_key: String::new(),
             gemini_voice: "Charon".into(),
             model: "claude-opus-5-5".into(),
-            night_model: "claude-haiku-5-5".into(),
             effort: "medium".into(),
             voice: String::new(),
             voice_model: "eleven_flash_v2_5".into(),
@@ -112,8 +107,6 @@ impl Default for Config {
             name: "Matrix".into(),
             wake_word: "hey matrix".into(),
             wake: true,
-            night_at: "03:30".into(),
-            night_last: String::new(),
             budget: 200.0,
             control: true,
             confirm: Confirm::Risky,
@@ -149,7 +142,6 @@ impl Config {
                 "gemini" => c.gemini_key = unprotect(v),
                 "gemini_ses" if !v.is_empty() => c.gemini_voice = v.to_string(),
                 "model" if !v.is_empty() => c.model = v.to_string(),
-                "gece_model" if !v.is_empty() => c.night_model = v.to_string(),
                 "caba" if matches!(v, "low" | "medium" | "high") => c.effort = v.to_string(),
                 "ses" => c.voice = v.to_string(),
                 "ses_model" if !v.is_empty() => c.voice_model = v.to_string(),
@@ -159,8 +151,6 @@ impl Config {
                 "uyandirma_sozu" if !v.is_empty() => c.wake_word = v.to_string(),
                 // Eski "uyandirma" anahtarı arayüzü yokken kapalı kaydedilmişti: yeni anahtar "dinle".
                 "dinle" => c.wake = v == "1",
-                "gece_saat" if !v.is_empty() => c.night_at = v.to_string(),
-                "gece_son" => c.night_last = v.to_string(),
                 "butce" => c.budget = v.parse().unwrap_or(c.budget),
                 "bilgisayar" => c.control = v != "0",
                 "onay" => {
@@ -185,7 +175,7 @@ impl Config {
         let dir = data_dir();
         let _ = std::fs::create_dir_all(&dir);
         let text = format!(
-            "dar={}\nsekme={}\ndil={}\nnotlar={}\nanthropic={}\nelevenlabs={}\npicovoice={}\nmodel={}\ngece_model={}\ncaba={}\nses={}\nses_model={}\nkisayol={}\nkisayol_mod={}\nhitap={}\nuyandirma_sozu={}\ndinle={}\ngece_saat={}\ngece_son={}\nbutce={}\nbilgisayar={}\nonay={}\nses_motoru={}\nmikrofon={}\ngroq={}\nyerel_ses={}\nyerel_hiz={}\ngemini={}\ngemini_ses={}\nsadece_ben={}\n",
+            "dar={}\nsekme={}\ndil={}\nnotlar={}\nanthropic={}\nelevenlabs={}\npicovoice={}\nmodel={}\ncaba={}\nses={}\nses_model={}\nkisayol={}\nkisayol_mod={}\nhitap={}\nuyandirma_sozu={}\ndinle={}\nbutce={}\nbilgisayar={}\nonay={}\nses_motoru={}\nmikrofon={}\ngroq={}\nyerel_ses={}\nyerel_hiz={}\ngemini={}\ngemini_ses={}\nsadece_ben={}\n",
             self.narrow as u8,
             self.tab,
             if self.turkish { "tr" } else { "en" },
@@ -194,7 +184,6 @@ impl Config {
             protect(&self.elevenlabs_key),
             protect(&self.picovoice_key),
             self.model,
-            self.night_model,
             self.effort,
             self.voice,
             self.voice_model,
@@ -203,8 +192,6 @@ impl Config {
             self.name,
             self.wake_word,
             self.wake as u8,
-            self.night_at,
-            self.night_last,
             self.budget,
             self.control as u8,
             self.confirm.id(),

@@ -41,10 +41,10 @@ tags: [sistem]
 
 Bu dosya notların nasıl tutulacağını söyler. Klasör adlarını, şablonu, neyin kaydedileceğini buradan değiştir.
 
-- Her cevaptan önce ilgili notları ara (search_notes), gerekirse oku (read_note).
-- Kullanıcı yeni bir şey anlattığında (bir kişi, olay, plan, fikir, tercih) bunu notlara yaz: önce var mı diye ara; varsa append ile ekle, yoksa create ile oluştur.
+- Notlara yalnızca gerekince bak: kullanıcı bir şey sorduğunda, geçmişe atıf yaptığında ya da cevap notlarda olabilecekken (search_notes, gerekirse read_note). Selamlaşma, sohbet, genel bilgi ve bilgisayar işleri için notlara bakma.
+- Yalnızca kalıcı değeri olan bir şeyi yaz: yeni bir kişi, karar, plan, tercih, öğrenilen bir bilgi ya da kullanıcının “not al” dediği şey. Önce var mı diye ara; varsa append ile ekle, yoksa create ile oluştur. Selamlaşma, sohbet, sorduğu sorular, ekrana bakmak gibi geçici şeyler yazılmaz.
 - Klasörler: kisiler/, projeler/, fikirler/, gunluk/ (gerekirse yeni klasör). Dosya adları küçük harf, ASCII, tire ile: kisiler/ayse.md.
-- Her konuşmadan sonra günlüğe (append_daily) saatli, kısa, [[bağlantı]]lı bir satır düş: ne konuşuldu, ne yapıldı.
+- Günlüğe (append_daily) yalnızca günün kalıcı olaylarını yaz (bir iş bitti, bir karar verildi, bir şey öğrenildi), kısa ve [[bağlantı]]lı. Her konuşmayı yazma; saat kendiliğinden eklenir.
 - Yeni not şablonu: başta `---` / `tags: [kisi]` / `olusturma: YYYY-AA-GG` / `---`, sonra `# Başlık`, sonra bilgiler; sonda `## Bağlantılar` altında ilgili [[notlar]]. Kişi notlarına: nasıl tanıştınız, önemli ayrıntılar, planlar.
 - Notları silme, kullanıcının yazdığını bozma; eklemeyi tercih et.
 - sistem/ klasörüne dokunma; orası kullanıcının.
@@ -185,7 +185,7 @@ fn tools() -> Vec<Tool> {
     vec![
         Tool {
             name: "search_notes",
-            description: "Notlarda ara (başlık, etiket, gövde). Bir konuyu cevaplamadan ya da yazmadan önce mutlaka ara.",
+            description: "Notlarda ara (başlık, etiket, gövde). Cevap notlarda olabilecekken ya da yeni bir not yazmadan önce (var mı diye) kullan; selamlaşma ve sohbet için kullanma.",
             schema: json!({"type":"object","properties":{"query":{"type":"string","description":"Aranacak kelimeler"},"limit":{"type":"integer","description":"En çok sonuç (varsayılan 8)"}},"required":["query","limit"],"additionalProperties":false}),
         },
         Tool {
@@ -200,7 +200,7 @@ fn tools() -> Vec<Tool> {
         },
         Tool {
             name: "append_daily",
-            description: "Bugünün günlüğüne (gunluk/YYYY-AA-GG.md) saatli bir satır ekle. Konuşmada geçen her önemli şeyi, ilgili [[bağlantı]]larla, buraya düş.",
+            description: "Bugünün günlüğüne (gunluk/YYYY-AA-GG.md) bir satır ekle; saat kendiliğinden yazılır. Yalnızca günün kalıcı olayları için (bir iş bitti, karar verildi, bir şey öğrenildi), ilgili [[bağlantı]]larla. Sohbeti, selamlaşmayı, soruları yazma.",
             schema: json!({"type":"object","properties":{"text":{"type":"string"}},"required":["text"],"additionalProperties":false}),
         },
         Tool {
@@ -462,7 +462,7 @@ impl Agent {
                     if self.vault.get(&path).is_none() {
                         self.vault.write(&path, &format!("---\ntags: [gunluk]\nolusturma: {date}\n---\n# {date} {}\n\n", weekday(&date)))?;
                     }
-                    let rel = self.vault.append(&path, &format!("- {time} {}", s("text").trim()))?;
+                    let rel = self.vault.append(&path, &format!("- {time} {}", strip_time(s("text").trim())))?;
                     on(Out::Changed(rel.clone()));
                     format!("eklendi: {rel}")
                 }
@@ -666,6 +666,26 @@ impl Agent {
         self.history.retain(|m| !m["content"].as_array().is_some_and(|a| a.is_empty()));
     }
 
+    /// Eski ekran görüntüleri geçmişte kalmasın: her istekte yeniden gönderilir ve pahalıdır.
+    /// Yalnızca en sonuncusu durur, öncekilerin yerine kısa bir not.
+    fn drop_old_images(&mut self) {
+        let mut seen = false;
+        for m in self.history.iter_mut().rev() {
+            let Some(blocks) = m["content"].as_array_mut() else { continue };
+            for b in blocks.iter_mut().rev() {
+                let Some(inner) = b["content"].as_array_mut() else { continue };
+                for c in inner.iter_mut().rev() {
+                    if c["type"] == "image" {
+                        if seen {
+                            *c = json!({"type": "text", "text": "[eski ekran görüntüsü]"});
+                        }
+                        seen = true;
+                    }
+                }
+            }
+        }
+    }
+
     /// Kullanıcı yazısını geçmişe ekler; son mesaj zaten kullanıcınınsa (yarıda kalan tur, araç
     /// sonuçları) aynı mesaja eklenir: iki kullanıcı mesajı art arda gelmesin.
     fn push_user(&mut self, text: String) {
@@ -690,6 +710,7 @@ impl Agent {
             Mode::Text => "[yazi]",
         };
         self.trim_history();
+        self.drop_old_images();
         self.push_user(format!("{tag} {text}"));
         self.control_ok = false;
         self.control_started = false;
@@ -861,5 +882,18 @@ pub fn probe(cfg: &Config, text: &str) -> i32 {
             println!("hata: {e}");
             1
         }
+    }
+}
+
+/// Modelin satırın başına kendisi koyduğu saat ("14:27 ", "21:10 - "): saat zaten eklenir.
+fn strip_time(text: &str) -> &str {
+    let mut t = text;
+    loop {
+        let b = t.as_bytes();
+        let is_time = b.len() >= 5 && b[0].is_ascii_digit() && b[1].is_ascii_digit() && b[2] == b':' && b[3].is_ascii_digit() && b[4].is_ascii_digit();
+        if !is_time {
+            return t;
+        }
+        t = t[5..].trim_start().trim_start_matches(['-', '–']).trim_start();
     }
 }

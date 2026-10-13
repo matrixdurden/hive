@@ -22,6 +22,9 @@ const GHOSTS: [&str; 8] = [
 ];
 
 /// Konuşmayı yazıya çevirir; `lang` ISO-639-1 ("tr") ya da `None` (kendisi bulur).
+/// Tanımaya ipucu: özel adlar doğru yazılsın.
+const HINT: &str = "Matrix, engram, WSL, ssh, terminal, not, günlük.";
+
 pub fn stt(key: &str, pcm: &[i16], rate: u32, lang: Option<&str>) -> Res<String> {
     if key.trim().is_empty() {
         return Err(t!("Groq API key is not set", "Groq API anahtarı girilmemiş").into());
@@ -29,8 +32,7 @@ pub fn stt(key: &str, pcm: &[i16], rate: u32, lang: Option<&str>) -> Res<String>
     if pcm.len() < rate as usize / 10 {
         return Ok(String::new());
     }
-    // İpucu: özel adlar doğru yazılsın.
-    let mut fields = vec![("model", MODEL), ("response_format", "json"), ("temperature", "0"), ("prompt", "Matrix, engram, justrises, WSL, ssh, terminal, not, günlük.")];
+    let mut fields = vec![("model", MODEL), ("response_format", "json"), ("temperature", "0"), ("prompt", HINT)];
     if let Some(l) = lang.filter(|l| !l.is_empty()) {
         fields.push(("language", l));
     }
@@ -50,6 +52,12 @@ pub fn stt(key: &str, pcm: &[i16], rate: u32, lang: Option<&str>) -> Res<String>
     let text = v["text"].as_str().unwrap_or("").trim().to_string();
     let low = crate::notes::key(&text);
     if GHOSTS.iter().any(|g| low == *g || low.trim_end_matches('.') == g.trim_end_matches('.')) {
+        return Ok(String::new());
+    }
+    // Sessizlikte Whisper ipucunu geri okur: ipucunun kelimelerinden başka bir şey yoksa boştur.
+    let hint = crate::notes::key(HINT);
+    let words: Vec<&str> = low.split(|c: char| !c.is_alphanumeric()).filter(|w| !w.is_empty()).collect();
+    if !words.is_empty() && words.iter().all(|w| hint.contains(w)) {
         return Ok(String::new());
     }
     Ok(text)

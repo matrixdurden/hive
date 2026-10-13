@@ -90,6 +90,21 @@ pub fn system_block(text: &str, cached: bool) -> Value {
     v
 }
 
+/// Mesajların kopyası, son mesajın son bloğunda önbellek noktası: sonraki istek (aynı turun araç
+/// döngüsü ya da bir sonraki tur) geçmişi baştan ücretli okumaz, önbellekten okur.
+fn cached_tail(messages: &[Value]) -> Vec<Value> {
+    let mut out = messages.to_vec();
+    if let Some(last) = out.last_mut() {
+        if let Some(text) = last["content"].as_str().map(String::from) {
+            last["content"] = json!([{"type": "text", "text": text}]);
+        }
+        if let Some(block) = last["content"].as_array_mut().and_then(|a| a.last_mut()) {
+            block["cache_control"] = json!({"type": "ephemeral"});
+        }
+    }
+    out
+}
+
 /// Akıştaki açık içerik bloğu.
 #[derive(Default, Clone)]
 struct Open {
@@ -112,7 +127,7 @@ pub fn stream(req: &Request, on_event: &mut dyn FnMut(Event) -> bool) -> Res<Rep
         "max_tokens": req.max_tokens,
         "stream": true,
         "system": req.system,
-        "messages": req.messages,
+        "messages": cached_tail(req.messages),
         // Düşünme hep açık; araç çağrıları arasındaki ilerleme notları özet olarak gelsin.
         "thinking": {"type": "adaptive", "display": "updates"},
         "output_config": {"effort": req.effort},
