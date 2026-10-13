@@ -5,7 +5,7 @@ edition = "2024"
 description = "Hafif, açık kaynak, GPU tabanlı canlı duvar kâğıdı motoru (Windows)"
 license = "MIT"
 # Otomatik güncelleme bu reponun GitHub Releases sayfasına bakar.
-repository = "https://github.com/matrixdurden/hive"
+repository = "https://github.com/matrixdurden/winloom"
 
 # Diskteki adı wallpaper.exe (kurulu olanlar bu adla bulunur).
 [[bin]]

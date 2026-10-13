@@ -1,4 +1,4 @@
-# Install winloom:  irm https://github.com/matrixdurden/hive/raw/main/install.ps1 | iex
+# Install winloom:  irm https://github.com/matrixdurden/winloom/raw/main/install.ps1 | iex
 #
 # Downloads the latest release, checks its SHA-256, installs it under %LOCALAPPDATA%\Programs\winloom
 # and starts it. No administrator needed; running it again updates winloom. Nothing is left in %TEMP%.
@@ -9,7 +9,7 @@ $ProgressPreference = 'SilentlyContinue'
 $tr = (Get-UICulture).TwoLetterISOLanguageName -eq 'tr'
 function Say($en, $tr_) { if ($tr) { $tr_ } else { $en } }
 
-$url = 'https://github.com/matrixdurden/hive/releases/latest/download'
+$url = 'https://github.com/matrixdurden/winloom/releases/latest/download'
 $exe = Join-Path $env:TEMP "winloom-$PID.exe"
 $sum = "$exe.sha256"
 

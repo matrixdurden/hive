@@ -3,7 +3,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/matrixdurden/hive/releases/latest"><img src="https://img.shields.io/github/v/release/matrixdurden/hive?style=flat-square&label=release&color=fbbf24&labelColor=16161a" alt="Latest release"></a>
+  <a href="https://github.com/matrixdurden/winloom/releases/latest"><img src="https://img.shields.io/github/v/release/matrixdurden/winloom?style=flat-square&label=release&color=fbbf24&labelColor=16161a" alt="Latest release"></a>
   <img src="https://img.shields.io/badge/Windows-10%20%C2%B7%2011-f472b6?style=flat-square&labelColor=16161a" alt="Windows 10 and 11">
   <img src="https://img.shields.io/badge/Rust-2024-a78bfa?style=flat-square&labelColor=16161a" alt="Rust 2024">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-e8e8ea?style=flat-square&labelColor=16161a" alt="License: MIT"></a>
@@ -18,7 +18,7 @@
 Paste into PowerShell:
 
 ```powershell
-irm https://github.com/matrixdurden/hive/raw/main/install.ps1 | iex
+irm https://github.com/matrixdurden/winloom/raw/main/install.ps1 | iex
 ```
 
 No administrator needed. After that winloom downloads new versions by itself, verifies them and installs them the next time it starts (or right away from Settings; automatic updates can be turned off).

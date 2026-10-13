@@ -17,7 +17,7 @@ use windows::Win32::UI::WindowsAndMessaging::PostMessageW;
 
 use ortak::{log, net, util};
 
-const REPO: &str = "matrixdurden/hive";
+const REPO: &str = "matrixdurden/winloom";
 /// Açılıştan sonra ağın oturması beklenir; sonra altı saatte bir.
 const FIRST: Duration = Duration::from_secs(45);
 const EVERY: Duration = Duration::from_secs(6 * 3600);

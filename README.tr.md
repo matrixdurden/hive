@@ -3,7 +3,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/matrixdurden/hive/releases/latest"><img src="https://img.shields.io/github/v/release/matrixdurden/hive?style=flat-square&label=sürüm&color=fbbf24&labelColor=16161a" alt="Son sürüm"></a>
+  <a href="https://github.com/matrixdurden/winloom/releases/latest"><img src="https://img.shields.io/github/v/release/matrixdurden/winloom?style=flat-square&label=sürüm&color=fbbf24&labelColor=16161a" alt="Son sürüm"></a>
   <img src="https://img.shields.io/badge/Windows-10%20%C2%B7%2011-f472b6?style=flat-square&labelColor=16161a" alt="Windows 10 ve 11">
   <img src="https://img.shields.io/badge/Rust-2024-a78bfa?style=flat-square&labelColor=16161a" alt="Rust 2024">
   <a href="LICENSE"><img src="https://img.shields.io/badge/lisans-MIT-e8e8ea?style=flat-square&labelColor=16161a" alt="Lisans: MIT"></a>
@@ -18,7 +18,7 @@
 PowerShell'e yapıştır:
 
 ```powershell
-irm https://github.com/matrixdurden/hive/raw/main/install.ps1 | iex
+irm https://github.com/matrixdurden/winloom/raw/main/install.ps1 | iex
 ```
 
 Yönetici izni gerekmez. Sonrasında winloom yeni sürümleri kendisi indirir, doğrular ve bir sonraki açılışında kurar (Ayarlar'dan hemen de kurulur, otomatik güncelleme kapatılabilir).
