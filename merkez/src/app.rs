@@ -27,6 +27,7 @@ use windows::core::{BOOL, PCWSTR, w};
 use ortak::gfx::{Color, Gfx, ImageId, Rect};
 use ortak::hub::{CLASS, COPY_TAB, WM_EXIT, WM_PENDING_TAB};
 use ortak::log;
+use ortak::form::{self, Ctl, Form, Item, Row};
 use ortak::ui::*;
 use ortak::util::{self, Res, wide};
 
@@ -53,7 +54,6 @@ const NAV: f32 = 40.0;
 /// Araçlar ve Ayarlar sayfalarının kenar boşluğu: araç sayfalarıyla aynı.
 const PAGE_PAD: f32 = PAD;
 /// Araçlar sayfasındaki kartlar.
-const CARD_H: f32 = 108.0;
 
 /// Pencere düğmeleri (küçült, büyüt, kapat).
 const CAP_W: f32 = 46.0;
@@ -66,6 +66,13 @@ const ICON_HOME: &str = "\u{E80F}";
 const TILE_W: f32 = 220.0;
 const TILE_H: f32 = 104.0;
 const TILE_GAP: f32 = 14.0;
+/// Ayarlar sayfasının satırları.
+const S_AUTOSTART: u32 = 1;
+const S_LANG: u32 = 2;
+const S_VERSION: u32 = 3;
+const S_AUTO_UPDATE: u32 = 4;
+const S_QUIT: u32 = 5;
+const S_REMOVE: u32 = 6;
 /// Ana sayfa açıkken kutucukları tazeleyen zamanlayıcı (araçların durumu değişir).
 const TIMER_HOME: usize = 9;
 /// Kenar çubuğunun başındaki arama kutusu ve altındaki boşluk.
@@ -162,18 +169,10 @@ enum Hit {
     Nav(Page),
     /// Aracın kendi sayfası (araç kendisi işler).
     Content,
-    /// Aracın aç / kapa anahtarı.
-    Switch(usize),
-    /// Açık aracın kartı ya da Ana sayfadaki kutucuğu: sayfasına gider.
+    /// Ana sayfadaki kutucuk: aracın sayfasına gider.
     Open(usize),
-    Autostart,
-    /// Dil: `true` Türkçe.
-    Lang(bool),
-    /// Hazır güncellemeyi şimdi kur, yoksa şimdi bak.
-    Update,
-    AutoUpdate,
-    Quit,
-    RemoveHive,
+    /// Araç ekle ve Ayarlar sayfalarının (sayfa kiti) öğeleri.
+    Form(form::Hit),
 }
 
 type SetupResult = (usize, bool, Result<(), String>);
@@ -501,25 +500,13 @@ impl App {
         sw
     }
 
-    fn card(&self, i: usize, w: f32) -> Rect {
-        let (l, r) = (self.side_w(w) + PAGE_PAD, w - PAGE_PAD);
-        let t = HEADER + 52.0 + i as f32 * (CARD_H + 12.0) - self.scroll;
-        Rect::new(l, t, r, t + CARD_H)
-    }
-
     fn max_scroll(&self) -> f32 {
         let (w, h) = self.size();
         let bottom = match self.page {
             Page::Home => self.live_tools().len().checked_sub(1).map_or(0.0, |k| self.tile(k, w).b + self.scroll),
-            _ => HEADER + 52.0 + TOOLS.len() as f32 * (CARD_H + 12.0),
+            _ => self.page_form(w).map_or(0.0, |f| f.bottom() - 24.0 + self.scroll),
         };
         (bottom + 12.0 - h).max(0.0)
-    }
-
-    /// Kartın aç / kapa anahtarı (sağda).
-    fn switch_rect(&self, i: usize, w: f32) -> Rect {
-        let c = self.card(i, w);
-        toggle_rect(c.r - 20.0, c.cy())
     }
 
     /// winloom'ı kaldır: önce kurulu bütün araçlar (her biri kendi kalıntı denetimiyle), sonra
@@ -589,12 +576,6 @@ impl App {
         self.sync_tools();
     }
 
-    fn settings_row(&self, n: usize, w: f32) -> Rect {
-        let t = HEADER + 12.0 + n as f32 * 64.0;
-        Rect::new(self.side_w(w) + PAGE_PAD, t, w - PAGE_PAD, t + 64.0)
-    }
-
-    /// Hazır güncellemenin "Güncelle" düğmesi (sürüm satırında).
     /// Sürüm satırının düğmesi: güncelleme hazırsa "Güncelle", değilse "Denetle" (bakılırken
     /// basılmaz).
     fn update_label() -> &'static str {
@@ -603,31 +584,6 @@ impl App {
             crate::update::Status::Checking => t!("Checking…", "Bakılıyor…"),
             _ => t!("Check", "Denetle"),
         }
-    }
-
-    fn update_rect(&self, w: f32) -> Rect {
-        let r = self.settings_row(2, w);
-        button_rect_right(&self.gfx, r.r, r.cy() - 17.0, Self::update_label(), false)
-    }
-
-    fn quit_rect(&self, w: f32) -> Rect {
-        let r = self.settings_row(4, w);
-        button_rect_right(&self.gfx, r.r, r.cy() - 17.0, t!("Quit", "Çık"), false)
-    }
-
-    fn remove_hive_rect(&self, w: f32) -> Rect {
-        let r = self.settings_row(5, w);
-        button_rect_right(&self.gfx, r.r, r.cy() - 17.0, t!("Remove", "Kaldır"), false)
-    }
-
-    /// Dil seçici: [English, Türkçe], satırın sağına yaslı.
-    fn lang_rects(&self, w: f32) -> [Rect; 2] {
-        let r = self.settings_row(1, w);
-        let g = &self.gfx;
-        let tr_w = g.measure("Türkçe", &g.f.button) + 26.0;
-        let en_w = g.measure("English", &g.f.button) + 26.0;
-        let tr = Rect::new(r.r - 3.0 - tr_w, r.cy() - 14.0, r.r - 3.0, r.cy() + 14.0);
-        [Rect::new(tr.l - en_w, tr.t, tr.l, tr.b), tr]
     }
 
     fn hit(&self, x: f32, y: f32) -> Hit {
@@ -659,44 +615,9 @@ impl App {
                 let tools = self.live_tools();
                 (0..tools.len()).find(|&k| self.tile(k, w).contains(x, y)).map_or(Hit::None, |k| Hit::Open(tools[k]))
             }
-            Page::Store => {
-                if y < HEADER + 40.0 {
-                    return Hit::None;
-                }
-                for i in 0..TOOLS.len() {
-                    if self.busy[i].is_some() {
-                        continue;
-                    }
-                    let c = self.card(i, w);
-                    let sw = self.switch_rect(i, w);
-                    if Rect::new(sw.l - 12.0, c.t, c.r, c.b).contains(x, y) {
-                        return Hit::Switch(i);
-                    }
-                    if self.installed(i) && c.contains(x, y) {
-                        return Hit::Open(i);
-                    }
-                }
-                Hit::None
-            }
-            Page::Settings => {
-                if self.settings_row(0, w).contains(x, y) {
-                    Hit::Autostart
-                } else if let Some(k) = self.lang_rects(w).iter().position(|r| r.contains(x, y)) {
-                    Hit::Lang(k == 1)
-                } else if util::installed_copy().is_some()
-                    && crate::update::status() != crate::update::Status::Checking
-                    && self.update_rect(w).contains(x, y)
-                {
-                    Hit::Update
-                } else if self.settings_row(3, w).contains(x, y) && x > self.settings_row(3, w).r - 120.0 {
-                    Hit::AutoUpdate
-                } else if self.quit_rect(w).contains(x, y) {
-                    Hit::Quit
-                } else if !self.removing_self && self.remove_hive_rect(w).contains(x, y) {
-                    Hit::RemoveHive
-                } else {
-                    Hit::None
-                }
+            Page::Store | Page::Settings => {
+                let f = self.page_form(w).map_or(form::Hit::None, |f| f.hit(&self.gfx, x, y));
+                if f == form::Hit::None { Hit::None } else { Hit::Form(f) }
             }
             Page::Tool(_) => Hit::None,
         }
@@ -728,40 +649,8 @@ impl App {
                 self.redraw();
             }
             Hit::Found(k) => self.run_found(k),
-            Hit::Switch(i) => self.start_setup(i, !self.installed(i)),
             Hit::Open(i) => self.select(Page::Tool(i)),
-            Hit::Autostart => {
-                if util::installed_copy().is_some() {
-                    set_autostart(!self.autostart);
-                    self.autostart = autostart();
-                    self.redraw();
-                }
-            }
-            Hit::Lang(tr) => {
-                ortak::i18n::set_turkish(tr);
-                self.save();
-                // Başlat menüsü açıklamaları da seçili dilde olsun.
-                let installed: Vec<bool> = (0..TOOLS.len()).map(|i| self.installed(i)).collect();
-                crate::shell::sync_shortcuts(&installed);
-                self.redraw();
-            }
-            Hit::Update => {
-                if matches!(crate::update::status(), crate::update::Status::Ready(_)) {
-                    crate::update::install(false);
-                } else {
-                    crate::update::check_now(self.hwnd);
-                }
-            }
-            Hit::AutoUpdate => {
-                self.auto_update = !self.auto_update;
-                crate::update::set_enabled(self.hwnd, self.auto_update);
-                self.save();
-                self.redraw();
-            }
-            Hit::Quit => unsafe {
-                let _ = DestroyWindow(self.hwnd);
-            },
-            Hit::RemoveHive => self.start_self_remove(),
+            Hit::Form(f) => self.form_click(f),
             Hit::None | Hit::Content => {}
         }
     }
@@ -838,13 +727,6 @@ impl App {
             }
         }
         g.translate(0.0, 0.0);
-    }
-
-    fn page_title(&self, w: f32, title: &str, sub: &str) {
-        let g = &self.gfx;
-        let x0 = self.side_w(w) + PAGE_PAD;
-        g.text(title, &g.f.heading, Rect::new(x0, HEAD_CY - 18.0, w - CAPTIONS - 12.0, HEAD_CY + 18.0), pal().text);
-        g.text(sub, &g.f.small, Rect::new(x0, HEADER + 14.0, w - PAGE_PAD, HEADER + 36.0), pal().muted);
     }
 
     // --- Arama ---
@@ -995,91 +877,51 @@ impl App {
         });
     }
 
-    fn paint_store(&self, w: f32, h: f32) {
-        let g = &self.gfx;
-        self.page_title(
-            w,
-            t!("Tools", "Araçlar"),
+    /// Araç ekle ve Ayarlar: sayfa kitiyle.
+    fn page_form(&self, w: f32) -> Option<Form> {
+        let (l, r, top) = (self.side_w(w) + PAGE_PAD, w - PAGE_PAD, HEADER + 16.0 - self.scroll);
+        let items = match self.page {
+            Page::Store => self.store_items(),
+            Page::Settings => self.settings_items(),
+            _ => return None,
+        };
+        Some(Form::new(items, l, r, top))
+    }
+
+    /// Araç ekle: her araç bir satır, sağında aç / kapa.
+    fn store_items(&self) -> Vec<Item> {
+        let mut items = vec![Item::Note(
             t!(
                 "All of them come with winloom: turn on what you want. Turned off, a tool leaves no trace.",
                 "Hepsi winloom ile gelir: istediğini aç. Kapattığın araç bilgisayarda iz bırakmaz."
-            ),
-        );
-        g.clip(Rect::new(self.side_w(w), HEADER + 40.0, w, h), || {
+            )
+            .into(),
+            false,
+        )];
+        items.push(Item::Section(String::new()));
         for (i, tool) in TOOLS.iter().enumerate() {
-            let c = self.card(i, w);
-            let on = self.installed(i);
-            // Açık aracın kartı sayfasına götürür: üstüne gelince belirginleşir.
-            g.fill(c, 8.0, if self.hover == Hit::Open(i) { pal().sel } else { pal().panel });
-            g.stroke(c, 8.0, pal().line, 1.0);
-            let sq = Rect::new(c.l + 20.0, c.cy() - 26.0, c.l + 72.0, c.cy() + 26.0);
-            g.fill(sq, 10.0, pal().panel);
-            g.stroke(sq, 10.0, pal().line, 1.0);
-            g.text(tool.glyph, &g.f.icon_large, sq, if on { accent() } else { pal().muted });
-
-            let sw = self.switch_rect(i, w);
-            let text_r = sw.l - 96.0;
-            let x = c.l + 96.0;
-            g.text(tool.name(), &g.f.heading, Rect::new(x, c.t + 16.0, text_r, c.t + 44.0), pal().text);
-            g.text(tool.tagline(), &g.f.text, Rect::new(x, c.t + 46.0, text_r, c.t + 66.0), pal().muted);
-            match &self.errors[i] {
-                Some(e) => g.text(e, &g.f.small, Rect::new(x, c.t + 68.0, text_r, c.t + 88.0), pal().red),
-                None => g.text(tool.note(), &g.f.small, Rect::new(x, c.t + 68.0, text_r, c.t + 88.0), pal().faint),
-            }
-
-            match self.busy[i] {
-                Some(install) => {
-                    let label = tools::busy_label(i, install);
-                    g.text(label, &g.f.small_right, Rect::new(sw.l - 120.0, c.t, sw.r, c.b), pal().muted);
-                }
-                None => {
-                    let label = if on { t!("On", "Açık") } else { t!("Off", "Kapalı") };
-                    let lr = Rect::new(sw.l - 80.0, c.t, sw.l - 10.0, c.b);
-                    g.text(label, &g.f.small_right, lr, if on { pal().text } else { pal().faint });
-                    toggle(g, sw, on, accent(), true);
-                }
-            }
+            let ctl = match self.busy[i] {
+                Some(install) => Ctl::Text(tools::busy_label(i, install).into()),
+                None => Ctl::Toggle(self.installed(i)),
+            };
+            let sub = self.errors[i].clone().unwrap_or_else(|| tool.tagline().into());
+            items.push(Item::Row(Row::new(i as u32, tool.name(), sub, ctl).icon(tool.glyph)));
         }
-        });
+        items
     }
 
-    fn paint_settings(&self, w: f32) {
-        let g = &self.gfx;
-        self.page_title(w, t!("Settings", "Ayarlar"), "");
+    fn settings_items(&self) -> Vec<Item> {
+        use crate::update::Status;
         let dev = util::installed_copy().is_none();
-        let r = self.settings_row(0, w);
-        if self.hover == Hit::Autostart && !dev {
-            g.fill(Rect::new(r.l - 12.0, r.t + 4.0, r.r + 12.0, r.b - 4.0), 8.0, pal().hover.alpha(0.6));
-        }
-        let sub = match dev {
+        let status = crate::update::status();
+        let autostart_sub = match dev {
             true => t!("Not available in a development copy", "Geliştirme kopyasında kullanılamaz"),
             false => t!(
                 "Starts quietly in the tray when you sign in; your wallpaper comes with it",
                 "Oturum açınca tepside sessizce başlar; duvar kâğıdın da onunla gelir"
             ),
         };
-        setting_row(g, r, t!("Start with Windows", "Windows ile başlat"), sub, 120.0);
-        toggle(g, toggle_rect(r.r, r.cy()), self.autostart, pal().text, !dev);
-
-        let r = self.settings_row(1, w);
-        setting_row(g, r, t!("Language", "Dil"), "", 200.0);
-        let [en, tr] = self.lang_rects(w);
-        g.fill(Rect::new(en.l - 3.0, en.t - 3.0, tr.r + 3.0, tr.b + 3.0), 8.0, pal().hover);
-        for (rect, label, on) in [(en, "English", !ortak::i18n::turkish()), (tr, "Türkçe", ortak::i18n::turkish())] {
-            let hovered = self.hover == Hit::Lang(label == "Türkçe");
-            if on {
-                g.fill(rect, 6.0, pal().sel);
-            } else if hovered {
-                g.fill(rect, 6.0, pal().sel.alpha(0.6));
-            }
-            g.text(label, &g.f.button, rect, if on || hovered { pal().text } else { pal().muted });
-        }
-
-        // Sürüm ve güncelleme durumu; hazır güncelleme varsa "Güncelle".
-        let r = self.settings_row(2, w);
-        use crate::update::Status;
-        let status = crate::update::status();
-        let sub = match &status {
+        let version_sub = match &status {
             _ if dev => t!("A development copy is not updated", "Geliştirme kopyası güncellenmez").to_string(),
             Status::Checking => t!("Looking for a new version…", "Yeni sürüm var mı bakılıyor…").to_string(),
             Status::Current => t!("This is the latest version", "En son sürüm bu").to_string(),
@@ -1088,44 +930,110 @@ impl App {
                 format!("{v} hazır · şimdi ya da winloom bir sonraki açılışında kurulur")
             ),
             Status::Failed(e) => t!(format!("Could not check: {e}"), format!("Bakılamadı: {e}")),
-            Status::Idle if self.auto_update => {
-                t!("New versions are looked for now and then", "Yeni sürüme arada bir bakılır").to_string()
-            }
+            Status::Idle if self.auto_update => t!("New versions are looked for now and then", "Yeni sürüme arada bir bakılır").to_string(),
             Status::Idle => t!("Automatic updates are off", "Otomatik güncelleme kapalı").to_string(),
         };
-        setting_row(g, r, &format!("{} {VERSION}", t!("Version", "Sürüm")), &sub, 140.0);
-        if !dev {
-            let primary = matches!(status, Status::Ready(_)).then(accent);
-            button(g, self.update_rect(w), Self::update_label(), None, primary, self.hover == Hit::Update);
-        }
-
-        let r = self.settings_row(3, w);
-        let sub = t!(
-            "Downloads new versions from GitHub, verifies and installs them",
-            "Yeni sürümleri GitHub'dan indirir, doğrular ve kurar"
-        );
-        setting_row(g, r, t!("Automatic updates", "Otomatik güncelle"), sub, 120.0);
-        toggle(g, toggle_rect(r.r, r.cy()), self.auto_update, accent(), !dev);
-
-        let r = self.settings_row(4, w);
-        let sub = t!("winloom and the tools' engines shut down completely", "winloom ve araçların motorları tamamen kapanır");
-        setting_row(g, r, t!("Quit", "Kapat"), sub, 120.0);
-        button(g, self.quit_rect(w), t!("Quit", "Çık"), None, None, self.hover == Hit::Quit);
-
-        let r = self.settings_row(5, w);
-        let title = t!("Remove winloom", "winloom'ı kaldır");
-        if self.removing_self {
-            let sub = t!("Removing… each tool is removed and checked in turn", "Kaldırılıyor… araçlar sırayla kaldırılıp denetleniyor");
-            setting_row(g, r, title, sub, 120.0);
+        let update = match () {
+            _ if dev => Ctl::None,
+            _ if matches!(status, Status::Ready(_)) => Ctl::Primary(Self::update_label().into()),
+            _ => Ctl::Button(Self::update_label().into()),
+        };
+        let remove = if self.removing_self {
+            Row::new(
+                S_REMOVE,
+                t!("Remove winloom", "winloom'ı kaldır"),
+                t!("Removing… each tool is removed and checked in turn", "Kaldırılıyor… araçlar sırayla kaldırılıp denetleniyor"),
+                Ctl::None,
+            )
         } else {
-            let sub = t!(
-                "Together with the tools that are on; no trace is left on this computer",
-                "Açık araçlarla birlikte; bilgisayarda hiçbir iz kalmaz"
-            );
-            setting_row(g, r, title, sub, 120.0);
-            let label = t!("Remove", "Kaldır");
-            button(g, self.remove_hive_rect(w), label, None, None, self.hover == Hit::RemoveHive);
+            Row::new(
+                S_REMOVE,
+                t!("Remove winloom", "winloom'ı kaldır"),
+                t!("Together with the tools that are on; no trace is left on this computer", "Açık araçlarla birlikte; bilgisayarda hiçbir iz kalmaz"),
+                Ctl::Button(t!("Remove", "Kaldır").into()),
+            )
+        };
+        vec![
+            Item::Section(t!("General", "Genel").into()),
+            Item::Row(Row::new(S_AUTOSTART, t!("Start with Windows", "Windows ile başlat"), autostart_sub, Ctl::Toggle(self.autostart)).dim(dev)),
+            Item::Row(Row::new(
+                S_LANG,
+                t!("Language", "Dil"),
+                "",
+                Ctl::Seg(vec!["English".into(), "Türkçe".into()], ortak::i18n::turkish() as usize),
+            )),
+            Item::Section(t!("Updates", "Güncelleme").into()),
+            Item::Row(Row::new(S_VERSION, format!("{} {VERSION}", t!("Version", "Sürüm")), version_sub, update)),
+            Item::Row(
+                Row::new(
+                    S_AUTO_UPDATE,
+                    t!("Automatic updates", "Otomatik güncelle"),
+                    t!("Downloads new versions from GitHub, verifies and installs them", "Yeni sürümleri GitHub'dan indirir, doğrular ve kurar"),
+                    Ctl::Toggle(self.auto_update),
+                )
+                .dim(dev),
+            ),
+            Item::Section("winloom".into()),
+            Item::Row(Row::new(
+                S_QUIT,
+                t!("Quit", "Kapat"),
+                t!("winloom and the tools' engines shut down completely", "winloom ve araçların motorları tamamen kapanır"),
+                Ctl::Button(t!("Quit", "Çık").into()),
+            )),
+            Item::Row(remove),
+        ]
+    }
+
+    /// Araç ekle ve Ayarlar'da tıklanan.
+    fn form_click(&mut self, f: form::Hit) {
+        match (self.page, f) {
+            (Page::Store, form::Hit::Toggle(i)) if self.busy[i as usize].is_none() => {
+                self.start_setup(i as usize, !self.installed(i as usize));
+            }
+            (Page::Store, form::Hit::Row(i)) if self.installed(i as usize) => self.select(Page::Tool(i as usize)),
+            (Page::Settings, form::Hit::Toggle(S_AUTOSTART)) if util::installed_copy().is_some() => {
+                set_autostart(!self.autostart);
+                self.autostart = autostart();
+                self.redraw();
+            }
+            (Page::Settings, form::Hit::Seg(S_LANG, k)) => {
+                ortak::i18n::set_turkish(k == 1);
+                self.save();
+                // Başlat menüsü açıklamaları da seçili dilde olsun.
+                let installed: Vec<bool> = (0..TOOLS.len()).map(|i| self.installed(i)).collect();
+                crate::shell::sync_shortcuts(&installed);
+                self.redraw();
+            }
+            (Page::Settings, form::Hit::Button(S_VERSION)) if crate::update::status() != crate::update::Status::Checking => {
+                if matches!(crate::update::status(), crate::update::Status::Ready(_)) {
+                    crate::update::install(false);
+                } else {
+                    crate::update::check_now(self.hwnd);
+                }
+            }
+            (Page::Settings, form::Hit::Toggle(S_AUTO_UPDATE)) if util::installed_copy().is_some() => {
+                self.auto_update = !self.auto_update;
+                crate::update::set_enabled(self.hwnd, self.auto_update);
+                self.save();
+                self.redraw();
+            }
+            (Page::Settings, form::Hit::Button(S_QUIT)) => unsafe {
+                let _ = DestroyWindow(self.hwnd);
+            },
+            (Page::Settings, form::Hit::Button(S_REMOVE)) if !self.removing_self => self.start_self_remove(),
+            _ => {}
         }
+    }
+
+    /// Araç ekle ya da Ayarlar: başlıkta adı, altında sayfa kiti.
+    fn paint_form(&self, w: f32, h: f32) {
+        let Some(f) = self.page_form(w) else { return };
+        let g = &self.gfx;
+        let x0 = self.side_w(w) + PAGE_PAD;
+        let title = if self.page == Page::Store { t!("Tools", "Araçlar") } else { t!("Settings", "Ayarlar") };
+        g.text(title, &g.f.heading, Rect::new(x0, HEAD_CY - 18.0, w - CAPTIONS - 12.0, HEAD_CY + 18.0), pal().text);
+        let hover = if let Hit::Form(fh) = self.hover { fh } else { form::Hit::None };
+        g.clip(Rect::new(self.side_w(w), HEADER, w, h), || f.paint(g, hover, None));
     }
 
     fn paint(&mut self) {
@@ -1147,9 +1055,8 @@ impl App {
         self.paint_sidebar(w, h);
         match (self.page, self.tool_live()) {
             (_, Some(i)) => g.clip(Rect::new(sw, 0.0, w, h), || self.paint_live(i, sw, w)),
-            (Page::Settings, _) => self.paint_settings(w),
             (Page::Home, _) => self.paint_home(w, h),
-            _ => self.paint_store(w, h),
+            _ => self.paint_form(w, h),
         }
 
         // Dar kenar çubuğunda üstüne gelinen öğenin adı.

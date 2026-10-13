@@ -8,6 +8,7 @@ pub mod i18n;
 pub mod log;
 
 pub mod frame;
+pub mod form;
 pub mod gfx;
 pub mod hotkey;
 pub mod hub;
