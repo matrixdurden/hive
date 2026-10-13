@@ -4,7 +4,7 @@
 #   araclar/<id>/   her araç kendi klasöründe: sayfası (src/), ikonu (ikon/), varsa motoru (motor/)
 # Yeni araç eklemek: ARAC-EKLEME.md.
 [workspace]
-members = ["merkez", "ortak", "araclar/*", "araclar/soundboard/motor", "araclar/soundboard/apo", "araclar/wallpaper/motor", "araclar/engram/motor"]
+members = ["merkez", "ortak", "araclar/*", "araclar/soundboard/motor", "araclar/soundboard/apo", "araclar/wallpaper/motor"]
 resolver = "3"
 
 # winloom'ın bütün crate'leri aynı sürümle çıkar (merkez, ortak, araçlar); motorların kendi sürümü var.
@@ -80,6 +80,13 @@ features = [
     "Win32_UI_Shell_Common",
     "Win32_UI_Shell_PropertiesSystem",
     "Win32_UI_WindowsAndMessaging",
+    "Win32_System_Time",
+    "Win32_System_Shutdown",
+    "Win32_System_Pipes",
+    "Win32_System_JobObjects",
+    "Win32_System_IO",
+    "Media_SpeechSynthesis",
+    "Media_Core",
 ]
 
 [profile.release]

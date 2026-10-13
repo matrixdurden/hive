@@ -9,13 +9,10 @@ pub static TOOL: Tool = Tool {
         "A voice second brain: takes notes as you talk, answers from them",
         "Sesli ikinci beyin: konuştukça not tutar, notlarından cevap verir",
     ],
-    note: [
-        "Runs as its own process · needs an AI API key",
-        "Kendi sürecinde çalışır · bir yapay zekâ API anahtarı ister",
-    ],
+    note: ["Needs an AI API key", "Bir yapay zekâ API anahtarı ister"],
     off_note: [
-        "engram closes; its settings, keys and voice cache are deleted. Your notes stay in their folder.",
-        "engram kapanır; ayarları, anahtarları ve ses önbelleği silinir. Notların kendi klasöründe kalır.",
+        "engram stops listening; its settings, keys and voice cache are deleted. Your notes stay in their folder.",
+        "engram dinlemeyi bırakır; ayarları, anahtarları ve ses önbelleği silinir. Notların kendi klasöründe kalır.",
     ],
     icons: ortak::icons!("engram"),
     installed: crate::installed,
@@ -23,5 +20,6 @@ pub static TOOL: Tool = Tool {
     uninstall: crate::uninstall,
     leftovers: crate::leftovers,
     start: |hwnd| Box::new(crate::Engram::start(hwnd)),
+    cli: crate::cli,
     ..Tool::BASE
 };

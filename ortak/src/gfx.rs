@@ -101,6 +101,21 @@ pub struct Fonts {
     pub icon_large: IDWriteTextFormat,
     /// Pencere düğmelerinin simgeleri: 10 px.
     pub icon_caption: IDWriteTextFormat,
+    /// Not gövdesi: 14 px, satır kaydırır (düzenle kullanılır).
+    pub body: IDWriteTextFormat,
+    /// Not içi başlıklar.
+    pub h1: IDWriteTextFormat,
+    pub h2: IDWriteTextFormat,
+    /// Kod: eş aralıklı 13 px.
+    pub mono: IDWriteTextFormat,
+    /// Karşılama: 30 px, ince.
+    pub display: IDWriteTextFormat,
+    /// Okuma (not gövdesi, cevaplar): 15 px, geniş satır aralığı.
+    pub read: IDWriteTextFormat,
+    pub read_h1: IDWriteTextFormat,
+    pub read_h2: IDWriteTextFormat,
+    pub read_h3: IDWriteTextFormat,
+    pub read_mono: IDWriteTextFormat,
 }
 
 /// Gömülü PNG'nin farklı boyutları; çizim hedefi yeniden yaratılınca bitmap'ler de yenilenir.
@@ -187,7 +202,26 @@ impl Gfx {
                 icon_small: format(icons, 12.0, normal, center)?,
                 icon_large: format(icons, 30.0, normal, center)?,
                 icon_caption: format(icons, 10.0, normal, center)?,
+                body: format(ui, 14.0, normal, lead)?,
+                h1: format(w!("Segoe UI Variable Display"), 24.0, semi, lead)?,
+                h2: format(w!("Segoe UI Variable Display"), 17.0, semi, lead)?,
+                mono: format(w!("Cascadia Mono"), 13.0, normal, lead)?,
+                display: format(w!("Segoe UI Variable Display"), 30.0, DWRITE_FONT_WEIGHT_SEMI_LIGHT, lead)?,
+                read: format(ui, 15.0, normal, lead)?,
+                read_h1: format(w!("Segoe UI Variable Display"), 28.0, semi, lead)?,
+                read_h2: format(w!("Segoe UI Variable Display"), 20.0, semi, lead)?,
+                read_h3: format(ui, 16.0, semi, lead)?,
+                read_mono: format(w!("Cascadia Mono"), 13.5, normal, lead)?,
             };
+            for f in [&f.body, &f.h1, &f.h2, &f.mono, &f.read, &f.read_h1, &f.read_h2, &f.read_h3, &f.read_mono] {
+                let _ = f.SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_NEAR);
+                let _ = f.SetWordWrapping(DWRITE_WORD_WRAPPING_WRAP);
+            }
+            // Okuma yazılarında satırlar nefes alsın.
+            for (fm, size) in [(&f.read, 15.0), (&f.read_h1, 28.0), (&f.read_h2, 20.0), (&f.read_h3, 16.0), (&f.read_mono, 13.5)] {
+                let ratio = if size > 18.0 { 1.25 } else { 1.62 };
+                let _ = fm.SetLineSpacing(DWRITE_LINE_SPACING_METHOD_UNIFORM, size * ratio, size * ratio * 0.8);
+            }
             Ok(Self { d2d, dw, wic, rt: None, dpi: 96.0, transparent: false, images: Vec::new(), f })
         }
     }
@@ -371,8 +405,83 @@ impl Gfx {
         });
     }
 
+    /// Radyal degradeli elips: `stops` (konum 0..1, renk), merkez `cx, cy`; `ox, oy` degradenin
+    /// merkezden kayması (ışık yönü).
+    pub fn radial(&self, cx: f32, cy: f32, rx: f32, ry: f32, ox: f32, oy: f32, stops: &[(f32, Color)]) {
+        let Some((rt, _)) = &self.rt else { return };
+        let stops: Vec<D2D1_GRADIENT_STOP> = stops.iter().map(|&(p, c)| D2D1_GRADIENT_STOP { position: p, color: c.d2d() }).collect();
+        unsafe {
+            let Ok(coll) = rt.CreateGradientStopCollection(&stops, D2D1_GAMMA_2_2, D2D1_EXTEND_MODE_CLAMP) else { return };
+            let props = D2D1_RADIAL_GRADIENT_BRUSH_PROPERTIES {
+                center: windows_numerics::Vector2 { X: cx, Y: cy },
+                gradientOriginOffset: windows_numerics::Vector2 { X: ox, Y: oy },
+                radiusX: rx,
+                radiusY: ry,
+            };
+            let Ok(brush) = rt.CreateRadialGradientBrush(&props, None, &coll) else { return };
+            let e = D2D1_ELLIPSE { point: windows_numerics::Vector2 { X: cx, Y: cy }, radiusX: rx, radiusY: ry };
+            rt.FillEllipse(&e, &brush);
+        }
+    }
+
+    /// Doğrusal degradeli dikdörtgen (yuvarlak köşeli): `a`'dan `b`'ye.
+    pub fn linear(&self, r: Rect, radius: f32, a: (f32, f32), b: (f32, f32), stops: &[(f32, Color)]) {
+        let Some((rt, _)) = &self.rt else { return };
+        let stops: Vec<D2D1_GRADIENT_STOP> = stops.iter().map(|&(p, c)| D2D1_GRADIENT_STOP { position: p, color: c.d2d() }).collect();
+        unsafe {
+            let Ok(coll) = rt.CreateGradientStopCollection(&stops, D2D1_GAMMA_2_2, D2D1_EXTEND_MODE_CLAMP) else { return };
+            let props = D2D1_LINEAR_GRADIENT_BRUSH_PROPERTIES {
+                startPoint: windows_numerics::Vector2 { X: a.0, Y: a.1 },
+                endPoint: windows_numerics::Vector2 { X: b.0, Y: b.1 },
+            };
+            let Ok(brush) = rt.CreateLinearGradientBrush(&props, None, &coll) else { return };
+            rt.FillRoundedRectangle(&D2D1_ROUNDED_RECT { rect: r.d2d(), radiusX: radius, radiusY: radius }, &brush);
+        }
+    }
+
+    /// Çizimi daireyle kırpar (yumuşak kenarlı).
+    pub fn clip_circle(&self, cx: f32, cy: f32, r: f32, f: impl FnOnce()) {
+        let Some((rt, _)) = &self.rt else { return };
+        unsafe {
+            let e = D2D1_ELLIPSE { point: windows_numerics::Vector2 { X: cx, Y: cy }, radiusX: r, radiusY: r };
+            let (Ok(geo), Ok(layer)) = (self.d2d.CreateEllipseGeometry(&e), rt.CreateLayer(None)) else {
+                f();
+                return;
+            };
+            let params = D2D1_LAYER_PARAMETERS {
+                contentBounds: D2D_RECT_F { left: -1e6, top: -1e6, right: 1e6, bottom: 1e6 },
+                geometricMask: std::mem::ManuallyDrop::new(Some(geo.cast().unwrap())),
+                maskAntialiasMode: D2D1_ANTIALIAS_MODE_PER_PRIMITIVE,
+                maskTransform: windows_numerics::Matrix3x2::identity(),
+                opacity: 1.0,
+                opacityBrush: std::mem::ManuallyDrop::new(None),
+                layerOptions: D2D1_LAYER_OPTIONS_NONE,
+            };
+            rt.PushLayer(&params, &layer);
+            f();
+            rt.PopLayer();
+            let _ = std::mem::ManuallyDrop::into_inner(params.geometricMask);
+        }
+    }
+
     pub fn circle(&self, x: f32, y: f32, radius: f32, c: Color) {
         self.fill(Rect::new(x - radius, y - radius, x + radius, y + radius), radius, c);
+    }
+
+    pub fn ring(&self, x: f32, y: f32, radius: f32, c: Color, width: f32) {
+        self.stroke(Rect::new(x - radius, y - radius, x + radius, y + radius), radius, c, width);
+    }
+
+    pub fn line(&self, x1: f32, y1: f32, x2: f32, y2: f32, c: Color, width: f32) {
+        self.with(c, |rt, b| unsafe {
+            rt.DrawLine(
+                windows_numerics::Vector2 { X: x1, Y: y1 },
+                windows_numerics::Vector2 { X: x2, Y: y2 },
+                b,
+                width,
+                None,
+            )
+        });
     }
 
     pub fn text(&self, s: &str, format: &IDWriteTextFormat, r: Rect, c: Color) {
@@ -412,6 +521,70 @@ impl Gfx {
                 rt.DrawBitmap(bmp, Some(&r.d2d()), opacity, D2D1_BITMAP_INTERPOLATION_MODE_LINEAR, None);
             }
         }
+    }
+
+    /// Satır kaydıran düzen: not gövdesi, sohbet balonu. Çizim hedefinden bağımsız, saklanabilir.
+    pub fn layout(&self, s: &str, format: &IDWriteTextFormat, width: f32) -> Option<IDWriteTextLayout> {
+        let s: Vec<u16> = s.encode_utf16().collect();
+        unsafe {
+            let l = self.dw.CreateTextLayout(&s, format, width.max(1.0), 100_000.0).ok()?;
+            let _ = l.SetWordWrapping(DWRITE_WORD_WRAPPING_WRAP);
+            let _ = l.SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_NEAR);
+            let _ = l.SetTrimming(&DWRITE_TRIMMING::default(), None);
+            Some(l)
+        }
+    }
+
+    /// Düzenin yüksekliği.
+    pub fn layout_height(l: &IDWriteTextLayout) -> f32 {
+        let mut m = DWRITE_TEXT_METRICS::default();
+        unsafe {
+            let _ = l.GetMetrics(&mut m);
+        }
+        m.height
+    }
+
+    /// Düzende UTF-16 aralığına yazı tipi ağırlığı / eğiklik / altı çizili / boy uygular.
+    pub fn style_range(l: &IDWriteTextLayout, start: u32, len: u32, bold: bool, italic: bool, underline: bool, mono: Option<&IDWriteTextFormat>) {
+        let r = DWRITE_TEXT_RANGE { startPosition: start, length: len };
+        unsafe {
+            if bold {
+                let _ = l.SetFontWeight(DWRITE_FONT_WEIGHT_SEMI_BOLD, r);
+            }
+            if italic {
+                let _ = l.SetFontStyle(DWRITE_FONT_STYLE_ITALIC, r);
+            }
+            if underline {
+                let _ = l.SetUnderline(true, r);
+            }
+            if mono.is_some() {
+                let _ = l.SetFontFamilyName(w!("Cascadia Mono"), r);
+            }
+        }
+    }
+
+    /// Düzeni çizer; `colors`: (başlangıç, uzunluk, renk) ile renklenen aralıklar (bağlantılar).
+    pub fn draw_layout(&self, l: &IDWriteTextLayout, x: f32, y: f32, c: Color, colors: &[(u32, u32, Color)]) {
+        let Some((rt, brush)) = &self.rt else { return };
+        unsafe {
+            for &(start, len, col) in colors {
+                if let Ok(b) = rt.CreateSolidColorBrush(&col.d2d(), None) {
+                    let _ = l.SetDrawingEffect(&b, DWRITE_TEXT_RANGE { startPosition: start, length: len });
+                }
+            }
+            brush.SetColor(&c.d2d());
+            rt.DrawTextLayout(windows_numerics::Vector2 { X: x, Y: y }, l, brush, D2D1_DRAW_TEXT_OPTIONS_CLIP);
+        }
+    }
+
+    /// Düzende noktanın denk geldiği UTF-16 konumu (metnin üstündeyse).
+    pub fn hit_layout(l: &IDWriteTextLayout, x: f32, y: f32) -> Option<u32> {
+        let (mut trailing, mut inside) = (BOOL(0), BOOL(0));
+        let mut m = DWRITE_HIT_TEST_METRICS::default();
+        unsafe {
+            l.HitTestPoint(x, y, &mut trailing, &mut inside, &mut m).ok()?;
+        }
+        inside.as_bool().then_some(m.textPosition)
     }
 
     pub fn measure(&self, s: &str, format: &IDWriteTextFormat) -> f32 {

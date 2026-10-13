@@ -11,7 +11,7 @@ use std::rc::Rc;
 
 use windows::Win32::Foundation::HWND;
 
-use crate::app::Tab;
+use crate::page::Tab;
 use crate::brain::Brain;
 use crate::config::Config;
 use crate::notes::Vault;

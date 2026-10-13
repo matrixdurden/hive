@@ -24,13 +24,13 @@ use crate::overlay;
 use crate::wake::{self, Spotter, Vad, VadEvent};
 
 /// İş parçacıklarından olay geldi.
-pub const WM_VOICE: u32 = WM_APP + 30;
+pub const WM_VOICE: u32 = WM_APP + 81;
 /// Mikrofon seviyesi: wParam = seviye × 1000.
-pub const WM_LEVEL: u32 = WM_APP + 31;
+pub const WM_LEVEL: u32 = WM_APP + 82;
 /// Bas-konuş tuşu ve Esc (klavye kancasından): wParam 1 basıldı, 0 bırakıldı, 2 Esc.
-pub const WM_KEY: u32 = WM_APP + 32;
+pub const WM_KEY: u32 = WM_APP + 83;
 /// Ekran ışığındaki onay düğmeleri: wParam 1 evet, 0 hayır.
-pub const WM_CONFIRM: u32 = WM_APP + 33;
+pub const WM_CONFIRM: u32 = WM_APP + 84;
 /// Konuşurken çıkış seviyesini ekran ışığına aktaran zamanlayıcı.
 pub const TIMER: usize = 0x7663;
 

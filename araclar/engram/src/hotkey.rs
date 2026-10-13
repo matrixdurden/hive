@@ -153,6 +153,8 @@ static MSG: AtomicU32 = AtomicU32::new(0);
 /// Tuş (alt 16 bit) ve değiştiriciler (üst 16 bit); 0: yok.
 static KEY: AtomicU32 = AtomicU32::new(0);
 static HELD: AtomicBool = AtomicBool::new(false);
+/// Kurulu kanca (HHOOK); 0: yok.
+static HOOK: AtomicUsize = AtomicUsize::new(0);
 
 fn post(code: usize) {
     unsafe {
@@ -213,8 +215,19 @@ pub fn hook(hwnd: HWND, msg: u32) {
     MSG.store(msg, Ordering::Relaxed);
     unsafe {
         let inst = GetModuleHandleW(None).ok();
-        if let Err(e) = SetWindowsHookExW(WH_KEYBOARD_LL, Some(hook_proc), inst.map(|i| i.into()), 0) {
-            crate::log!("klavye kancası kurulamadı: {e}");
+        match SetWindowsHookExW(WH_KEYBOARD_LL, Some(hook_proc), inst.map(|i| i.into()), 0) {
+            Ok(h) => HOOK.store(h.0 as usize, Ordering::Relaxed),
+            Err(e) => crate::log!("klavye kancası kurulamadı: {e}"),
+        }
+    }
+}
+
+/// Kancayı kaldırır (engram kapatılınca).
+pub fn unhook() {
+    let h = HOOK.swap(0, Ordering::Relaxed);
+    if h != 0 {
+        unsafe {
+            let _ = windows::Win32::UI::WindowsAndMessaging::UnhookWindowsHookEx(windows::Win32::UI::WindowsAndMessaging::HHOOK(h as *mut _));
         }
     }
 }

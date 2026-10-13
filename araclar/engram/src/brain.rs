@@ -15,7 +15,7 @@ use crate::agent::{Agent, Hooks, Mode, Out};
 use crate::config::Config;
 
 /// Ajandan olay geldi.
-pub const WM_AGENT: u32 = WM_APP + 20;
+pub const WM_AGENT: u32 = WM_APP + 80;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Role {

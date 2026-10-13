@@ -11,7 +11,7 @@ use windows::Win32::Graphics::DirectWrite::IDWriteTextLayout;
 use windows::Win32::UI::WindowsAndMessaging::{KillTimer, SetTimer, WM_TIMER};
 
 use crate::agent::Mode;
-use crate::app::Shared;
+use crate::page::Shared;
 use crate::brain::Role;
 use crate::gfx::{Color, Gfx, Rect};
 use crate::ui::*;
@@ -106,7 +106,7 @@ impl HomePage {
     }
 
     fn redraw(&self) {
-        crate::app::redraw(self.hwnd);
+        crate::page::redraw(self.hwnd);
     }
 
     fn column(&self) -> (f32, f32) {
@@ -745,7 +745,7 @@ impl Page for HomePage {
                 let (date, _) = crate::util::now();
                 let mut s = self.shared.borrow_mut();
                 s.open_note = Some(format!("gunluk/{date}.md"));
-                s.open_tab = Some(crate::app::Tab::Memory);
+                s.open_tab = Some(crate::page::Tab::Memory);
             }
             Hit::Yes | Hit::No => self.shared.borrow_mut().brain.answer(hit == Hit::Yes),
             Hit::Link(i, k) => {
@@ -753,7 +753,7 @@ impl Page for HomePage {
                 if let Some(t) = target {
                     let mut s = self.shared.borrow_mut();
                     s.open_note = Some(t);
-                    s.open_tab = Some(crate::app::Tab::Memory);
+                    s.open_tab = Some(crate::page::Tab::Memory);
                 }
             }
             _ => {}

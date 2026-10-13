@@ -19,16 +19,19 @@ winloom/
 
 ## İki tür araç
 
-- **Hafif:** winloom'ın içinde çalışır. Pil, Ses aygıtları, Dock ve Tıklayıcı bu türden.
-  Sayfa ve iş aynı crate'te durur.
-- **Ağır:** kendi sürecinde çalışır, winloom onu açar ve kapatır. Duvar kâğıdı ve engram
+- **Hafif:** winloom'ın içinde çalışır. Pil, Ses aygıtları, Dock, Tıklayıcı ve engram bu
+  türden. Sayfa ve iş aynı crate'te durur.
+- **Ağır:** işin bir kısmı kendi sürecinde çalışır, winloom onu açar ve kapatır. Duvar kâğıdı
   (`motor/`, winloom.exe'nin içinde taşınır, açılınca diske yazılır) ve VPN (rabbithole, açılınca
-  GitHub'dan indirilir) bu türden. engram kendi penceresini de açar; `--hub` ile winloom'ın aracı
-  olarak çalışır (tepsi ikonu, kısayol, oturumda başlama winloom'ın). Mikrofon, ekran kartı, ağ gibi ağır ya da riskli işler buraya girer:
+  GitHub'dan indirilir) bu türden. Ekran kartı, sistem hizmeti gibi riskli işler buraya girer:
   çökerse winloom'ı ve öbür araçları düşürmez.
 
-Kullanıcı ikisini aynı görür: Araçlar sayfasında bir kart, aç/kapa anahtarı, kenar çubuğunda bir
-sayfa. Tepside yalnızca winloom'ın ikonu olur; araçların tepsi ikonu ve kendi menüsü olmaz.
+**Arayüz her zaman winloom'ın penceresinde.** Araç kendi uygulama penceresini açmaz; ekranları
+kenar çubuğundaki sayfasındadır (alt ekranlar varsa sayfanın başlığında sekmeler: engram'ın
+"Ana · Hafıza" ve ayarlar düğmesi gibi). Kullanıcı hepsini aynı görür: Araçlar sayfasında bir kart,
+aç/kapa anahtarı, kenar çubuğunda bir sayfa. Tepside yalnızca winloom'ın ikonu olur; araçların
+tepsi ikonu ve kendi menüsü olmaz. Bildirim gerekiyorsa sayfa `take_notice` ile winloom'ın
+tepsisinden gösterir; winloom'ı kendi sayfasında öne getirmek `ortak::hub::post_tab`.
 
 ## Adımlar
 
@@ -106,7 +109,7 @@ sayfa. Tepside yalnızca winloom'ın ikonu olur; araçların tepsi ikonu ve kend
   | audio | 50–59 | 501– | 5001– |
   | clicker | 60–69 | 601– | 6001– |
   | dock | 70–79 | | |
-  | engram | | 801– | |
+  | engram | 80–89 | 0x686f, 0x6e74, 0x7663 | (klavye kancası) |
   | **sıradaki araç** | **90–99** | **901–** | **9001–** |
 
   Aracın kendi açtığı pencerelerin (dock çubuğu gibi) kimlikleri bu tabloya girmez.

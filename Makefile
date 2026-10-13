@@ -6,11 +6,10 @@ VERSION          := $(shell grep -m1 '^version' Cargo.toml | cut -d'"' -f2)
 
 .PHONY: build install stop log ikon release engram-ses
 
-# winloom.exe'nin içine gömülenler önce: soundboard'un mikrofon efekti DLL'i, duvar kâğıdı ve engram motorları.
+# winloom.exe'nin içine gömülenler önce: soundboard'un mikrofon efekti DLL'i ve duvar kâğıdı motoru.
 build:
 	cargo build --release -p soundboard-apo
 	cargo build --release -p wallpaper-motor
-	cargo build --release -p engram-motor
 	cargo build --release -p winloom
 
 # Windows tarafına kopyala ve başlat (çalışan kopya kapatılır).
@@ -49,5 +48,5 @@ engram-ses:
 	test -x "$(SES_DIR)/.venv/bin/python" || uv venv -q --python 3.11 "$(SES_DIR)/.venv"
 	uv pip install -q --python "$(SES_DIR)/.venv/bin/python" coqui-tts "transformers>=4.57,<5" speechbrain
 	uv pip install -q --python "$(SES_DIR)/.venv/bin/python" "torch==2.7.1" "torchaudio==2.7.1" --index-url https://download.pytorch.org/whl/cu128
-	cp araclar/engram/motor/araclar/xtts_sunucu.py "$(SES_DIR)/sunucu.py"
+	cp araclar/engram/ses/xtts_sunucu.py "$(SES_DIR)/sunucu.py"
 	@echo "Yerel ses kuruldu: $(SES_DIR)"

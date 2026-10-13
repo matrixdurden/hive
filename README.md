@@ -37,7 +37,7 @@ Every tool comes with winloom: turn on the ones you want on the **Tools** page. 
 | <img src="araclar/dock/ikon/dock-64.png" width="40"> | **Dock** | A dock in place of the Windows taskbar, in the Windows 11 look: your pinned apps and the running ones in one floating bar, with Wi-Fi, sound, battery and the clock at its end. Icons under the cursor grow, apps bounce when they want your attention, hovering shows live previews of their windows and you rearrange them by dragging. It always stays on screen, maximized windows end above it, and it stays out of fullscreen games. Throw the cursor into the top-left corner to see all windows (Win+Tab), into the bottom-right corner for the desktop (both can be turned off). Win+1…9 opens the apps in dock order; "Pin to dock" is in the right-click menu. Remove it and the taskbar and Start come back as they were. |
 | <img src="araclar/dock/ikon/dock-64.png" width="40"> | **Music** | What Spotify is playing, in a strip next to the dock, as tall as the dock: cover, song, artist, previous / play / next and a thin progress line you can click to seek. Click the strip and your open Spotify window comes forward. Its background is the cover blurred, the cover's color, or plain like the dock. Works with the Spotify app and the Spotify web app installed from the browser; no Spotify login. Other players (YouTube in the browser, ...) can show up too. |
 | <img src="araclar/clicker/ikon/clicker-64.png" width="40"> | **Clicker** | A classic auto clicker. Hold a key (or press it once to toggle) and it clicks where the cursor is with the left, right or middle button, from one click every two seconds up to a hundred a second; it stops when you let go, or after the number of clicks you set. The key is yours to pick (`F6` to start with). |
-| <img src="araclar/engram/ikon/engram-64.png" width="40"> | **engram** | A voice second brain: it takes notes as you talk and answers from them, in its own window. Talk or type on Home, browse your notes (plain Markdown in your own folder) in Memory. Needs an AI API key. Runs as its own process, so the rest of winloom never waits on it. |
+| <img src="araclar/engram/ikon/engram-64.png" width="40"> | **engram** | A voice second brain: it takes notes as you talk and answers from them. Talk or type on Home, browse your notes (plain Markdown in your own folder) in Memory; both right in winloom's window. Say its wake word or hold its key to talk; the screen edges light up while it listens. Needs an AI API key. |
 
 <table>
   <tr>
@@ -78,7 +78,6 @@ make release    # GitHub release with the version in Cargo.toml
 | [`ortak/`](ortak) | Code every tool shares: drawing, UI parts, logging, network, language, the tool contract |
 | [`araclar/<id>/`](araclar) | One folder per tool: its page (`src/`), icon (`ikon/`) and engine if it has one (`motor/`) |
 | [`araclar/soundboard/motor/`](araclar/soundboard/motor) | Soundboard engine; its microphone effect in [`apo/`](araclar/soundboard/apo) |
-| [`araclar/engram/motor/`](araclar/engram/motor) | engram itself: its window, notes, chat, voice |
 | [`araclar/wallpaper/motor/`](araclar/wallpaper/motor) | Wallpaper engine and the [`.cheshire` format](araclar/wallpaper/motor/README.md#the-cheshire-format) |
 
 Adding a new tool: [ARAC-EKLEME.md](ARAC-EKLEME.md) (Turkish).

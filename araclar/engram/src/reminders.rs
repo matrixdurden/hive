@@ -9,7 +9,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use windows::Win32::Foundation::{HWND, LPARAM, WPARAM};
 use windows::Win32::UI::WindowsAndMessaging::{PostMessageW, WM_APP};
 
-pub const WM_REMINDER: u32 = WM_APP + 40;
+pub const WM_REMINDER: u32 = WM_APP + 85;
 
 struct Item {
     id: u64,

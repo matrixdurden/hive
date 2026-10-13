@@ -7,7 +7,7 @@ use std::cell::RefCell;
 use windows::Win32::Foundation::HWND;
 use windows::Win32::Graphics::DirectWrite::IDWriteTextLayout;
 
-use crate::app::Shared;
+use crate::page::Shared;
 use crate::gfx::{Color, Gfx, Rect};
 use crate::notes::md::{self, Kind, Style};
 use crate::ui::*;
@@ -470,7 +470,7 @@ impl NotesPage {
     }
 
     fn redraw(&self) {
-        crate::app::redraw(self.shared.borrow().hwnd);
+        crate::page::redraw(self.shared.borrow().hwnd);
     }
 
     /// Açık notu düzenlemeye başlar: ham markdown düzenleyicide.

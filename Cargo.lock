@@ -150,16 +150,10 @@ name = "engram"
 version = "0.5.0"
 dependencies = [
  "ortak",
- "windows",
-]
-
-[[package]]
-name = "engram-motor"
-version = "0.1.0"
-dependencies = [
  "serde",
  "serde_json",
  "windows",
+ "windows-core",
  "windows-numerics",
 ]
 

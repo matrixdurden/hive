@@ -25,7 +25,7 @@ use windows::Win32::UI::WindowsAndMessaging::*;
 use windows::core::{BOOL, PCWSTR, w};
 
 use ortak::gfx::{Color, Gfx, ImageId, Rect};
-use ortak::hub::{CLASS, COPY_TAB, WM_EXIT};
+use ortak::hub::{CLASS, COPY_TAB, WM_EXIT, WM_PENDING_TAB};
 use ortak::log;
 use ortak::ui::*;
 use ortak::util::{self, Res, wide};
@@ -40,8 +40,6 @@ const VERSION: &str = env!("CARGO_PKG_VERSION");
 const WM_TRAY: u32 = WM_APP + 1;
 /// Bir aracın kurulumu ya da kaldırılması bitti (sonuçlar `results` kuyruğunda).
 const WM_TOOL_SETUP: u32 = WM_APP + 2;
-/// Uygulama meşgulken gelen sekme isteği sonradan uygulanır.
-const WM_PENDING_TAB: u32 = WM_APP + 3;
 /// winloom'ın kendini kaldırması bitti (hatalar `self_errors`'ta).
 const WM_SELF_DONE: u32 = WM_APP + 4;
 const WM_MOUSELEAVE: u32 = 0x02A3;
@@ -211,7 +209,6 @@ fn nc_calc_size(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
 
 thread_local! {
     static APP: RefCell<Option<App>> = const { RefCell::new(None) };
-    static PENDING_TAB: RefCell<Option<String>> = const { RefCell::new(None) };
 }
 
 fn autostart() -> bool {
@@ -1350,7 +1347,7 @@ impl App {
                 return Some(LRESULT(1));
             }
             WM_PENDING_TAB => {
-                if let Some(tab) = PENDING_TAB.with(|p| p.borrow_mut().take()) {
+                if let Some(tab) = ortak::hub::take_tab() {
                     self.open_tab(&tab);
                 }
             }
@@ -1444,7 +1441,7 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
                 return LRESULT(0);
             }
             let bytes = unsafe { std::slice::from_raw_parts(cds.lpData as *const u8, cds.cbData as usize) };
-            PENDING_TAB.with(|p| *p.borrow_mut() = Some(String::from_utf8_lossy(bytes).into_owned()));
+            ortak::hub::set_tab(String::from_utf8_lossy(bytes).into_owned());
             unsafe {
                 let _ = PostMessageW(Some(hwnd), WM_PENDING_TAB, WPARAM(0), LPARAM(0));
             }

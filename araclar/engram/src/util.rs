@@ -22,28 +22,13 @@ pub fn error_box(msg: &str) {
     }
 }
 
-static HUB: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
-
-/// winloom'ın aracı olarak mı çalışıyor (`--hub`): tepsi ikonu, Başlat kısayolu, Uygulamalar
-/// kaydı ve oturumda başlama winloom'ın; engram bunları yapmaz.
-pub fn hub() -> bool {
-    HUB.load(std::sync::atomic::Ordering::Relaxed)
-}
-
-pub fn set_hub(on: bool) {
-    HUB.store(on, std::sync::atomic::Ordering::Relaxed);
-}
-
-/// Kurulu exe, ayarlar ve log burada durur: winloom'da %LOCALAPPDATA%\Programs\winloom\engram,
-/// tek başınayken %LOCALAPPDATA%\Programs\engram.
+/// %LOCALAPPDATA%\Programs\winloom\engram: ayarlar, anahtarlar, ses önbelleği. Notlar kullanıcının
+/// kendi klasöründe.
 pub fn data_dir() -> PathBuf {
-    if hub() { hub_dir() } else { standalone_dir() }
+    ortak::util::data_dir().join("engram")
 }
 
-pub fn hub_dir() -> PathBuf {
-    local_programs().join("winloom").join("engram")
-}
-
+/// engram'ın eski, tek başına kurulumu (%LOCALAPPDATA%\Programs\engram).
 pub fn standalone_dir() -> PathBuf {
     local_programs().join("engram")
 }

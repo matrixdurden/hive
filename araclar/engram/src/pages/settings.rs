@@ -5,7 +5,7 @@
 
 use windows::Win32::Foundation::HWND;
 
-use crate::app::Shared;
+use crate::page::Shared;
 use crate::gfx::{Gfx, Rect};
 use crate::pages::VoiceReq;
 use crate::ui::*;
@@ -34,8 +34,6 @@ enum Act {
     Train,
     VoiceNote,
     Browse,
-    Quit,
-    Remove,
 }
 
 impl Act {
@@ -54,8 +52,6 @@ impl Act {
             Act::Train => t!("Start", "Başla"),
             Act::VoiceNote => t!("Open note", "Notu aç"),
             Act::Browse => t!("Browse…", "Gözat…"),
-            Act::Quit => t!("Quit", "Çık"),
-            Act::Remove => t!("Remove", "Kaldır"),
         }
     }
 }
@@ -75,15 +71,12 @@ const F_SPOTIFY: usize = 9;
 /// Seçenek satırları.
 const S_MODEL: usize = 0;
 const S_EFFORT: usize = 1;
-const S_LANG: usize = 2;
-const S_THEME: usize = 3;
 const S_TTS: usize = 4;
 const S_CONFIRM: usize = 5;
 
 /// Aç/kapa satırları.
 const T_WAKE: usize = 0;
 const T_CONTROL: usize = 1;
-const T_AUTOSTART: usize = 3;
 const T_LOCK: usize = 4;
 
 const MODELS: [(&str, &str); 2] = [("Opus 5.5", "claude-opus-5-5"), ("Sonnet 5.5", "claude-sonnet-5-5")];
@@ -107,7 +100,6 @@ enum Ctl {
 pub struct SettingsPage {
     shared: Shared,
     fields: Vec<TextField>,
-    autostart: bool,
     scroll: f32,
     hover: Hit,
     pressed: Hit,
@@ -134,24 +126,14 @@ impl SettingsPage {
         fields[F_GEMINI].mask = true;
         fields[F_ANTHROPIC].mask = true;
         fields[F_ELEVEN].mask = true;
-        let autostart = crate::shell::autostart();
-        SettingsPage { shared, fields, autostart, scroll: 0.0, hover: Hit::None, pressed: Hit::None, w: 0.0, h: 0.0 }
+        SettingsPage { shared, fields, scroll: 0.0, hover: Hit::None, pressed: Hit::None, w: 0.0, h: 0.0 }
     }
 
     /// Satırlar sırayla: (başlık, açıklama, kontrol).
-    /// winloom modunda oturumda başlama ve kaldırma winloom'ın: o satırlar yok.
+    /// Dil, tema, oturumda başlama ve kaldırma winloom'ın Ayarlar'ında.
     fn rows(&self) -> Vec<(&'static str, String, Ctl)> {
-        let mut rows = self.all_rows();
-        if crate::util::hub() {
-            rows.retain(|(_, _, ctl)| !matches!(ctl, Ctl::Toggle(T_AUTOSTART) | Ctl::Button(Act::Remove)));
-        }
-        rows
-    }
-
-    fn all_rows(&self) -> Vec<(&'static str, String, Ctl)> {
         let s = self.shared.borrow();
         let c = &s.config;
-        let dev = crate::util::installed_copy().is_none();
         let trained = if s.trained >= 3 {
             t!(format!("Learned from {} samples: recognised on this computer", s.trained), format!("{} örnekten öğrendi: bu bilgisayarda tanınır", s.trained))
         } else if !s.train_msg.is_empty() && s.voice_state == crate::voice::State::Training {
@@ -261,15 +243,6 @@ impl SettingsPage {
                 format!("{} · {}", crate::usage::summary(c.budget), crate::usage::tokens()),
                 Ctl::Field(F_BUDGET),
             ),
-            (t!("Language", "Dil"), String::new(), Ctl::Seg(S_LANG)),
-            (t!("Theme", "Tema"), String::new(), Ctl::Seg(S_THEME)),
-            (
-                t!("Start with Windows", "Windows ile başlat"),
-                if dev { t!("Not available in a development copy", "Geliştirme kopyasında kullanılamaz").into() } else { t!("Starts quietly in the tray when you sign in", "Oturum açınca tepside sessizce başlar").into() },
-                Ctl::Toggle(T_AUTOSTART),
-            ),
-            (t!("Quit", "Kapat"), t!("engram shuts down completely", "engram tamamen kapanır").into(), Ctl::Button(Act::Quit)),
-            (t!("Remove engram", "engram'ı kaldır"), t!("Settings and keys are deleted; your notes stay", "Ayarlar ve anahtarlar silinir; notların kalır").into(), Ctl::Button(Act::Remove)),
         ]
     }
 
@@ -303,10 +276,8 @@ impl SettingsPage {
         match s {
             S_MODEL => MODELS.iter().map(|m| m.0.to_string()).collect(),
             S_EFFORT => vec![t!("low", "az").into(), t!("medium", "orta").into(), t!("high", "çok").into()],
-            S_LANG => vec!["English".into(), "Türkçe".into()],
             S_TTS => vec![t!("Local", "Yerel").into(), "Gemini".into(), "ElevenLabs".into(), "Windows".into(), t!("Off", "Kapalı").into()],
-            S_CONFIRM => vec![t!("Always", "Her zaman").into(), t!("Risky only", "Yalnızca riskli").into(), t!("Never", "Hiç").into()],
-            _ => vec!["Claude".into(), "Windows".into()],
+            _ => vec![t!("Always", "Her zaman").into(), t!("Risky only", "Yalnızca riskli").into(), t!("Never", "Hiç").into()],
         }
     }
 
@@ -315,10 +286,8 @@ impl SettingsPage {
         match s {
             S_MODEL => MODELS.iter().position(|m| m.1 == c.model).unwrap_or(0),
             S_EFFORT => EFFORTS.iter().position(|e| *e == c.effort).unwrap_or(1),
-            S_LANG => crate::i18n::turkish() as usize,
             S_TTS => TTS.iter().position(|t| *t == c.tts).unwrap_or(0),
-            S_CONFIRM => CONFIRMS.iter().position(|x| *x == c.confirm).unwrap_or(1),
-            _ => (theme() == Theme::Windows) as usize,
+            _ => CONFIRMS.iter().position(|x| *x == c.confirm).unwrap_or(1),
         }
     }
 
@@ -327,14 +296,8 @@ impl SettingsPage {
         match t {
             T_WAKE => c.wake,
             T_CONTROL => c.control,
-            T_LOCK => c.voice_lock,
-
-            _ => self.autostart,
+            _ => c.voice_lock,
         }
-    }
-
-    fn toggle_enabled(&self, t: usize) -> bool {
-        t != T_AUTOSTART || crate::util::installed_copy().is_some()
     }
 
     fn segs(&self, g: &Gfx, row: Rect, labels: &[String]) -> Vec<Rect> {
@@ -414,7 +377,7 @@ impl SettingsPage {
                     self.segs(g, r, &labels).iter().position(|sr| sr.contains(x, y)).map_or(Hit::None, |k| Hit::Seg(s, k))
                 }
                 Ctl::Toggle(t) => {
-                    if self.toggle_enabled(t) && toggle_rect(r.r - 4.0, r.cy()).contains(x, y) { Hit::Toggle(t) } else { Hit::None }
+                    if toggle_rect(r.r - 4.0, r.cy()).contains(x, y) { Hit::Toggle(t) } else { Hit::None }
                 }
                 Ctl::Button(a) => {
                     if self.button_rect(g, a, r).contains(x, y) { Hit::Button(a) } else { Hit::None }
@@ -540,29 +503,16 @@ impl SettingsPage {
         match seg {
             S_MODEL => st.config.model = MODELS[k.min(1)].1.into(),
             S_EFFORT => st.config.effort = EFFORTS[k.min(2)].into(),
-            S_LANG => {
-                crate::i18n::set_turkish(k == 1);
-                st.config.turkish = k == 1;
-                crate::shell::sync_shortcut();
-            }
             S_TTS => {
                 st.config.tts = TTS[k.min(4)].into();
                 st.voice_req = Some(VoiceReq::Apply);
             }
-            S_CONFIRM => st.config.confirm = CONFIRMS[k.min(2)],
-            _ => st.set_theme = Some(if k == 1 { Theme::Windows } else { Theme::Claude }),
+            _ => st.config.confirm = CONFIRMS[k.min(2)],
         }
         st.config.save();
     }
 
     fn flip(&mut self, t: usize) {
-        if t == T_AUTOSTART {
-            if let Some(exe) = crate::util::installed_copy() {
-                crate::shell::set_autostart((!self.autostart).then_some(exe.as_str()));
-                self.autostart = crate::shell::autostart();
-            }
-            return;
-        }
         let mut s = self.shared.borrow_mut();
         match t {
             T_WAKE => {
@@ -597,7 +547,7 @@ impl SettingsPage {
                         Ok(_) => crate::log!("spotify bağlandı"),
                         Err(e) => crate::util::error_box(&format!("Spotify: {e}")),
                     }
-                    crate::app::redraw(windows::Win32::Foundation::HWND(hwnd as *mut _));
+                    crate::page::redraw(windows::Win32::Foundation::HWND(hwnd as *mut _));
                 });
             }
             Act::GeminiVoice => {
@@ -681,7 +631,7 @@ impl SettingsPage {
             Act::VoiceNote => {
                 let mut s = self.shared.borrow_mut();
                 s.open_note = Some(format!("{}/{}.md", crate::notes::SYSTEM_DIR, crate::voice::NOTE));
-                s.open_tab = Some(crate::app::Tab::Memory);
+                s.open_tab = Some(crate::page::Tab::Memory);
             }
             Act::Browse => {
                 let (hwnd, cur) = {
@@ -692,13 +642,11 @@ impl SettingsPage {
                     self.set_vault(&p.display().to_string());
                 }
             }
-            Act::Quit => self.shared.borrow_mut().quit = true,
-            Act::Remove => self.shared.borrow_mut().remove_requested = true,
         }
     }
 
     fn redraw(&self) {
-        crate::app::redraw(self.shared.borrow().hwnd);
+        crate::page::redraw(self.shared.borrow().hwnd);
     }
 }
 
@@ -765,7 +713,7 @@ impl Page for SettingsPage {
                             g.text(l, &g.f.button, *sr, if on || hov { pal().text } else { pal().muted });
                         }
                     }
-                    Ctl::Toggle(t) => toggle(g, toggle_rect(r.r - 4.0, r.cy()), self.toggled(t), accent(), self.toggle_enabled(t)),
+                    Ctl::Toggle(t) => toggle(g, toggle_rect(r.r - 4.0, r.cy()), self.toggled(t), accent(), true),
                     Ctl::Button(a) => {
                         let primary = a == Act::Train && self.shared.borrow().voice_state == crate::voice::State::Training;
                         button(g, self.button_rect(g, a, r), a.label(), None, primary.then(accent), self.hover == Hit::Button(a));
@@ -863,7 +811,6 @@ impl Page for SettingsPage {
 
     fn set_visible(&mut self, visible: bool) {
         if visible {
-            self.autostart = crate::shell::autostart();
             // Dışarıdan değişmiş olabilecek alanlar.
             let c = self.shared.borrow().config.clone();
             if !self.fields.iter().any(|f| f.focused) {
