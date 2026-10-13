@@ -833,7 +833,7 @@ impl App {
     /// Ana sayfanın `k`'inci kutucuğu: içerik genişliğine sığdığı kadar sütun.
     fn tile(&self, k: usize, w: f32) -> Rect {
         let (l, r) = (self.side_w(w) + PAGE_PAD, w - PAGE_PAD);
-        let cols = (((r - l + TILE_GAP) / (TILE_W + TILE_GAP)).floor() as usize).clamp(1, 4);
+        let cols = (((r - l + TILE_GAP) / (TILE_W + TILE_GAP)).floor() as usize).max(1);
         let tw = (r - l - TILE_GAP * (cols - 1) as f32) / cols as f32;
         let (col, row) = (k % cols, k / cols);
         let x = l + col as f32 * (tw + TILE_GAP);

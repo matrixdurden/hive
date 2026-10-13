@@ -35,6 +35,7 @@ use windows::Win32::UI::Shell::ShellExecuteW;
 use windows::Win32::UI::WindowsAndMessaging::*;
 use windows::core::{GUID, PCWSTR, w};
 
+use ortak::form::{self, Ctl, Form, Item, Row};
 use ortak::gfx::{Gfx, Rect};
 use ortak::log;
 use ortak::ui::*;
@@ -67,10 +68,9 @@ const SURVIVAL_CPU: u32 = 40;
 const DEFAULT_CLOSE: &str = "RobloxPlayerBeta;javaw;ElyPrismLauncher;LightStudio-background;LightStudioHelper;OmenCommandCenterBackground;NVIDIA Overlay";
 const DEFAULT_IGPU: &str = "brave;Spotify;claude;Discord;WhatsApp;Code;msedgewebview2";
 
-const PANEL_HEAD: f32 = 56.0;
-const ROW: f32 = 52.0;
-const GAP: f32 = 12.0;
-const CARD_H: f32 = 92.0;
+/// Sayfa satırları (vites satırları vitesin kendi numarasını taşır).
+const R_AUTO: u32 = 10;
+const R_THRESHOLD: u32 = 11;
 
 pub fn dir() -> PathBuf {
     util::data_dir().join("battery")
@@ -315,18 +315,7 @@ pub fn probe() -> String {
 enum Hit {
     None,
     Folder,
-    Card(u8),
-    Auto,
-    Threshold(usize),
-}
-
-struct Layout {
-    cards: [Rect; 3],
-    hint: Option<Rect>,
-    panel1: Rect,
-    auto_row: Rect,
-    thr_row: Rect,
-    bottom: f32,
+    Form(form::Hit),
 }
 
 pub struct Battery {
@@ -754,151 +743,71 @@ impl Battery {
         Rect::new(self.head_r - 36.0, HEAD_CY - 18.0, self.head_r, HEAD_CY + 18.0)
     }
 
-    fn layout_all(&self) -> Layout {
-        let w = self.w;
-        let top = HEADER + 16.0 - self.scroll;
-        let cw = (w - 2.0 * PAD - 2.0 * GAP) / 3.0;
-        let ct = top + 30.0;
-        let cards = [0, 1, 2].map(|i| {
-            let l = PAD + i as f32 * (cw + GAP);
-            Rect::new(l, ct, l + cw, ct + CARD_H)
-        });
-        let inner = |t: f32| Rect::new(PAD + 20.0, t, w - PAD - 20.0, t + ROW);
-        let mut y = ct + CARD_H + 12.0;
-        // Pildeyken kapatılması iyi olanlar (varsa) kartların altında tek satır.
-        let hint = (!self.suggest.is_empty()).then(|| Rect::new(PAD, y, w - PAD, y + 22.0));
-        if hint.is_some() {
-            y += 26.0;
+    fn threshold_labels() -> Vec<String> {
+        THRESHOLDS.iter().map(|&t| if t == 0 { t!("Off", "Kapalı").to_string() } else { format!("%{t}") }).collect()
+    }
+
+    /// Sayfa kitiyle: vitesler (her biri bir satır, seçili olanda işaret) ve otomatik geçiş.
+    fn items(&self) -> Vec<Item> {
+        let mut items = vec![Item::Section(t!("Gear", "Vites").into())];
+        for m in MODES {
+            let sub = if m == PLUGGED { t!("full speed", "tam hız").to_string() } else { self.full_text(m) };
+            let row = Row::new(m as u32, mode_name(m), sub, Ctl::Check(self.mode == m)).icon(mode_icon(m)).clickable();
+            items.push(Item::Row(row));
         }
-        let p1_t = y + 4.0;
-        y = p1_t + PANEL_HEAD - 12.0;
-        let auto_row = inner(y);
-        let thr_row = inner(y + ROW);
-        let panel1 = Rect::new(PAD, p1_t, w - PAD, thr_row.b + 8.0);
-        Layout { cards, hint, panel1, auto_row, thr_row, bottom: panel1.b + 24.0 }
+        let mut how = if self.cfg.auto && !self.manual { t!("Chosen automatically", "Otomatik seçildi") } else { t!("Chosen by you", "Elle seçildi") }
+            .to_string();
+        // Pildeyken kapatılması iyi olanlar (varsa) aynı satırda.
+        if !self.suggest.is_empty() {
+            how += &format!(" · {}: {}", t!("Worth closing", "Kapatman iyi olur"), self.suggest.join(", "));
+        }
+        items.push(Item::Note(how, false));
+        let sel = THRESHOLDS.iter().position(|&t| t == self.cfg.threshold).unwrap_or(0);
+        items.extend([
+            Item::Section(t!("Automatic", "Otomatik").into()),
+            Item::Row(Row::new(
+                R_AUTO,
+                t!("Follow the charger", "Şarja göre geç"),
+                t!("unplugged → Out, plugged in → Plugged in", "çıkınca Dışarıda, takılınca Prizde"),
+                Ctl::Toggle(self.cfg.auto),
+            )),
+            Item::Row(Row::new(
+                R_THRESHOLD,
+                t!("Low battery alert", "Pil uyarısı"),
+                t!("a notification; switching stays yours", "bildirim gelir, geçiş sende"),
+                Ctl::Seg(Self::threshold_labels(), sel),
+            )),
+        ]);
+        items
+    }
+
+    fn form(&self) -> Form {
+        Form::new(self.items(), PAD, self.w - PAD, HEADER + 16.0 - self.scroll)
     }
 
     fn max_scroll(&self) -> f32 {
-        let l = self.layout_all();
-        (l.bottom + self.scroll - self.h).max(0.0)
-    }
-
-    fn segments(g: &Gfx, r: Rect, labels: &[String]) -> Vec<Rect> {
-        let widths: Vec<f32> = labels.iter().map(|l| g.measure(l, &g.f.button) + 26.0).collect();
-        let total: f32 = widths.iter().sum::<f32>() + 6.0;
-        let mut x = r.r - total + 3.0;
-        widths
-            .iter()
-            .map(|&wd| {
-                let s = Rect::new(x, r.cy() - 14.0, x + wd, r.cy() + 14.0);
-                x += wd;
-                s
-            })
-            .collect()
-    }
-
-    fn threshold_labels() -> Vec<String> {
-        THRESHOLDS.iter().map(|&t| if t == 0 { t!("Off", "Kapalı").to_string() } else { format!("%{t}") }).collect()
+        (self.form().bottom() + self.scroll - self.h).max(0.0)
     }
 
     fn hit(&self, g: &Gfx, x: f32, y: f32) -> Hit {
         if y < HEADER {
             return if self.folder_rect().contains(x, y) { Hit::Folder } else { Hit::None };
         }
-        let l = self.layout_all();
-        if let Some(i) = l.cards.iter().position(|c| c.contains(x, y)) {
-            return Hit::Card(MODES[i]);
+        match self.form().hit(g, x, y) {
+            form::Hit::None => Hit::None,
+            f => Hit::Form(f),
         }
-        if l.auto_row.contains(x, y) {
-            return Hit::Auto;
-        }
-        if let Some(k) = Self::segments(g, l.thr_row, &Self::threshold_labels()).iter().position(|s| s.contains(x, y)) {
-            return Hit::Threshold(k);
-        }
-        Hit::None
     }
 
     // --- Çizim ---
 
-    fn panel(g: &Gfx, r: Rect, title: &str, sub: &str) {
-        g.fill(r, 12.0, pal().panel);
-        g.stroke(r, 12.0, pal().line, 1.0);
-        let t = Rect::new(r.l + 20.0, r.t + 10.0, r.r - 20.0, r.t + 34.0);
-        g.text(title, &g.f.strong, t, pal().text);
-        g.text(sub, &g.f.small, Rect::new(t.l, t.b - 2.0, t.r, t.b + 16.0), pal().muted);
-    }
-
-    fn paint_segments(&self, g: &Gfx, r: Rect, labels: &[String], selected: usize, hover: impl Fn(usize) -> bool) {
-        let segs = Self::segments(g, r, labels);
-        if let (Some(first), Some(last)) = (segs.first(), segs.last()) {
-            g.fill(Rect::new(first.l - 3.0, first.t - 3.0, last.r + 3.0, last.b + 3.0), 8.0, pal().hover);
-        }
-        for (j, (s, label)) in segs.iter().zip(labels).enumerate() {
-            let c = if j == selected {
-                g.fill(*s, 6.0, accent());
-                on_accent()
-            } else if hover(j) {
-                g.fill(*s, 6.0, pal().sel);
-                pal().text
-            } else {
-                pal().muted
-            };
-            g.text(label, &g.f.button, *s, c);
-        }
-    }
-
     pub fn paint(&self, g: &Gfx) {
-        let w = self.w;
         let dot = if self.ac { pal().green } else { accent() };
         status(g, self.head_x + 16.0, HEAD_CY, dot, &self.status_text(), pal().muted, self.folder_rect().l - 8.0);
         icon_button(g, self.folder_rect(), ICON_FOLDER, pal().muted, self.hover == Hit::Folder);
-
-        let l = self.layout_all();
-        g.clip(Rect::new(0.0, HEADER, w, self.h), || {
-            let top = HEADER + 16.0 - self.scroll;
-            g.text(t!("Gear", "Vites"), &g.f.strong, Rect::new(PAD, top, w / 2.0, top + 24.0), pal().text);
-            let how = if self.cfg.auto && !self.manual { t!("automatic", "otomatik") } else { t!("chosen by you", "elle seçildi") };
-            g.text(how, &g.f.small_right, Rect::new(w / 2.0, top + 2.0, w - PAD, top + 22.0), pal().faint);
-
-            for (i, c) in l.cards.iter().enumerate() {
-                let m = MODES[i];
-                let selected = self.mode == m;
-                let hovered = self.hover == Hit::Card(m);
-                g.fill(*c, 12.0, if hovered && !selected { pal().hover } else { pal().panel });
-                if selected {
-                    g.stroke(*c, 12.0, accent(), 2.0);
-                } else {
-                    g.stroke(*c, 12.0, pal().line, 1.0);
-                }
-                let x = c.l + 16.0;
-                let fg = if selected { accent() } else { pal().text };
-                g.text(mode_icon(m), &g.f.icon, Rect::new(x, c.t + 14.0, x + 26.0, c.t + 40.0), if selected { accent() } else { pal().muted });
-                g.text(mode_name(m), &g.f.strong, Rect::new(x + 34.0, c.t + 14.0, c.r - 16.0, c.t + 40.0), fg);
-                let est = self.full_text(m);
-                let ec = if self.rate_for(m).is_some() { pal().text } else { pal().faint };
-                g.text(&est, &g.f.small, Rect::new(x, c.b - 32.0, c.r - 16.0, c.b - 10.0), ec);
-            }
-
-            // İki satırlı ayar satırı: başlık ve altında kısa açıklama; sağda kontrol.
-            let setting = |r: Rect, title: &str, sub: &str, right: f32| {
-                g.text(title, &g.f.text, Rect::new(r.l, r.t + 4.0, r.r - right, r.cy() + 4.0), pal().text);
-                g.text(sub, &g.f.small, Rect::new(r.l, r.cy() - 2.0, r.r - right, r.b), pal().muted);
-            };
-            Self::panel(g, l.panel1, t!("Automatic", "Otomatik"), "");
-            let r = l.auto_row;
-            setting(r, t!("Follow the charger", "Şarja göre geç"), t!("unplugged → Out, plugged in → Plugged in", "çıkınca Dışarıda, takılınca Prizde"), 60.0);
-            toggle(g, toggle_rect(r.r, r.cy()), self.cfg.auto, accent(), true);
-            let r = l.thr_row;
-            g.fill(Rect::new(r.l, r.t, r.r, r.t + 1.0), 0.0, pal().hover);
-            setting(r, t!("Low battery alert", "Pil uyarısı"), t!("a notification; switching stays yours", "bildirim gelir, geçiş sende"), 300.0);
-            let sel = THRESHOLDS.iter().position(|&t| t == self.cfg.threshold).unwrap_or(0);
-            self.paint_segments(g, r, &Self::threshold_labels(), sel, |k| self.hover == Hit::Threshold(k));
-
-            if let Some(r) = l.hint {
-                let text = format!("{} · {}", t!("Worth closing", "Kapatman iyi olur"), self.suggest.join(", "));
-                g.text(&text, &g.f.small, r, pal().muted);
-            }
-        });
+        let hover = if let Hit::Form(f) = self.hover { f } else { form::Hit::None };
+        let f = self.form();
+        g.clip(Rect::new(0.0, HEADER, self.w, self.h), || f.paint(g, hover, None));
     }
 
     fn open_folder(&self) {
@@ -987,16 +896,20 @@ impl ToolPage for Battery {
 
     fn mouse_up(&mut self, g: &Gfx, x: f32, y: f32) {
         let hit = self.hit(g, x, y);
-        if hit != std::mem::replace(&mut self.pressed, Hit::None) {
+        let same = match (hit, std::mem::replace(&mut self.pressed, Hit::None)) {
+            (Hit::Form(a), Hit::Form(b)) => a.same(b),
+            (a, b) => a == b,
+        };
+        if !same {
             return;
         }
         match hit {
             Hit::Folder => self.open_folder(),
-            Hit::Card(m) => {
+            Hit::Form(form::Hit::Row(m)) if m <= SURVIVAL as u32 => {
                 self.manual = true;
-                self.switch(m, false);
+                self.switch(m as u8, false);
             }
-            Hit::Auto => {
+            Hit::Form(form::Hit::Toggle(R_AUTO) | form::Hit::Row(R_AUTO)) => {
                 self.cfg.auto = !self.cfg.auto;
                 self.manual = false;
                 self.cfg.save();
@@ -1005,13 +918,13 @@ impl ToolPage for Battery {
                 }
                 self.redraw();
             }
-            Hit::Threshold(k) => {
+            Hit::Form(form::Hit::Seg(R_THRESHOLD, k)) => {
                 self.cfg.threshold = THRESHOLDS[k];
                 self.cfg.save();
                 self.low_warned = false;
                 self.redraw();
             }
-            Hit::None => {}
+            _ => {}
         }
     }
 

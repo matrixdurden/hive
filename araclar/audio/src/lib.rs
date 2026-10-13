@@ -44,6 +44,7 @@ use windows::Win32::UI::Input::KeyboardAndMouse::*;
 use windows::Win32::UI::WindowsAndMessaging::*;
 use windows::core::{GUID, PCWSTR, implement};
 
+use ortak::form::{self, Ctl, Form, Item, Row};
 use ortak::gfx::{Gfx, Rect};
 use ortak::osd;
 use ortak::ui::*;
@@ -63,8 +64,11 @@ pub const HK_BASE: i32 = 5001;
 const RECHECK_MS: u32 = 300;
 const RECHECKS: u8 = 4;
 
-const ROW: f32 = 44.0;
-const ICON_CHECK: &str = "\u{E73E}";
+/// Sayfa kitindeki satır kimlikleri: çıkışlar, girişler (sıradaki yerine eklenir), kısayollar.
+const ID_OUT: u32 = 0;
+const ID_IN: u32 = 1000;
+const ID_KEY: u32 = 2000;
+
 const ICON_HEADPHONE: &str = "\u{E7F6}";
 const ICON_MIC_OFF: &str = "\u{F781}";
 
@@ -341,22 +345,6 @@ pub fn probe() -> String {
 
 // --- Motor ve sayfa ---
 
-#[derive(Clone, Copy, PartialEq, Debug)]
-enum Hit {
-    None,
-    Out(usize),
-    In(usize),
-    Key(usize),
-}
-
-/// Sayfanın bölümleri (çıkış, giriş, kısayollar): başlıkların üst kenarı, kutular ve satırlar.
-struct Layout {
-    titles: [f32; 3],
-    panels: [Rect; 3],
-    rows: [Vec<Rect>; 3],
-    bottom: f32,
-}
-
 pub struct Audio {
     hwnd: HWND,
     enumerator: Option<IMMDeviceEnumerator>,
@@ -379,8 +367,8 @@ pub struct Audio {
     /// Kısayolu atanan satır.
     bind: Option<usize>,
     scroll: f32,
-    hover: Hit,
-    pressed: Hit,
+    hover: form::Hit,
+    pressed: form::Hit,
     w: f32,
     h: f32,
     head_x: f32,
@@ -405,8 +393,8 @@ impl Audio {
             registered: Vec::new(),
             bind: None,
             scroll: 0.0,
-            hover: Hit::None,
-            pressed: Hit::None,
+            hover: form::Hit::None,
+            pressed: form::Hit::None,
             w: 0.0,
             h: 0.0,
             head_x: 0.0,
@@ -607,7 +595,7 @@ impl Audio {
         }
     }
 
-    /// Hepsini baştan kaydeder. Başka bir uygulamanın tuttuğu kısayol kırmızı görünür.
+    /// Hepsini baştan kaydeder. Başka bir uygulamanın tuttuğu kısayol satırında yazar.
     fn register(&mut self) {
         self.unregister();
         for (i, key) in self.settings.keys.iter().enumerate() {
@@ -666,29 +654,7 @@ impl Audio {
         self.end_bind(None);
     }
 
-    // --- Yerleşim ---
-
-    fn layout_all(&self) -> Layout {
-        let (l, r) = (PAD, self.w - PAD);
-        let mut y = HEADER + 16.0 - self.scroll;
-        let mut titles = [0.0; 3];
-        let mut panels = [Rect::new(0.0, 0.0, 0.0, 0.0); 3];
-        let mut rows: [Vec<Rect>; 3] = Default::default();
-        for (s, n) in [self.outs.len().max(1), self.ins.len().max(1), KEYS].into_iter().enumerate() {
-            titles[s] = y;
-            let top = y + 30.0;
-            let row =
-                |i: usize| Rect::new(l + 6.0, top + 6.0 + i as f32 * ROW, r - 6.0, top + 6.0 + (i + 1) as f32 * ROW);
-            rows[s] = (0..n).map(row).collect();
-            panels[s] = Rect::new(l, top, r, top + 12.0 + n as f32 * ROW);
-            y = panels[s].b + 24.0;
-        }
-        Layout { titles, panels, rows, bottom: y + self.scroll }
-    }
-
-    fn max_scroll(&self) -> f32 {
-        (self.layout_all().bottom - self.h).max(0.0)
-    }
+    // --- Sayfa ---
 
     fn chip_text(&self, i: usize) -> String {
         match (self.bind == Some(i), self.settings.keys[i]) {
@@ -698,58 +664,65 @@ impl Audio {
         }
     }
 
-    fn key_chip(&self, g: &Gfx, row: Rect, i: usize) -> Rect {
-        chip_rect(g, row.r - 10.0, row.cy(), &self.chip_text(i))
+    /// Satır kimliğinin cihazı (çıkış ya da giriş).
+    fn device_at(&self, id: u32) -> Option<&Device> {
+        match id {
+            ID_OUT..ID_IN => self.outs.get((id - ID_OUT) as usize),
+            ID_IN..ID_KEY => self.ins.get((id - ID_IN) as usize),
+            _ => None,
+        }
     }
 
-    fn hit(&self, g: &Gfx, x: f32, y: f32) -> Hit {
-        if y < HEADER {
-            return Hit::None;
-        }
-        let [outs, ins, keys] = &self.layout_all().rows;
-        if let Some(i) = outs.iter().take(self.outs.len()).position(|r| r.contains(x, y)) {
-            return Hit::Out(i);
-        }
-        if let Some(i) = ins.iter().take(self.ins.len()).position(|r| r.contains(x, y)) {
-            return Hit::In(i);
-        }
-        if let Some(i) = keys.iter().enumerate().position(|(i, r)| self.key_chip(g, *r, i).contains(x, y)) {
-            return Hit::Key(i);
-        }
-        Hit::None
-    }
-
-    // --- Çizim ---
-
-    fn paint_devices(&self, g: &Gfx, rows: &[Rect], list: &[Device], current: Option<&str>, mic: bool) {
+    /// Cihaz listesi bölümü: varsayılan olanın yanında işaret; boşsa "Cihaz yok".
+    fn device_items(&self, items: &mut Vec<Item>, title: &str, list: &[Device], current: Option<&str>, base: u32, icon: &'static str) {
+        items.push(Item::Section(title.into()));
         if list.is_empty() {
-            let r = rows[0];
-            g.text(t!("No device", "Cihaz yok"), &g.f.text, Rect::new(r.l + 14.0, r.t, r.r, r.b), pal().faint);
-            return;
+            items.push(Item::Row(Row::new(base, t!("No device", "Cihaz yok"), "", Ctl::None).dim(true)));
         }
-        for (i, (r, d)) in rows.iter().zip(list).enumerate() {
+        for (i, d) in list.iter().enumerate() {
             let selected = current == Some(d.id.as_str());
-            let hit = if mic { Hit::In(i) } else { Hit::Out(i) };
-            if self.hover == hit && !selected {
-                g.fill(*r, 8.0, pal().hover);
-            }
-            let (icon, color) = match (mic, selected, self.muted) {
-                (false, _, _) => (ICON_HEADPHONE, if selected { accent() } else { pal().muted }),
-                (true, _, true) => (ICON_MIC_OFF, if selected { pal().red } else { pal().muted }),
-                (true, _, false) => (ICON_MIC, if selected { accent() } else { pal().muted }),
-            };
-            g.text(icon, &g.f.icon_small, Rect::new(r.l + 12.0, r.t, r.l + 32.0, r.b), color);
-            let mut right = r.r - 12.0;
-            if selected {
-                g.text(ICON_CHECK, &g.f.icon_small, Rect::new(r.r - 34.0, r.t, r.r - 12.0, r.b), accent());
-                right -= 30.0;
-            }
-            g.text(&d.name, &g.f.text, Rect::new(r.l + 44.0, r.t, right, r.b), if selected { pal().text } else { pal().muted });
+            items.push(Item::Row(Row::new(base + i as u32, d.name.as_str(), "", Ctl::Check(selected)).icon(icon).clickable()));
+        }
+    }
+
+    fn form(&self) -> Form {
+        let mut items = Vec::new();
+        let out = self.out.as_ref().map(|d| d.id.as_str());
+        let mic = self.mic.as_ref().map(|m| m.id.as_str());
+        let mic_icon = if self.muted { ICON_MIC_OFF } else { ICON_MIC };
+        self.device_items(&mut items, t!("Output", "Çıkış"), &self.outs, out, ID_OUT, ICON_HEADPHONE);
+        self.device_items(&mut items, t!("Input", "Giriş"), &self.ins, mic, ID_IN, mic_icon);
+        items.push(Item::Section(t!("Shortcuts", "Kısayollar").into()));
+        let names = [
+            t!("Next output", "Sonraki çıkış"),
+            t!("Next input", "Sonraki giriş"),
+            t!("Mute all microphones", "Bütün mikrofonları sustur"),
+        ];
+        for (i, name) in names.into_iter().enumerate() {
+            let sub = if self.conflicts[i] { t!("Another app is using this shortcut", "Bu kısayolu başka bir uygulama kullanıyor") } else { "" };
+            let ctl = Ctl::Chip(self.chip_text(i), self.bind == Some(i));
+            items.push(Item::Row(Row::new(ID_KEY + i as u32, name, sub, ctl)));
+        }
+        Form::new(items, PAD, self.w - PAD, HEADER + 16.0 - self.scroll)
+    }
+
+    fn max_scroll(&self) -> f32 {
+        (self.form().bottom() + self.scroll - self.h).max(0.0)
+    }
+
+    /// Tıklanabilen: cihaz satırları ve kısayol kutucukları.
+    fn hit(&self, g: &Gfx, x: f32, y: f32) -> form::Hit {
+        if y < HEADER {
+            return form::Hit::None;
+        }
+        match self.form().hit(g, x, y) {
+            h @ form::Hit::Row(id) if self.device_at(id).is_some() => h,
+            h @ form::Hit::Chip(_) => h,
+            _ => form::Hit::None,
         }
     }
 
     pub fn paint(&self, g: &Gfx) {
-        let w = self.w;
         let watching = self.enumerator.is_some();
         let (dot, head) = match () {
             _ if !watching => (pal().red, t!("Cannot read audio devices", "Ses cihazları okunamıyor")),
@@ -757,40 +730,8 @@ impl Audio {
             _ => (pal().green, t!("Music pauses when headphones drop", "Kulaklık kopunca müzik durur")),
         };
         status(g, self.head_x + 16.0, HEAD_CY, dot, head, pal().muted, self.head_r - 8.0);
-
-        let l = self.layout_all();
-        g.clip(Rect::new(0.0, HEADER, w, self.h), || {
-            let titles = [t!("Output", "Çıkış"), t!("Input", "Giriş"), t!("Shortcuts", "Kısayollar")];
-            for (s, title) in titles.iter().enumerate() {
-                let t = l.titles[s];
-                g.text(title, &g.f.strong, Rect::new(PAD, t, w - PAD, t + 24.0), pal().text);
-                g.fill(l.panels[s], 12.0, pal().panel);
-                g.stroke(l.panels[s], 12.0, pal().line, 1.0);
-            }
-            let [outs, ins, keys] = &l.rows;
-            self.paint_devices(g, outs, &self.outs, self.out.as_ref().map(|d| d.id.as_str()), false);
-            self.paint_devices(g, ins, &self.ins, self.mic.as_ref().map(|m| m.id.as_str()), true);
-
-            let names = [
-                t!("Next output", "Sonraki çıkış"),
-                t!("Next input", "Sonraki giriş"),
-                t!("Mute all microphones", "Bütün mikrofonları sustur"),
-            ];
-            for (i, (r, name)) in keys.iter().zip(names).enumerate() {
-                if i > 0 {
-                    g.fill(Rect::new(r.l + 8.0, r.t, r.r - 8.0, r.t + 1.0), 0.0, pal().hover);
-                }
-                g.text(name, &g.f.text, Rect::new(r.l + 14.0, r.t, r.r - 160.0, r.b), pal().text);
-                let (c, b) = match () {
-                    _ if self.bind == Some(i) => (accent(), accent()),
-                    _ if self.conflicts[i] => (pal().red, pal().line),
-                    _ if self.settings.keys[i].is_none() => (pal().faint, pal().line),
-                    _ if self.hover == Hit::Key(i) => (pal().text, pal().faint),
-                    _ => (pal().muted, pal().line),
-                };
-                chip(g, self.key_chip(g, *r, i), &self.chip_text(i), c, b);
-            }
-        });
+        let f = self.form();
+        g.clip(Rect::new(0.0, HEADER, self.w, self.h), || f.paint(g, self.hover, None));
     }
 }
 
@@ -845,8 +786,8 @@ impl ToolPage for Audio {
     }
 
     fn mouse_leave(&mut self) {
-        if self.hover != Hit::None {
-            self.hover = Hit::None;
+        if self.hover != form::Hit::None {
+            self.hover = form::Hit::None;
             self.redraw();
         }
     }
@@ -857,15 +798,14 @@ impl ToolPage for Audio {
 
     fn mouse_up(&mut self, g: &Gfx, x: f32, y: f32) {
         let hit = self.hit(g, x, y);
-        if hit != std::mem::replace(&mut self.pressed, Hit::None) {
+        if !hit.same(std::mem::replace(&mut self.pressed, form::Hit::None)) {
             return;
         }
         self.end_bind(None);
         let chosen = match hit {
-            Hit::Out(i) => self.outs.get(i),
-            Hit::In(i) => self.ins.get(i),
-            Hit::Key(i) => return self.start_bind(i),
-            Hit::None => None,
+            form::Hit::Chip(id) => return self.start_bind((id - ID_KEY) as usize),
+            form::Hit::Row(id) => self.device_at(id),
+            _ => None,
         };
         if let Some(id) = chosen.map(|d| d.id.clone()) {
             set_default(&id);
@@ -896,12 +836,12 @@ impl ToolPage for Audio {
     }
 
     fn interactive(&self, g: &Gfx, x: f32, y: f32) -> bool {
-        self.hit(g, x, y) != Hit::None
+        self.hit(g, x, y) != form::Hit::None
     }
 
     fn set_visible(&mut self, visible: bool) {
         if !visible {
-            self.hover = Hit::None;
+            self.hover = form::Hit::None;
             self.end_bind(None);
         }
     }

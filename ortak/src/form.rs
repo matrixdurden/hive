@@ -1,15 +1,13 @@
 //! Sayfa kiti: bütün sayfalar aynı görünsün diye. Sayfa ne göstereceğini bir öğe listesiyle
 //! söyler (`Item`), kit yerleştirir, çizer ve tıklananı bulur.
 //!
-//! Düzen: sol kenara yaslı, en çok `COL_MAX` genişliğinde tek sütun. Her bölüm başlığın altında
+//! Düzen: pencerenin genişliğine yayılan tek sütun (her ekranda kendiliğinden). Her bölüm başlığın altında
 //! tek bir kart; kartın satırları arasında ince çizgi. Satır: solda (varsa) simge, başlık ve
 //! altında açıklama; sağda tek kontrol. Kontroller her sayfada aynı ölçüde ve aynı hizada.
 
 use crate::gfx::{Gfx, Rect};
 use crate::ui::*;
 
-/// İçerik sütununun en geniş hali.
-pub const COL_MAX: f32 = 860.0;
 /// Satır yüksekliği: açıklamasız ve açıklamalı.
 const ROW: f32 = 52.0;
 const ROW_SUB: f32 = 64.0;
@@ -112,9 +110,13 @@ impl Hit {
         }
     }
 
-    /// Aynı yer mi (kaydırıcının değeri ve seçeneğin sırası dışında).
+    /// Aynı yer mi (basıp aynı yerde bırakmak tıklamadır). Kaydırıcının değerine bakılmaz;
+    /// seçeneklerde aynı seçenek olmalı.
     pub fn same(self, other: Hit) -> bool {
-        std::mem::discriminant(&self) == std::mem::discriminant(&other) && self.id() == other.id()
+        match (self, other) {
+            (Hit::Seg(a, i), Hit::Seg(b, j)) => a == b && i == j,
+            _ => std::mem::discriminant(&self) == std::mem::discriminant(&other) && self.id() == other.id(),
+        }
     }
 }
 
@@ -129,7 +131,6 @@ pub struct Form {
 impl Form {
     /// `l..r` arasında, `top`'tan başlayarak yerleştirir (kaydırma `top`'a katılır).
     pub fn new(items: Vec<Item>, l: f32, r: f32, top: f32) -> Self {
-        let r = r.min(l + COL_MAX);
         let mut rects = Vec::with_capacity(items.len());
         let mut cards = Vec::new();
         let mut y = top;

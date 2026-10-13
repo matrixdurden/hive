@@ -2,8 +2,9 @@
 //! GPU tarafındaki bir çökme winloom'ı götürmesin. Komutlar `WM_COPYDATA` ile gider, motor
 //! durumunu `durum.txt`'ye yazıp WM_STATE ile haber verir (bkz. wallpaper/src/hub.rs).
 //!
-//! Sayfa: üstte durum ve düğmeler, ortada küçük resimli galeri, altta seçili duvar kâğıdının
-//! ayarları. Küçük resimleri motorun `--onizleme` komutu üretir, önbellekte tutulur.
+//! Sayfa: başlıkta durum ve düğmeler; altında sayfa kitiyle küçük resimli galeri, seçili duvar
+//! kâğıdının ayarları ve genel ayarlar. Küçük resimleri motorun `--onizleme` komutu üretir,
+//! önbellekte tutulur.
 //!
 //! Diskteki adlar (`Programs\cheshire\cheshire.exe`, .cheshire dosyaları) motorun ilk adından
 //! kalma; kurulu olanlar bulunabilsin diye değişmez.
@@ -31,11 +32,11 @@ use windows::Win32::UI::Shell::*;
 use windows::Win32::UI::WindowsAndMessaging::*;
 use windows::core::{PCWSTR, w};
 
+use ortak::form::{self, Ctl, Form, Item, Row};
 use ortak::gfx::{Color, Gfx, ImageId, Rect};
 use ortak::log;
 use ortak::ui::*;
 use ortak::util::{self, Res};
-
 
 /// wallpaper/src/hub.rs ile aynı olmalı.
 pub const WM_STATE: u32 = WM_APP + 40;
@@ -50,28 +51,18 @@ static ENGINE: &[u8] = include_bytes!(env!("WALLPAPER_EXE"));
 
 const SWATCHES: [&str; 6] = ["#4fc3f7", "#ff6ec7", "#b388ff", "#69f0ae", "#ffd740", "#ffffff"];
 const FPS: [u32; 4] = [30, 60, 120, 144];
+/// Galeri: kutucuğun en dar hali, kutucuklar arası boşluk ve resmin altındaki ad şeridi.
 const CARD_MIN: f32 = 160.0;
 const GAP: f32 = 16.0;
-const ROW: f32 = 52.0;
-/// Panel başlığının yüksekliği ve satır etiketlerinin genişliği.
-const PANEL_HEAD: f32 = 56.0;
-const LABEL_W: f32 = 180.0;
-/// Panellerin zemini: sayfadan bir ton açık.
-/// Bu kadar seçeneğe kadar bölmeli seçici; fazlası ‹ › ile.
+const CAPTION: f32 = 34.0;
+/// Bu kadar seçeneğe kadar bölmeli seçici; fazlası ‹ seçili › ile.
 const MAX_SEGMENTS: usize = 5;
-
-struct Layout {
-    cards: Vec<Rect>,
-    panel1: Rect,
-    reset: Option<Rect>,
-    /// (parametre sırası, satır)
-    rows: Vec<(usize, Rect)>,
-    panel2: Rect,
-    fps_row: Rect,
-    battery_row: Rect,
-    /// İçeriğin bittiği y (kaydırma sınırı için).
-    bottom: f32,
-}
+const STEPPER_W: f32 = 248.0;
+/// Formdaki kimlikler: parametre satırları sıralarıyla (0, 1, …), ötekiler bunlar.
+const GALLERY: u32 = 1000;
+const RESET: u32 = 1001;
+const FPS_ROW: u32 = 1002;
+const BATTERY: u32 = 1003;
 
 /// %LOCALAPPDATA%\Programs\wallpaper — motorun exe'si, ayarları ve duvar kâğıtları.
 pub fn app_dir() -> PathBuf {
@@ -373,13 +364,21 @@ enum Hit {
     Folder,
     Add,
     Wall(usize),
-    Reset,
-    Slider(usize),
-    Choice(usize, usize),
-    Toggle(usize),
+    /// Renk seçeneği: parametre ve sırası.
     Swatch(usize, usize),
-    Fps(usize),
-    Battery,
+    /// ‹ › : parametre ve gidilecek seçenek.
+    Step(usize, usize),
+    Form(form::Hit),
+}
+
+impl Hit {
+    /// Basılan ile bırakılan aynı yer mi (formda kaydırıcının değeri ve seçeneğin sırası dışında).
+    fn same(self, other: Hit) -> bool {
+        match (self, other) {
+            (Hit::Form(a), Hit::Form(b)) => a.same(b),
+            _ => self == other,
+        }
+    }
 }
 
 pub enum Modal {
@@ -400,7 +399,8 @@ pub struct Wallpaper {
     scroll: f32,
     hover: Hit,
     pressed: Hit,
-    drag: Option<usize>,
+    /// Sürüklenen kaydırıcının satırı.
+    drag: Option<u32>,
     /// Sürüklerken komutlar seyreltilir.
     last_send: Option<Instant>,
     w: f32,
@@ -562,90 +562,99 @@ impl Wallpaper {
         Rect::new(self.head_r - 36.0, HEAD_CY - 18.0, self.head_r, HEAD_CY + 18.0)
     }
 
-    fn layout_all(&self, g: &Gfx) -> Layout {
-        let w = self.w;
-        let avail = w - 2.0 * PAD;
-        let cols = (((avail + GAP) / (CARD_MIN + GAP)).floor() as usize).max(1);
-        let cw = (avail - (cols - 1) as f32 * GAP) / cols as f32;
-        let ch = cw * 9.0 / 16.0 + 34.0;
-        let top = HEADER + 16.0 - self.scroll;
-        let gallery_t = top + 32.0;
-        let cards: Vec<Rect> = (0..self.st.walls.len())
-            .map(|i| {
-                let (r, c) = (i / cols, i % cols);
-                let l = PAD + c as f32 * (cw + GAP);
-                let t = gallery_t + r as f32 * (ch + GAP);
-                Rect::new(l, t, l + cw, t + ch)
-            })
-            .collect();
-        let rows_n = self.st.walls.len().div_ceil(cols).max(1);
-        let mut y = gallery_t + rows_n as f32 * (ch + GAP) + 12.0;
-
-        // Seçili duvar kâğıdının paneli.
-        let p1_t = y;
-        y += PANEL_HEAD;
-        let inner = |t: f32| Rect::new(PAD + 20.0, t, w - PAD - 20.0, t + ROW);
-        let mut rows = Vec::new();
-        for n in 0..self.st.params.len() {
-            rows.push((n, inner(y)));
-            y += ROW;
-        }
-        if self.st.params.is_empty() {
-            y += ROW;
-        }
-        let panel1 = Rect::new(PAD, p1_t, w - PAD, y + 8.0);
-        let reset = (!self.st.params.iter().all(Param::is_default))
-            .then(|| button_rect_right(g, panel1.r - 16.0, p1_t + 12.0, t!("Reset to defaults", "Varsayılana dön"), false));
-
-        // Motor paneli.
-        y = panel1.b + GAP;
-        let p2_t = y;
-        y += PANEL_HEAD;
-        let fps_row = inner(y);
-        let battery_row = inner(y + ROW);
-        let panel2 = Rect::new(PAD, p2_t, w - PAD, battery_row.b + 8.0);
-        Layout { cards, panel1, reset, rows, panel2, fps_row, battery_row, bottom: panel2.b + 40.0 }
+    /// Galeri ızgarası bu genişlikte: sütun sayısı, kutucuğun genişliği ve yüksekliği.
+    fn grid(width: f32) -> (usize, f32, f32) {
+        let cols = (((width + GAP) / (CARD_MIN + GAP)).floor() as usize).max(1);
+        let cw = (width - (cols - 1) as f32 * GAP) / cols as f32;
+        (cols, cw, cw * 9.0 / 16.0 + CAPTION)
     }
 
-    /// Satırın sağına yaslı bölmeli seçici.
+    /// Galerinin kutucukları, galeri alanının içinde.
+    fn cards(&self, area: Rect) -> Vec<Rect> {
+        let (cols, cw, ch) = Self::grid(area.w());
+        (0..self.st.walls.len())
+            .map(|i| {
+                let l = area.l + (i % cols) as f32 * (cw + GAP);
+                let t = area.t + (i / cols) as f32 * (ch + GAP);
+                Rect::new(l, t, l + cw, t + ch)
+            })
+            .collect()
+    }
+
+    /// Renk seçeneklerinin kapladığı genişlik.
+    fn swatches_w(count: usize) -> f32 {
+        count.saturating_sub(1) as f32 * 30.0 + 22.0
+    }
+
+    /// Renk seçeneği, satırın kontrol alanının sağına yaslı.
+    fn swatch(c: Rect, count: usize, j: usize) -> Rect {
+        let x = c.r - 11.0 - (count - 1 - j) as f32 * 30.0;
+        Rect::new(x - 11.0, c.cy() - 11.0, x + 11.0, c.cy() + 11.0)
+    }
+
     /// Çok seçenekte (örneğin sloganlar) bölmeli seçici sığmaz: ‹ seçili › ile gezilir.
-    fn stepper(r: Rect) -> (Rect, Rect, Rect) {
-        let next = Rect::new(r.r - 32.0, r.cy() - 14.0, r.r - 3.0, r.cy() + 14.0);
+    fn stepper(c: Rect) -> (Rect, Rect, Rect) {
+        let next = Rect::new(c.r - 29.0, c.cy() - 14.0, c.r, c.cy() + 14.0);
         let label = Rect::new(next.l - 190.0, next.t, next.l, next.b);
         let prev = Rect::new(label.l - 29.0, next.t, label.l, next.b);
         (prev, label, next)
     }
 
-    fn segments(g: &Gfx, r: Rect, labels: &[String]) -> Vec<Rect> {
-        let widths: Vec<f32> = labels.iter().map(|l| g.measure(l, &g.f.button) + 26.0).collect();
-        let total: f32 = widths.iter().sum::<f32>() + 6.0;
-        let mut x = r.r - total + 3.0;
-        widths
-            .iter()
-            .map(|&wd| {
-                let s = Rect::new(x, r.cy() - 14.0, x + wd, r.cy() + 14.0);
-                x += wd;
-                s
-            })
-            .collect()
+    fn selected_name(&self) -> Option<&str> {
+        self.st.walls.iter().find(|w| w.0 == self.st.selected).map(|w| pick(&w.1, &w.2))
     }
 
-    fn slider_track(r: Rect) -> (f32, f32) {
-        (r.l + LABEL_W, r.r - 52.0)
+    /// Sayfanın içeriği: galeri, seçili duvar kâğıdının ayarları, bütün duvar kâğıtları için olanlar.
+    fn form(&self) -> Form {
+        let st = &self.st;
+        let mut items = vec![Item::Section(t!("Wallpapers", "Duvar kâğıtları").into())];
+        if st.walls.is_empty() {
+            let msg = t!("No wallpapers · drop a .cheshire file here", "Duvar kâğıdı yok · bir .cheshire dosyasını buraya sürükle");
+            items.push(Item::Note(msg.into(), false));
+        } else {
+            let (cols, _, ch) = Self::grid(self.w - 2.0 * PAD);
+            let rows = st.walls.len().div_ceil(cols);
+            items.push(Item::Custom(GALLERY, rows as f32 * (ch + GAP) - GAP));
+        }
+
+        items.push(Item::Section(self.selected_name().unwrap_or(t!("Wallpaper", "Duvar kâğıdı")).into()));
+        for (n, p) in st.params.iter().enumerate() {
+            let ctl = match &p.kind {
+                Kind::Slider { min, max, value, .. } => {
+                    Ctl::Slider(if max > min { (value - min) / (max - min) } else { 0.0 }, format!("{value:.2}"))
+                }
+                Kind::Choice { options, .. } if options.len() > MAX_SEGMENTS => Ctl::Space(STEPPER_W),
+                Kind::Choice { options, value, .. } => Ctl::Seg(choice_labels(options), *value),
+                Kind::Toggle { value, .. } => Ctl::Toggle(*value),
+                Kind::Color { default, .. } => Ctl::Space(Self::swatches_w(colors(default).len())),
+            };
+            items.push(Item::Row(Row::new(n as u32, pick(&p.label[0], &p.label[1]), "", ctl)));
+        }
+        if st.params.is_empty() {
+            items.push(Item::Note(t!("This wallpaper has no settings.", "Bu duvar kâğıdının ayarı yok.").into(), false));
+        } else {
+            // Satır hep yerinde (altındakiler kaymasın); değişiklik yoksa düğmesi yok.
+            let changed = !st.params.iter().all(Param::is_default);
+            let ctl = match changed {
+                true => Ctl::Button(t!("Reset to defaults", "Varsayılana dön").into()),
+                false => Ctl::Text(t!("In use", "Kullanılıyor").into()),
+            };
+            items.push(Item::Row(Row::new(RESET, t!("Default settings", "Varsayılan ayarlar"), "", ctl).dim(!changed)));
+        }
+
+        items.push(Item::Section(t!("General", "Genel").into()));
+        let fps = FPS.iter().map(|f| f.to_string()).collect();
+        let sel = FPS.iter().position(|&f| f == st.fps).unwrap_or(usize::MAX);
+        items.push(Item::Row(Row::new(FPS_ROW, t!("Frame rate", "Kare hızı"), "", Ctl::Seg(fps, sel))));
+        items.push(Item::Row(Row::new(BATTERY, t!("Pause on battery", "Pildeyken duraklat"), "", Ctl::Toggle(st.battery))));
+        if !st.error.is_empty() {
+            items.push(Item::Note(st.error.clone(), true));
+        }
+        Form::new(items, PAD, self.w - PAD, HEADER + 16.0 - self.scroll)
     }
 
-    fn swatch(r: Rect, count: usize, j: usize) -> Rect {
-        let x = r.r - 11.0 - (count - 1 - j) as f32 * 30.0;
-        Rect::new(x - 11.0, r.cy() - 11.0, x + 11.0, r.cy() + 11.0)
-    }
-
-    fn fps_labels() -> Vec<String> {
-        FPS.iter().map(|f| f.to_string()).collect()
-    }
-
-    fn max_scroll(&self, g: &Gfx) -> f32 {
-        let l = self.layout_all(g);
-        (l.bottom + self.scroll - self.h).max(0.0)
+    fn max_scroll(&self) -> f32 {
+        (self.form().bottom() - 24.0 + self.scroll + 12.0 - self.h).max(0.0)
     }
 
     fn hit(&self, g: &Gfx, x: f32, y: f32) -> Hit {
@@ -657,57 +666,43 @@ impl Wallpaper {
                 _ => Hit::None,
             };
         }
-        let l = self.layout_all(g);
-        if let Some(i) = l.cards.iter().position(|c| c.contains(x, y)) {
-            return Hit::Wall(i);
-        }
-        if l.reset.is_some_and(|r| r.contains(x, y)) {
-            return Hit::Reset;
-        }
-        for &(n, r) in &l.rows {
-            if !r.contains(x, y) {
-                continue;
+        let f = self.form();
+        match f.hit(g, x, y) {
+            form::Hit::None => Hit::None,
+            form::Hit::Custom(_) => {
+                let cards = f.custom(GALLERY).map(|a| self.cards(a)).unwrap_or_default();
+                cards.iter().position(|c| c.contains(x, y)).map_or(Hit::None, Hit::Wall)
             }
-            return match &self.st.params[n].kind {
-                Kind::Slider { .. } => {
-                    let (a, b) = Self::slider_track(r);
-                    if x >= a - 10.0 && x <= b + 10.0 { Hit::Slider(n) } else { Hit::None }
-                }
-                Kind::Choice { options, value, .. } if options.len() > MAX_SEGMENTS => {
-                    let (prev, _, next) = Self::stepper(r);
-                    let len = options.len();
-                    match () {
-                        _ if prev.contains(x, y) => Hit::Choice(n, (value + len - 1) % len),
-                        _ if next.contains(x, y) => Hit::Choice(n, (value + 1) % len),
-                        _ => Hit::None,
-                    }
-                }
-                Kind::Choice { options, .. } => Self::segments(g, r, &choice_labels(options))
-                    .iter()
-                    .position(|s| s.contains(x, y))
-                    .map_or(Hit::None, |j| Hit::Choice(n, j)),
-                Kind::Toggle { .. } => Hit::Toggle(n),
-                Kind::Color { default, .. } => {
-                    let count = colors(default).len();
-                    (0..count).find(|&j| Self::swatch(r, count, j).contains(x, y)).map_or(Hit::None, |j| Hit::Swatch(n, j))
-                }
-            };
+            form::Hit::Row(id) => self.part(&f, id as usize, x, y),
+            h => Hit::Form(h),
         }
-        if let Some(k) = Self::segments(g, l.fps_row, &Self::fps_labels()).iter().position(|s| s.contains(x, y)) {
-            return Hit::Fps(k);
-        }
-        if l.battery_row.contains(x, y) {
-            return Hit::Battery;
-        }
-        Hit::None
     }
 
-    fn slide_to(&mut self, g: &Gfx, n: usize, x: f32, force: bool) {
-        let Some(&(_, r)) = self.layout_all(g).rows.iter().find(|(m, _)| *m == n) else { return };
-        let (a, b) = Self::slider_track(r);
-        let Some(p) = self.st.params.get_mut(n) else { return };
+    /// Kitin çizmediği kontrollerde (renkler, ‹ ›) imlecin altındaki.
+    fn part(&self, f: &Form, n: usize, x: f32, y: f32) -> Hit {
+        let (Some(c), Some(p)) = (f.control(n as u32), self.st.params.get(n)) else { return Hit::None };
+        match &p.kind {
+            Kind::Choice { options, value, .. } => {
+                let (prev, _, next) = Self::stepper(c);
+                let len = options.len();
+                match () {
+                    _ if prev.contains(x, y) => Hit::Step(n, (value + len - 1) % len),
+                    _ if next.contains(x, y) => Hit::Step(n, (value + 1) % len),
+                    _ => Hit::None,
+                }
+            }
+            Kind::Color { default, .. } => {
+                let count = colors(default).len();
+                (0..count).find(|&j| Self::swatch(c, count, j).contains(x, y)).map_or(Hit::None, |j| Hit::Swatch(n, j))
+            }
+            _ => Hit::None,
+        }
+    }
+
+    fn slide_to(&mut self, id: u32, x: f32, force: bool) {
+        let Some(t) = self.form().slider_value(id, x) else { return };
+        let Some(p) = self.st.params.get_mut(id as usize) else { return };
         let Kind::Slider { min, max, value, .. } = &mut p.kind else { return };
-        let t = ((x - a) / (b - a)).clamp(0.0, 1.0);
         *value = *min + (*max - *min) * t;
         let (index, v) = (p.index, *value);
         self.redraw();
@@ -718,34 +713,18 @@ impl Wallpaper {
         }
     }
 
+    fn choose(&mut self, n: usize, j: usize) {
+        if let Some(p) = self.st.params.get_mut(n)
+            && let Kind::Choice { value, .. } = &mut p.kind
+        {
+            *value = j;
+            let line = format!("param {} {j}", p.index);
+            self.cmd(&line);
+            self.redraw();
+        }
+    }
+
     // --- Çizim ---
-
-    fn paint_segments(&self, g: &Gfx, r: Rect, labels: &[String], selected: usize, hover: impl Fn(usize) -> bool) {
-        let segs = Self::segments(g, r, labels);
-        if let (Some(first), Some(last)) = (segs.first(), segs.last()) {
-            g.fill(Rect::new(first.l - 3.0, first.t - 3.0, last.r + 3.0, last.b + 3.0), 8.0, pal().hover);
-        }
-        for (j, (s, label)) in segs.iter().zip(labels).enumerate() {
-            let c = if j == selected {
-                g.fill(*s, 6.0, accent());
-                on_accent()
-            } else if hover(j) {
-                g.fill(*s, 6.0, pal().sel);
-                pal().text
-            } else {
-                pal().muted
-            };
-            g.text(label, &g.f.button, *s, c);
-        }
-    }
-
-    fn panel(g: &Gfx, r: Rect, title: &str, sub: &str) {
-        g.fill(r, 12.0, pal().panel);
-        g.stroke(r, 12.0, pal().line, 1.0);
-        let t = Rect::new(r.l + 20.0, r.t + 10.0, r.r - 180.0, r.t + 34.0);
-        g.text(title, &g.f.strong, t, pal().text);
-        g.text(sub, &g.f.small, Rect::new(t.l, t.b - 2.0, t.r, t.b + 16.0), pal().muted);
-    }
 
     /// Başlıktaki durum, seçili dilde (motor yalnızca ham bilgiyi bildirir).
     fn status_text(&self) -> String {
@@ -769,135 +748,88 @@ impl Wallpaper {
         if !st.engine {
             return t!("no working wallpaper", "geçerli duvar kâğıdı yok").into();
         }
-        let name = st.walls.iter().find(|w| w.0 == st.selected).map_or("", |w| pick(&w.1, &w.2));
-        format!("{name} · {} FPS", st.fps_eff)
+        format!("{} · {} FPS", self.selected_name().unwrap_or(""), st.fps_eff)
+    }
+
+    fn paint_gallery(&self, g: &Gfx, area: Rect) {
+        let st = &self.st;
+        for (i, ((file, en, tr), c)) in st.walls.iter().zip(self.cards(area)).enumerate() {
+            if c.b < HEADER || c.t > self.h {
+                continue;
+            }
+            let selected = *file == st.selected;
+            let hovered = self.hover == Hit::Wall(i);
+            let img = Rect::new(c.l, c.t, c.r, c.b - CAPTION);
+            g.fill(img, 8.0, pal().hover);
+            match self.thumbs.get(file).map(|&(_, id)| id) {
+                Some(id) => g.clip(img, || g.image(id, img, if hovered || selected { 1.0 } else { 0.8 })),
+                None => g.text(t!("preparing preview…", "önizleme hazırlanıyor…"), &g.f.small_center, img, pal().faint),
+            }
+            if selected {
+                g.stroke(Rect::new(img.l - 3.0, img.t - 3.0, img.r + 3.0, img.b + 3.0), 10.0, accent(), 2.0);
+            } else if hovered {
+                g.stroke(img, 8.0, pal().line, 1.0);
+            }
+            let lc = if selected { accent() } else if hovered { pal().text } else { pal().muted };
+            g.text(pick(en, tr), &g.f.text, Rect::new(c.l + 2.0, c.b - 30.0, c.r, c.b - 4.0), lc);
+        }
+    }
+
+    /// Kitin yer ayırdığı kontroller: ‹ seçili › ve renkler.
+    fn paint_parts(&self, g: &Gfx, f: &Form) {
+        for (n, p) in self.st.params.iter().enumerate() {
+            let Some(c) = f.control(n as u32) else { continue };
+            match &p.kind {
+                Kind::Choice { options, value, .. } => {
+                    let (prev, label, next) = Self::stepper(c);
+                    let len = options.len();
+                    g.fill(Rect::new(prev.l - 3.0, prev.t - 3.0, next.r + 3.0, next.b + 3.0), 8.0, pal().hover);
+                    icon_button(g, prev, "\u{E76B}", pal().muted, self.hover == Hit::Step(n, (value + len - 1) % len));
+                    icon_button(g, next, "\u{E76C}", pal().muted, self.hover == Hit::Step(n, (value + 1) % len));
+                    let current = options.get(*value).map(|o| choice_label(o)).unwrap_or_default();
+                    g.text(&current, &g.f.button, label, pal().text);
+                }
+                Kind::Color { value, default } => {
+                    let list = colors(default);
+                    for (j, hex) in list.iter().enumerate() {
+                        let s = Self::swatch(c, list.len(), j);
+                        g.circle((s.l + s.r) / 2.0, s.cy(), 8.0, hex_color(hex).unwrap_or(pal().text));
+                        if hex.eq_ignore_ascii_case(value) {
+                            g.stroke(s, 11.0, pal().text, 2.0);
+                        } else if self.hover == Hit::Swatch(n, j) {
+                            g.stroke(s, 11.0, pal().muted, 1.0);
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
     }
 
     pub fn paint(&self, g: &Gfx) {
-        let w = self.w;
-        let st = &self.st;
-        let paused = !st.reason.is_empty();
-
-        // Başlık: durum ve düğmeler.
-        let status_text = self.status_text();
-        let dot = if paused { pal().muted } else { pal().green };
-        status(g, self.head_x + 16.0, HEAD_CY, dot, &status_text, pal().muted, self.pause_rect().l - 8.0);
-        let pause_icon = if st.user_paused { ICON_PLAY } else { ICON_PAUSE };
+        // Başlık: yalnızca durum ve düğmeler.
+        let dot = if self.st.reason.is_empty() { pal().green } else { pal().muted };
+        status(g, self.head_x + 16.0, HEAD_CY, dot, &self.status_text(), pal().muted, self.pause_rect().l - 8.0);
+        let pause_icon = if self.st.user_paused { ICON_PLAY } else { ICON_PAUSE };
         icon_button(g, self.pause_rect(), pause_icon, pal().muted, self.hover == Hit::Pause);
         icon_button(g, self.folder_rect(), ICON_FOLDER, pal().muted, self.hover == Hit::Folder);
         icon_button(g, self.add_rect(), ICON_ADD, pal().muted, self.hover == Hit::Add);
 
-        let l = self.layout_all(g);
-        g.clip(Rect::new(0.0, HEADER, w, self.h), || {
-            let top = HEADER + 16.0 - self.scroll;
-            g.text(t!("Wallpapers", "Duvar kâğıtları"), &g.f.strong, Rect::new(PAD, top, w - PAD, top + 24.0), pal().text);
-
-            // Galeri.
-            for (i, ((file, en, tr), c)) in st.walls.iter().zip(&l.cards).enumerate() {
-                let name = pick(en, tr);
-                if c.b < HEADER || c.t > self.h {
-                    continue;
-                }
-                let selected = *file == st.selected;
-                let hovered = self.hover == Hit::Wall(i);
-                let img = Rect::new(c.l, c.t, c.r, c.b - 34.0);
-                g.fill(img, 8.0, pal().hover);
-                match self.thumbs.get(file).map(|&(_, id)| id) {
-                    Some(id) => g.clip(img, || g.image(id, img, if hovered || selected { 1.0 } else { 0.8 })),
-                    None => g.text(t!("preparing preview…", "önizleme hazırlanıyor…"), &g.f.small_center, img, pal().faint),
-                }
-                if selected {
-                    g.stroke(Rect::new(img.l - 3.0, img.t - 3.0, img.r + 3.0, img.b + 3.0), 10.0, accent(), 2.0);
-                } else if hovered {
-                    g.stroke(img, 8.0, pal().line, 1.0);
-                }
-                let lc = if selected { accent() } else if hovered { pal().text } else { pal().muted };
-                g.text(name, &g.f.text, Rect::new(c.l + 2.0, c.b - 30.0, c.r, c.b - 4.0), lc);
+        let f = self.form();
+        let hover = if let Hit::Form(h) = self.hover { h } else { form::Hit::None };
+        g.clip(Rect::new(0.0, HEADER, self.w, self.h), || {
+            f.paint(g, hover, self.drag);
+            if let Some(area) = f.custom(GALLERY) {
+                self.paint_gallery(g, area);
             }
-            if st.walls.is_empty() {
-                let t = top + 32.0;
-                let msg = t!("No wallpapers · drop a .cheshire file here", "Duvar kâğıdı yok · bir .cheshire dosyasını buraya sürükle");
-                g.text(msg, &g.f.small, Rect::new(PAD, t, w - PAD, t + 24.0), pal().faint);
-            }
-
-            // Seçili duvar kâğıdının paneli.
-            let name = st.walls.iter().find(|w| w.0 == st.selected).map_or(t!("Wallpaper", "Duvar kâğıdı"), |w| pick(&w.1, &w.2));
-            Self::panel(g, l.panel1, name, t!("Settings for this wallpaper", "Bu duvar kâğıdının ayarları"));
-            if let Some(r) = l.reset {
-                button(g, r, t!("Reset to defaults", "Varsayılana dön"), None, None, self.hover == Hit::Reset);
-            }
-            if st.params.is_empty() {
-                let t = l.panel1.t + PANEL_HEAD;
-                let msg = t!("This wallpaper has no settings.", "Bu duvar kâğıdının ayarı yok.");
-                g.text(msg, &g.f.small, Rect::new(PAD + 20.0, t, w - PAD - 20.0, t + ROW), pal().faint);
-            }
-            for (k, &(n, r)) in l.rows.iter().enumerate() {
-                let p = &st.params[n];
-                if k > 0 {
-                    g.fill(Rect::new(r.l, r.t, r.r, r.t + 1.0), 0.0, pal().hover);
-                }
-                g.text(pick(&p.label[0], &p.label[1]), &g.f.text, Rect::new(r.l, r.t, r.l + LABEL_W - 16.0, r.b), pal().text);
-                match &p.kind {
-                    Kind::Slider { min, max, value, .. } => {
-                        let (a, b) = Self::slider_track(r);
-                        let active = self.drag == Some(n) || self.hover == Hit::Slider(n);
-                        let v = if max > min { (value - min) / (max - min) } else { 0.0 };
-                        slider(g, a, b, r.cy(), v, accent(), active);
-                        g.text(&format!("{value:.2}"), &g.f.small_right, Rect::new(b + 8.0, r.t, r.r, r.b), pal().muted);
-                    }
-                    Kind::Choice { options, value, .. } if options.len() > MAX_SEGMENTS => {
-                        let (prev, label, next) = Self::stepper(r);
-                        let len = options.len();
-                        g.fill(Rect::new(prev.l - 3.0, prev.t - 3.0, next.r + 3.0, next.b + 3.0), 8.0, pal().hover);
-                        let hp = self.hover == Hit::Choice(n, (value + len - 1) % len);
-                        let hn = self.hover == Hit::Choice(n, (value + 1) % len);
-                        icon_button(g, prev, "\u{E76B}", pal().muted, hp);
-                        icon_button(g, next, "\u{E76C}", pal().muted, hn);
-                        let current = options.get(*value).map(|o| choice_label(o)).unwrap_or_default();
-                        g.text(&current, &g.f.button, label, pal().text);
-                    }
-                    Kind::Choice { options, value, .. } => {
-                        self.paint_segments(g, r, &choice_labels(options), *value, |j| self.hover == Hit::Choice(n, j));
-                    }
-                    Kind::Toggle { value, .. } => toggle(g, toggle_rect(r.r, r.cy()), *value, accent(), true),
-                    Kind::Color { value, default } => {
-                        let list = colors(default);
-                        for (j, hex) in list.iter().enumerate() {
-                            let s = Self::swatch(r, list.len(), j);
-                            g.circle((s.l + s.r) / 2.0, s.cy(), 8.0, hex_color(hex).unwrap_or(pal().text));
-                            if hex.eq_ignore_ascii_case(value) {
-                                g.stroke(s, 11.0, pal().text, 2.0);
-                            } else if self.hover == Hit::Swatch(n, j) {
-                                g.stroke(s, 11.0, pal().muted, 1.0);
-                            }
-                        }
-                    }
-                }
-            }
-
-            // Motor paneli.
-            Self::panel(g, l.panel2, t!("Engine", "Motor"), t!("For every wallpaper", "Bütün duvar kâğıtları için"));
-            let r = l.fps_row;
-            g.text(t!("Frame rate", "Kare hızı"), &g.f.text, Rect::new(r.l, r.t, r.l + LABEL_W, r.b), pal().text);
-            let sel = FPS.iter().position(|&f| f == st.fps).unwrap_or(usize::MAX);
-            self.paint_segments(g, r, &Self::fps_labels(), sel, |k| self.hover == Hit::Fps(k));
-            let r = l.battery_row;
-            g.fill(Rect::new(r.l, r.t, r.r, r.t + 1.0), 0.0, pal().hover);
-            g.text(t!("Pause on battery", "Pildeyken duraklat"), &g.f.text, Rect::new(r.l, r.t, r.l + LABEL_W, r.b), pal().text);
-            toggle(g, toggle_rect(r.r, r.cy()), st.battery, accent(), true);
-
-            if !st.error.is_empty() {
-                let t = l.panel2.b + 12.0;
-                g.text(&st.error, &g.f.small, Rect::new(PAD, t, w - PAD, t + 22.0), pal().red);
-            }
+            self.paint_parts(g, &f);
         });
     }
 }
 
 impl ToolPage for Wallpaper {
     fn summary(&self) -> Option<(String, String)> {
-        let st = &self.st;
-        let name = st.walls.iter().find(|w| w.0 == st.selected).map_or("", |w| pick(&w.1, &w.2)).to_string();
+        let name = self.selected_name().unwrap_or("").to_string();
         let status = self.status_text();
         let detail = status.strip_prefix(&name).map_or(status.clone(), |r| r.trim_start_matches(" · ").to_string());
         Some(if name.is_empty() { (status, String::new()) } else { (name, detail) })
@@ -937,8 +869,8 @@ impl ToolPage for Wallpaper {
     }
 
     fn mouse_move(&mut self, g: &Gfx, x: f32, y: f32) {
-        if let Some(n) = self.drag {
-            self.slide_to(g, n, x, false);
+        if let Some(id) = self.drag {
+            self.slide_to(id, x, false);
             return;
         }
         let hit = self.hit(g, x, y);
@@ -957,20 +889,20 @@ impl ToolPage for Wallpaper {
 
     fn mouse_down(&mut self, g: &Gfx, x: f32, y: f32) {
         self.pressed = self.hit(g, x, y);
-        if let Hit::Slider(n) = self.pressed {
-            self.drag = Some(n);
-            self.slide_to(g, n, x, false);
+        if let Hit::Form(form::Hit::Slider(id, _)) = self.pressed {
+            self.drag = Some(id);
+            self.slide_to(id, x, false);
         }
     }
 
     fn mouse_up(&mut self, g: &Gfx, x: f32, y: f32) {
-        if let Some(n) = self.drag.take() {
-            self.slide_to(g, n, x, true);
+        if let Some(id) = self.drag.take() {
+            self.slide_to(id, x, true);
             self.pressed = Hit::None;
             return;
         }
         let hit = self.hit(g, x, y);
-        if hit != std::mem::replace(&mut self.pressed, Hit::None) {
+        if !hit.same(std::mem::replace(&mut self.pressed, Hit::None)) {
             return;
         }
         match hit {
@@ -984,23 +916,17 @@ impl ToolPage for Wallpaper {
                     self.redraw();
                 }
             }
-            Hit::Reset => {
+            Hit::Form(form::Hit::Button(RESET)) => {
                 for p in &self.st.params {
                     self.cmd(&format!("param {} {}", p.index, p.default_value()));
                 }
             }
-            Hit::Choice(n, j) => {
-                if let Some(p) = self.st.params.get_mut(n)
-                    && let Kind::Choice { value, .. } = &mut p.kind
-                {
-                    *value = j;
-                    let line = format!("param {} {j}", p.index);
-                    self.cmd(&line);
-                    self.redraw();
-                }
-            }
-            Hit::Toggle(n) => {
-                if let Some(p) = self.st.params.get_mut(n)
+            Hit::Form(form::Hit::Seg(FPS_ROW, k)) => self.cmd(&format!("fps {}", FPS[k])),
+            Hit::Form(form::Hit::Toggle(BATTERY)) => self.cmd(if self.st.battery { "pilde 0" } else { "pilde 1" }),
+            Hit::Form(form::Hit::Seg(n, j)) => self.choose(n as usize, j),
+            Hit::Step(n, j) => self.choose(n, j),
+            Hit::Form(form::Hit::Toggle(n)) => {
+                if let Some(p) = self.st.params.get_mut(n as usize)
                     && let Kind::Toggle { value, .. } = &mut p.kind
                 {
                     *value = !*value;
@@ -1017,14 +943,12 @@ impl ToolPage for Wallpaper {
                     self.cmd(&format!("param {} {hex}", p.index));
                 }
             }
-            Hit::Fps(k) => self.cmd(&format!("fps {}", FPS[k])),
-            Hit::Battery => self.cmd(if self.st.battery { "pilde 0" } else { "pilde 1" }),
-            Hit::Slider(_) | Hit::None => {}
+            _ => {}
         }
     }
 
     fn wheel(&mut self, g: &Gfx, x: f32, y: f32, delta: f32) {
-        self.scroll = (self.scroll - delta * 60.0).clamp(0.0, self.max_scroll(g));
+        self.scroll = (self.scroll - delta * 60.0).clamp(0.0, self.max_scroll());
         self.hover = self.hit(g, x, y);
         self.redraw();
     }

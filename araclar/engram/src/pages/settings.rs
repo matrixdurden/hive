@@ -1,8 +1,9 @@
 //! Ayarlar, bölüm bölüm: Ses (ElevenLabs, konuşan ses, uyandırma, sesimi öğret, bas-konuş),
 //! Bilgisayar (kontrol, onay), Beyin (Anthropic anahtarı, model, düşünme, not klasörü, hitap) ve
-//! Uygulama (kullanım, dil, tema, oturumda başlama, çıkış, kaldırma). API anahtarları DPAPI ile
-//! saklanır, maskeli görünür.
+//! Uygulama (kullanım). API anahtarları DPAPI ile saklanır, maskeli görünür. Düzen sayfa kitinin
+//! (`ortak::form`); yazı alanları engram'ın kendi `TextField`'ı, kitin ayırdığı yere çizilir.
 
+use ortak::form::{self, Ctl, Form, Item, Row};
 use windows::Win32::Foundation::HWND;
 
 use crate::page::Shared;
@@ -10,17 +11,19 @@ use crate::gfx::{Gfx, Rect};
 use crate::pages::VoiceReq;
 use crate::ui::*;
 
-const ROW: f32 = 64.0;
-const SECTION: f32 = 52.0;
-const MAX_W: f32 = 760.0;
+/// Yazı alanlarının genişliği: uzun (anahtar, klasör; yanında düğme varsa ikisi birlikte) ve kısa.
+const FIELD_W: f32 = 360.0;
+const SHORT_W: f32 = 120.0;
 
+/// Tıklanan / üstüne gelinen.
 #[derive(Clone, Copy, PartialEq, Debug)]
 enum Hit {
     None,
+    /// Kitin kontrolleri (seçenek, aç/kapa, düğme).
+    Form(form::Hit),
     Field(usize),
-    Seg(usize, usize),
-    Toggle(usize),
-    Button(Act),
+    /// Yazı alanının yanındaki düğme.
+    Act(Act),
 }
 
 /// Düğmelerin işi.
@@ -54,9 +57,31 @@ impl Act {
             Act::Browse => t!("Browse…", "Gözat…"),
         }
     }
+
+    /// Düğme satırının işi.
+    fn of_row(id: u32) -> Option<Act> {
+        Some(match id {
+            R_LOCAL => Act::LocalVoice,
+            R_GEMINI_VOICE => Act::GeminiVoice,
+            R_MIC => Act::Mic,
+            R_VOICE_NOTE => Act::VoiceNote,
+            R_TRAIN => Act::Train,
+            _ => return None,
+        })
+    }
+
+    /// Yazı alanının yanındaki düğme.
+    fn of_field(f: usize) -> Option<Act> {
+        Some(match f {
+            F_VOICE => Act::PickVoice,
+            F_SPOTIFY => Act::Spotify,
+            F_VAULT => Act::Browse,
+            _ => return None,
+        })
+    }
 }
 
-/// Yazı alanları sırası.
+/// Yazı alanları sırası; alanın satırının kimliği de budur.
 const F_ANTHROPIC: usize = 0;
 const F_ELEVEN: usize = 1;
 const F_VAULT: usize = 2;
@@ -68,34 +93,24 @@ const F_GROQ: usize = 7;
 const F_GEMINI: usize = 8;
 const F_SPOTIFY: usize = 9;
 
-/// Seçenek satırları.
-const S_MODEL: usize = 0;
-const S_EFFORT: usize = 1;
-const S_TTS: usize = 4;
-const S_CONFIRM: usize = 5;
-
-/// Aç/kapa satırları.
-const T_WAKE: usize = 0;
-const T_CONTROL: usize = 1;
-const T_LOCK: usize = 4;
+/// Öteki satırların kimlikleri (alanlardan sonra).
+const R_TTS: u32 = 10;
+const R_LOCAL: u32 = 11;
+const R_GEMINI_VOICE: u32 = 12;
+const R_WAKE: u32 = 13;
+const R_MIC: u32 = 14;
+const R_LOCK: u32 = 15;
+const R_VOICE_NOTE: u32 = 16;
+const R_TRAIN: u32 = 17;
+const R_CONTROL: u32 = 18;
+const R_CONFIRM: u32 = 19;
+const R_MODEL: u32 = 20;
+const R_EFFORT: u32 = 21;
 
 const MODELS: [(&str, &str); 2] = [("Opus 5.5", "claude-opus-5-5"), ("Sonnet 5.5", "claude-sonnet-5-5")];
 const EFFORTS: [&str; 3] = ["low", "medium", "high"];
 const TTS: [&str; 5] = ["xtts", "gemini", "auto", "windows", "kapali"];
 const CONFIRMS: [crate::config::Confirm; 3] = [crate::config::Confirm::Always, crate::config::Confirm::Risky, crate::config::Confirm::Never];
-
-/// Satırın sağındaki kontrol.
-#[derive(Clone, Copy)]
-enum Ctl {
-    /// Bölüm başlığı.
-    Section,
-    Field(usize),
-    /// Yazı alanı ve yanında düğme.
-    FieldButton(usize, Act),
-    Seg(usize),
-    Toggle(usize),
-    Button(Act),
-}
 
 pub struct SettingsPage {
     shared: Shared,
@@ -129,272 +144,165 @@ impl SettingsPage {
         SettingsPage { shared, fields, scroll: 0.0, hover: Hit::None, pressed: Hit::None, w: 0.0, h: 0.0 }
     }
 
-    /// Satırlar sırayla: (başlık, açıklama, kontrol).
-    /// Dil, tema, oturumda başlama ve kaldırma winloom'ın Ayarlar'ında.
-    fn rows(&self) -> Vec<(&'static str, String, Ctl)> {
+    /// Sayfanın öğeleri. Dil, tema, oturumda başlama ve kaldırma winloom'ın Ayarlar'ında.
+    fn items(&self) -> Vec<Item> {
         let s = self.shared.borrow();
         let c = &s.config;
+        let field = |f: usize, title: &str, sub: String, w: f32| Item::Row(Row::new(f as u32, title, sub, Ctl::Space(w)));
+        let button = |id: u32, title: &str, sub: String| Item::Row(Row::new(id, title, sub, Ctl::Button(Act::of_row(id).map_or("", Act::label).into())));
+        let seg = |id: u32, title: &str, sub: &str, opts: &[&str], sel: usize| {
+            Item::Row(Row::new(id, title, sub, Ctl::Seg(opts.iter().map(|o| o.to_string()).collect(), sel)))
+        };
         let trained = if s.trained >= 3 {
             t!(format!("Learned from {} samples: recognised on this computer", s.trained), format!("{} örnekten öğrendi: bu bilgisayarda tanınır", s.trained))
         } else if !s.train_msg.is_empty() && s.voice_state == crate::voice::State::Training {
             t!(format!("Say it now: {}", s.train_msg), format!("Şimdi söyle: {}", s.train_msg))
-        } else if c.groq_key.is_empty() && c.gemini_key.is_empty() && c.elevenlabs_key.is_empty() {
-            t!("~1 min: say the wake phrase 3 times, then read 8 sentences", "~1 dk: uyandırma sözünü 3 kez söyle, sonra 8 cümle oku").into()
         } else {
             t!("~1 min: say the wake phrase 3 times, then read 8 sentences", "~1 dk: uyandırma sözünü 3 kez söyle, sonra 8 cümle oku").into()
         };
+        let training = s.voice_state == crate::voice::State::Training;
+        let train_label = Act::Train.label().to_string();
+        let mic = if c.mic.is_empty() {
+            t!("Windows default. A Bluetooth headset drops to call quality while listening; prefer the laptop mic", "Windows'un varsayılanı. Bluetooth kulaklık dinlerken görüşme kalitesine düşer; dizüstünün mikrofonu daha iyi").into()
+        } else {
+            crate::audio::mics().into_iter().find(|m| m.0 == c.mic).map_or_else(|| t!("Selected microphone is not connected", "Seçili mikrofon takılı değil").into(), |m| m.1)
+        };
+        let local = match crate::xtts::status() {
+            crate::xtts::Status::Ready => t!("ready", "hazır"),
+            crate::xtts::Status::Loading => t!("loading…", "yükleniyor…"),
+            crate::xtts::Status::Failed => t!("not running (make engram-ses)", "çalışmıyor (make engram-ses)"),
+            crate::xtts::Status::Off => t!("off", "kapalı"),
+        };
+        let spotify = if crate::spotify::connected() {
+            t!("Connected: \"give me some music\" picks from your playlists", "Bağlı: \"bana müzik ver\" listelerinden seçer")
+        } else {
+            t!("Client ID from developer.spotify.com (redirect http://127.0.0.1:8737/spotify)", "developer.spotify.com'daki Client ID (yönlendirme http://127.0.0.1:8737/spotify)")
+        };
         vec![
-            (t!("Voice", "Ses"), String::new(), Ctl::Section),
-            (
-                t!("Groq API key", "Groq API anahtarı"),
-                t!("To hear you: free at console.groq.com (Whisper)", "Seni duymak için: console.groq.com'dan ücretsiz (Whisper)").into(),
-                Ctl::Field(F_GROQ),
-            ),
-            (
+            Item::Section(t!("Voice", "Ses").into()),
+            field(F_GROQ, t!("Groq API key", "Groq API anahtarı"), t!("To hear you: free at console.groq.com (Whisper)", "Seni duymak için: console.groq.com'dan ücretsiz (Whisper)").into(), FIELD_W),
+            field(
+                F_GEMINI,
                 t!("Gemini API key", "Gemini API anahtarı"),
                 t!("Hearing if there is no Groq key, and its voice; from aistudio.google.com", "Groq yoksa duyma, ister konuşan ses; aistudio.google.com'dan").into(),
-                Ctl::Field(F_GEMINI),
+                FIELD_W,
             ),
-            (
-                t!("ElevenLabs API key", "ElevenLabs API anahtarı"),
-                t!("Its voice; optional", "Konuşan sesi; isteğe bağlı").into(),
-                Ctl::Field(F_ELEVEN),
-            ),
-            (
+            field(F_ELEVEN, t!("ElevenLabs API key", "ElevenLabs API anahtarı"), t!("Its voice; optional", "Konuşan sesi; isteğe bağlı").into(), FIELD_W),
+            seg(
+                R_TTS,
                 t!("Speaking voice", "Konuşan ses"),
-                t!("Local runs free on your graphics card; Windows' own voice is robotic", "Yerel: ekran kartında bedava; Windows'un kendi sesi robotiktir").into(),
-                Ctl::Seg(S_TTS),
+                t!("Local runs free on your graphics card; Windows' own voice is robotic", "Yerel: ekran kartında bedava; Windows'un kendi sesi robotiktir"),
+                &[t!("Local", "Yerel"), "Gemini", "ElevenLabs", "Windows", t!("Off", "Kapalı")],
+                TTS.iter().position(|t| *t == c.tts).unwrap_or(0),
             ),
-            (
-                t!("Local voice", "Yerel ses"),
-                format!("{} · {}", c.local_voice, match crate::xtts::status() {
-                    crate::xtts::Status::Ready => t!("ready", "hazır"),
-                    crate::xtts::Status::Loading => t!("loading…", "yükleniyor…"),
-                    crate::xtts::Status::Failed => t!("not running (make engram-ses)", "çalışmıyor (make engram-ses)"),
-                    crate::xtts::Status::Off => t!("off", "kapalı"),
-                }),
-                Ctl::Button(Act::LocalVoice),
-            ),
-            (t!("Gemini voice", "Gemini sesi"), c.gemini_voice.clone(), Ctl::Button(Act::GeminiVoice)),
-            (t!("ElevenLabs voice ID", "ElevenLabs ses kimliği"), t!("From elevenlabs.io › Voices; empty for the default", "elevenlabs.io › Voices'tan; boşsa varsayılan").into(), Ctl::FieldButton(F_VOICE, Act::PickVoice)),
-            (
+            button(R_LOCAL, t!("Local voice", "Yerel ses"), format!("{} · {local}", c.local_voice)),
+            button(R_GEMINI_VOICE, t!("Gemini voice", "Gemini sesi"), c.gemini_voice.clone()),
+            field(F_VOICE, t!("ElevenLabs voice ID", "ElevenLabs ses kimliği"), t!("From elevenlabs.io › Voices; empty for the default", "elevenlabs.io › Voices'tan; boşsa varsayılan").into(), FIELD_W),
+            Item::Row(Row::new(
+                R_WAKE,
                 t!("Wake by voice", "Sesle uyan"),
                 t!(format!("Say \"{}\"; the microphone stays on", s.wake_phrase), format!("\"{}\" de; mikrofon açık kalır", s.wake_phrase)),
-                Ctl::Toggle(T_WAKE),
-            ),
-            (
-                t!("Microphone", "Mikrofon"),
-                if c.mic.is_empty() {
-                    t!("Windows default. A Bluetooth headset drops to call quality while listening; prefer the laptop mic", "Windows'un varsayılanı. Bluetooth kulaklık dinlerken görüşme kalitesine düşer; dizüstünün mikrofonu daha iyi").into()
-                } else {
-                    crate::audio::mics().into_iter().find(|m| m.0 == c.mic).map_or_else(|| t!("Selected microphone is not connected", "Seçili mikrofon takılı değil").into(), |m| m.1)
-                },
-                Ctl::Button(Act::Mic),
-            ),
-            (
+                Ctl::Toggle(c.wake),
+            )),
+            button(R_MIC, t!("Microphone", "Mikrofon"), mic),
+            Item::Row(Row::new(
+                R_LOCK,
                 t!("Only my voice", "Yalnızca benim sesim"),
-                t!("Music and other people don't trigger it; learned from \"Teach my voice\"", "Müzik ve başkaları tetiklemez; \"Sesimi tanıt\"tan öğrenir").into(),
-                Ctl::Toggle(T_LOCK),
-            ),
-            (t!("Wake phrase and replies", "Uyandırma sözü ve cevaplar"), "sistem/ses.md".into(), Ctl::Button(Act::VoiceNote)),
-            (t!("Teach my voice", "Sesimi tanıt"), trained, Ctl::Button(Act::Train)),
-            (t!("Push-to-talk key", "Bas-konuş tuşu"), t!("Hold it anywhere and talk", "Her yerde basılı tutup konuş").into(), Ctl::Field(F_HOTKEY)),
-            (
-                "Spotify",
-                if crate::spotify::connected() {
-                    t!("Connected: \"give me some music\" picks from your playlists", "Bağlı: \"bana müzik ver\" listelerinden seçer").into()
-                } else {
-                    t!("Client ID from developer.spotify.com (redirect http://127.0.0.1:8737/spotify)", "developer.spotify.com'daki Client ID (yönlendirme http://127.0.0.1:8737/spotify)").into()
-                },
-                Ctl::FieldButton(F_SPOTIFY, Act::Spotify),
-            ),
-            (t!("Computer", "Bilgisayar"), String::new(), Ctl::Section),
-            (
+                t!("Music and other people don't trigger it; learned from \"Teach my voice\"", "Müzik ve başkaları tetiklemez; \"Sesimi tanıt\"tan öğrenir"),
+                Ctl::Toggle(c.voice_lock),
+            )),
+            button(R_VOICE_NOTE, t!("Wake phrase and replies", "Uyandırma sözü ve cevaplar"), "sistem/ses.md".into()),
+            Item::Row(Row::new(R_TRAIN, t!("Teach my voice", "Sesimi tanıt"), trained, if training { Ctl::Primary(train_label) } else { Ctl::Button(train_label) })),
+            field(F_HOTKEY, t!("Push-to-talk key", "Bas-konuş tuşu"), t!("Hold it anywhere and talk", "Her yerde basılı tutup konuş").into(), SHORT_W),
+            field(F_SPOTIFY, "Spotify", spotify.into(), FIELD_W),
+            Item::Section(t!("Computer", "Bilgisayar").into()),
+            Item::Row(Row::new(
+                R_CONTROL,
                 t!("Control the computer", "Bilgisayarı kontrol et"),
-                t!("Mouse and keyboard; when off it can only look at the screen", "Fare ve klavye; kapalıyken yalnızca ekrana bakar").into(),
-                Ctl::Toggle(T_CONTROL),
-            ),
-            (
+                t!("Mouse and keyboard; when off it can only look at the screen", "Fare ve klavye; kapalıyken yalnızca ekrana bakar"),
+                Ctl::Toggle(c.control),
+            )),
+            seg(
+                R_CONFIRM,
                 t!("Ask before", "Onay"),
-                t!("Risky only: deleting, installing, shutting down, pushing…", "Yalnızca riskli: silme, kurma, kapatma, push…").into(),
-                Ctl::Seg(S_CONFIRM),
+                t!("Risky only: deleting, installing, shutting down, pushing…", "Yalnızca riskli: silme, kurma, kapatma, push…"),
+                &[t!("Always", "Her zaman"), t!("Risky only", "Yalnızca riskli"), t!("Never", "Hiç")],
+                CONFIRMS.iter().position(|x| *x == c.confirm).unwrap_or(1),
             ),
-            (t!("Brain", "Beyin"), String::new(), Ctl::Section),
-            (
+            Item::Section(t!("Brain", "Beyin").into()),
+            field(
+                F_ANTHROPIC,
                 t!("Anthropic API key", "Anthropic API anahtarı"),
                 t!("From platform.claude.com; stored encrypted for this user", "platform.claude.com'dan; bu kullanıcıya şifreli saklanır").into(),
-                Ctl::Field(F_ANTHROPIC),
+                FIELD_W,
             ),
-            (t!("Model", "Model"), t!("Opus is the smartest; Sonnet is faster and cheaper", "Opus en zekisi; Sonnet daha hızlı ve ucuz").into(), Ctl::Seg(S_MODEL)),
-            (t!("Thinking", "Düşünme"), t!("How long it thinks in written chat", "Yazılı sohbette ne kadar düşünsün").into(), Ctl::Seg(S_EFFORT)),
-            (
-                t!("Brain folder", "Beyin klasörü"),
-                t!("Plain markdown notes; Obsidian can open the same folder", "Düz markdown notlar; Obsidian aynı klasörü açabilir").into(),
-                Ctl::FieldButton(F_VAULT, Act::Browse),
+            seg(
+                R_MODEL,
+                t!("Model", "Model"),
+                t!("Opus is the smartest; Sonnet is faster and cheaper", "Opus en zekisi; Sonnet daha hızlı ve ucuz"),
+                &MODELS.map(|m| m.0),
+                MODELS.iter().position(|m| m.1 == c.model).unwrap_or(0),
             ),
-            (
+            seg(
+                R_EFFORT,
+                t!("Thinking", "Düşünme"),
+                t!("How long it thinks in written chat", "Yazılı sohbette ne kadar düşünsün"),
+                &[t!("low", "az"), t!("medium", "orta"), t!("high", "çok")],
+                EFFORTS.iter().position(|e| *e == c.effort).unwrap_or(1),
+            ),
+            field(F_VAULT, t!("Brain folder", "Beyin klasörü"), t!("Plain markdown notes; Obsidian can open the same folder", "Düz markdown notlar; Obsidian aynı klasörü açabilir").into(), FIELD_W),
+            field(
+                F_NAME,
                 t!("Assistant's name", "Asistanın adı"),
                 t!("It answers to it and winloom shows it under this name", "Ona böyle seslenirsin; winloom'da da bu adla görünür").into(),
-                Ctl::Field(F_NAME),
+                FIELD_W,
             ),
-            (t!("App", "Uygulama"), String::new(), Ctl::Section),
-            (
-                t!("API usage", "API kullanımı"),
-                format!("{} · {}", crate::usage::summary(c.budget), crate::usage::tokens()),
-                Ctl::Field(F_BUDGET),
-            ),
+            Item::Section(t!("App", "Uygulama").into()),
+            field(F_BUDGET, t!("API usage", "API kullanımı"), format!("{} · {}", crate::usage::summary(c.budget), crate::usage::tokens()), SHORT_W),
         ]
     }
 
-    fn col(&self) -> (f32, f32) {
-        let w = (self.w - 2.0 * PAD).min(MAX_W);
-        let l = (self.w - w) / 2.0;
-        (l, w)
-    }
-
-    /// Satırların dikey yerleri.
-    fn row_rects(&self) -> Vec<Rect> {
-        let (l, w) = self.col();
-        let mut t = HEADER + 4.0 - self.scroll;
-        self.rows()
-            .iter()
-            .map(|(_, _, ctl)| {
-                let h = if matches!(ctl, Ctl::Section) { SECTION } else { ROW };
-                let r = Rect::new(l, t, l + w, t + h);
-                t += h;
-                r
-            })
-            .collect()
+    /// Yerleştirilmiş sayfa (kaydırma dahil).
+    fn form(&self) -> Form {
+        Form::new(self.items(), PAD, self.w - PAD, HEADER + 16.0 - self.scroll)
     }
 
     fn max_scroll(&self) -> f32 {
-        let content: f32 = self.rows().iter().map(|r| if matches!(r.2, Ctl::Section) { SECTION } else { ROW }).sum();
-        (HEADER + 4.0 + content + 24.0 - self.h).max(0.0)
+        (self.form().bottom() + self.scroll - self.h).max(0.0)
     }
 
-    fn seg_labels(&self, s: usize) -> Vec<String> {
-        match s {
-            S_MODEL => MODELS.iter().map(|m| m.0.to_string()).collect(),
-            S_EFFORT => vec![t!("low", "az").into(), t!("medium", "orta").into(), t!("high", "çok").into()],
-            S_TTS => vec![t!("Local", "Yerel").into(), "Gemini".into(), "ElevenLabs".into(), "Windows".into(), t!("Off", "Kapalı").into()],
-            _ => vec![t!("Always", "Her zaman").into(), t!("Risky only", "Yalnızca riskli").into(), t!("Never", "Hiç").into()],
-        }
-    }
-
-    fn seg_selected(&self, s: usize) -> usize {
-        let c = &self.shared.borrow().config;
-        match s {
-            S_MODEL => MODELS.iter().position(|m| m.1 == c.model).unwrap_or(0),
-            S_EFFORT => EFFORTS.iter().position(|e| *e == c.effort).unwrap_or(1),
-            S_TTS => TTS.iter().position(|t| *t == c.tts).unwrap_or(0),
-            _ => CONFIRMS.iter().position(|x| *x == c.confirm).unwrap_or(1),
-        }
-    }
-
-    fn toggled(&self, t: usize) -> bool {
-        let c = &self.shared.borrow().config;
-        match t {
-            T_WAKE => c.wake,
-            T_CONTROL => c.control,
-            _ => c.voice_lock,
-        }
-    }
-
-    fn segs(&self, g: &Gfx, row: Rect, labels: &[String]) -> Vec<Rect> {
-        let mut right = row.r - 4.0;
-        let mut v: Vec<Rect> = labels
-            .iter()
-            .rev()
-            .map(|l| {
-                let w = g.measure(l, &g.f.button) + 26.0;
-                let r = Rect::new(right - w, row.cy() - 14.0, right, row.cy() + 14.0);
-                right -= w;
-                r
-            })
-            .collect();
-        v.reverse();
-        v
-    }
-
-    fn field_rect(&self, f: usize, row: Rect, button_w: f32) -> Rect {
-        let h = 34.0;
-        if f == F_BUDGET || f == F_HOTKEY {
-            return Rect::new(row.r - 120.0, row.cy() - h / 2.0, row.r - 4.0, row.cy() + h / 2.0);
-        }
-        let w = (row.w() * 0.46).max(200.0);
-        let r = row.r - 4.0 - button_w;
-        Rect::new(r - w, row.cy() - h / 2.0, r, row.cy() + h / 2.0)
-    }
-
-    fn button_rect(&self, g: &Gfx, a: Act, row: Rect) -> Rect {
-        button_rect_right(g, row.r - 4.0, row.cy() - 17.0, a.label(), false)
-    }
-
-    /// Satırın kontrollerinin kapladığı genişlik (başlık yazısı bunun solunda biter).
-    fn control_w(&self, g: &Gfx, ctl: Ctl, r: Rect) -> f32 {
-        match ctl {
-            Ctl::Section => 0.0,
-            Ctl::Field(f) => self.field_rect(f, r, 0.0).w() + 20.0,
-            Ctl::FieldButton(f, a) => {
-                let bw = self.button_rect(g, a, r).w() + 8.0;
-                self.field_rect(f, r, bw).w() + bw + 20.0
+    /// Yazı alanının yeri ve (varsa) sağındaki düğmesi: ikisi kitin ayırdığı yeri paylaşır.
+    fn field_rects(g: &Gfx, form: &Form, f: usize) -> Option<(Rect, Option<(Act, Rect)>)> {
+        let c = form.control(f as u32)?;
+        Some(match Act::of_field(f) {
+            Some(a) => {
+                let b = button_rect_right(g, c.r, c.t, a.label(), false);
+                (Rect::new(c.l, c.t, b.l - 8.0, c.b), Some((a, b)))
             }
-            Ctl::Seg(s) => {
-                let labels = self.seg_labels(s);
-                r.r - self.segs(g, r, &labels)[0].l + 24.0
-            }
-            Ctl::Toggle(_) => 70.0,
-            Ctl::Button(a) => self.button_rect(g, a, r).w() + 24.0,
-        }
+            None => (c, None),
+        })
     }
 
     fn hit(&self, g: &Gfx, x: f32, y: f32) -> Hit {
         if y < HEADER {
             return Hit::None;
         }
-        let rows = self.rows();
-        for (r, (_, _, ctl)) in self.row_rects().into_iter().zip(rows) {
-            if !r.contains(x, y) {
-                continue;
-            }
-            return match ctl {
-                Ctl::Section => Hit::None,
-                Ctl::Field(f) => {
-                    if self.field_rect(f, r, 0.0).contains(x, y) { Hit::Field(f) } else { Hit::None }
-                }
-                Ctl::FieldButton(f, a) => {
-                    let b = self.button_rect(g, a, r);
-                    if b.contains(x, y) {
-                        Hit::Button(a)
-                    } else if self.field_rect(f, r, b.w() + 8.0).contains(x, y) {
-                        Hit::Field(f)
-                    } else {
-                        Hit::None
-                    }
-                }
-                Ctl::Seg(s) => {
-                    let labels = self.seg_labels(s);
-                    self.segs(g, r, &labels).iter().position(|sr| sr.contains(x, y)).map_or(Hit::None, |k| Hit::Seg(s, k))
-                }
-                Ctl::Toggle(t) => {
-                    if toggle_rect(r.r - 4.0, r.cy()).contains(x, y) { Hit::Toggle(t) } else { Hit::None }
-                }
-                Ctl::Button(a) => {
-                    if self.button_rect(g, a, r).contains(x, y) { Hit::Button(a) } else { Hit::None }
-                }
-            };
+        let form = self.form();
+        match form.hit(g, x, y) {
+            form::Hit::None => Hit::None,
+            // Yazı alanı satırı: alan mı, düğmesi mi.
+            form::Hit::Row(id) => match Self::field_rects(g, &form, id as usize) {
+                Some((r, _)) if r.contains(x, y) => Hit::Field(id as usize),
+                Some((_, Some((a, b)))) if b.contains(x, y) => Hit::Act(a),
+                _ => Hit::None,
+            },
+            h => Hit::Form(h),
         }
-        Hit::None
     }
 
     /// Alanın yeri (fare olayları için).
     fn field_at(&self, g: &Gfx, f: usize) -> Option<Rect> {
-        let rows = self.rows();
-        self.row_rects().into_iter().zip(rows).find_map(|(r, (_, _, ctl))| match ctl {
-            Ctl::Field(x) if x == f => Some(self.field_rect(f, r, 0.0)),
-            Ctl::FieldButton(x, a) if x == f => Some(self.field_rect(f, r, self.button_rect(g, a, r).w() + 8.0)),
-            _ => None,
-        })
+        Self::field_rects(g, &self.form(), f).map(|(r, _)| r)
     }
 
     /// Alandaki yazıyı ayarlara işler ve kaydeder.
@@ -498,12 +406,12 @@ impl SettingsPage {
         self.focus(None);
     }
 
-    fn choose(&mut self, seg: usize, k: usize) {
+    fn choose(&mut self, id: u32, k: usize) {
         let mut st = self.shared.borrow_mut();
-        match seg {
-            S_MODEL => st.config.model = MODELS[k.min(1)].1.into(),
-            S_EFFORT => st.config.effort = EFFORTS[k.min(2)].into(),
-            S_TTS => {
+        match id {
+            R_MODEL => st.config.model = MODELS[k.min(1)].1.into(),
+            R_EFFORT => st.config.effort = EFFORTS[k.min(2)].into(),
+            R_TTS => {
                 st.config.tts = TTS[k.min(4)].into();
                 st.voice_req = Some(VoiceReq::Apply);
             }
@@ -512,14 +420,14 @@ impl SettingsPage {
         st.config.save();
     }
 
-    fn flip(&mut self, t: usize) {
+    fn flip(&mut self, id: u32) {
         let mut s = self.shared.borrow_mut();
-        match t {
-            T_WAKE => {
+        match id {
+            R_WAKE => {
                 s.config.wake = !s.config.wake;
                 s.voice_req = Some(VoiceReq::Apply);
             }
-            T_LOCK => {
+            R_LOCK => {
                 s.config.voice_lock = !s.config.voice_lock;
                 s.voice_req = Some(VoiceReq::Apply);
             }
@@ -677,47 +585,18 @@ impl Page for SettingsPage {
     }
 
     fn paint(&self, g: &Gfx) {
-        let rows = self.rows();
+        let form = self.form();
+        let hover = if let Hit::Form(h) = self.hover { h } else { form::Hit::None };
         g.clip(Rect::new(0.0, HEADER, self.w, self.h), || {
-            for (r, (title, sub, ctl)) in self.row_rects().into_iter().zip(rows) {
+            form.paint(g, hover, None);
+            for (f, field) in self.fields.iter().enumerate() {
+                let Some((r, act)) = Self::field_rects(g, &form, f) else { continue };
                 if r.b < HEADER || r.t > self.h {
                     continue;
                 }
-                if let Ctl::Section = ctl {
-                    g.text(title, &g.f.heading, Rect::new(r.l, r.t + 14.0, r.r, r.b), pal().text);
-                    continue;
-                }
-                setting_row(g, r, title, &sub, self.control_w(g, ctl, r));
-                match ctl {
-                    Ctl::Section => {}
-                    Ctl::Field(f) => self.fields[f].draw(g, self.field_rect(f, r, 0.0), self.hover == Hit::Field(f)),
-                    Ctl::FieldButton(f, a) => {
-                        let b = self.button_rect(g, a, r);
-                        self.fields[f].draw(g, self.field_rect(f, r, b.w() + 8.0), self.hover == Hit::Field(f));
-                        button(g, b, a.label(), None, None, self.hover == Hit::Button(a));
-                    }
-                    Ctl::Seg(s) => {
-                        let labels = self.seg_labels(s);
-                        let segs = self.segs(g, r, &labels);
-                        let sel = self.seg_selected(s);
-                        let (first, last) = (segs[0], segs[segs.len() - 1]);
-                        g.fill(Rect::new(first.l - 3.0, first.t - 3.0, last.r + 3.0, last.b + 3.0), 8.0, pal().hover);
-                        for (k, (sr, l)) in segs.iter().zip(&labels).enumerate() {
-                            let on = k == sel;
-                            let hov = self.hover == Hit::Seg(s, k);
-                            if on {
-                                g.fill(*sr, 6.0, pal().sel);
-                            } else if hov {
-                                g.fill(*sr, 6.0, pal().sel.alpha(0.6));
-                            }
-                            g.text(l, &g.f.button, *sr, if on || hov { pal().text } else { pal().muted });
-                        }
-                    }
-                    Ctl::Toggle(t) => toggle(g, toggle_rect(r.r - 4.0, r.cy()), self.toggled(t), accent(), true),
-                    Ctl::Button(a) => {
-                        let primary = a == Act::Train && self.shared.borrow().voice_state == crate::voice::State::Training;
-                        button(g, self.button_rect(g, a, r), a.label(), None, primary.then(accent), self.hover == Hit::Button(a));
-                    }
+                field.draw(g, r, self.hover == Hit::Field(f));
+                if let Some((a, b)) = act {
+                    button(g, b, a.label(), None, None, self.hover == Hit::Act(a));
                 }
             }
         });
@@ -769,9 +648,14 @@ impl Page for SettingsPage {
             return;
         }
         match hit {
-            Hit::Seg(s, k) => self.choose(s, k),
-            Hit::Toggle(t) => self.flip(t),
-            Hit::Button(a) => self.act(a),
+            Hit::Form(form::Hit::Seg(id, k)) => self.choose(id, k),
+            Hit::Form(form::Hit::Toggle(id)) => self.flip(id),
+            Hit::Form(form::Hit::Button(id)) => {
+                if let Some(a) = Act::of_row(id) {
+                    self.act(a);
+                }
+            }
+            Hit::Act(a) => self.act(a),
             _ => {}
         }
         self.redraw();
@@ -805,8 +689,8 @@ impl Page for SettingsPage {
         used
     }
 
-    fn interactive(&self, g: &Gfx, x: f32, y: f32) -> bool {
-        y >= HEADER || self.hit(g, x, y) != Hit::None
+    fn interactive(&self, _g: &Gfx, _x: f32, y: f32) -> bool {
+        y >= HEADER
     }
 
     fn set_visible(&mut self, visible: bool) {

@@ -25,6 +25,7 @@ use windows::Win32::Media::{timeBeginPeriod, timeEndPeriod};
 use windows::Win32::UI::Input::KeyboardAndMouse::*;
 use windows::Win32::UI::WindowsAndMessaging::*;
 
+use ortak::form::{Ctl, Form, Hit, Item, Row};
 use ortak::gfx::{Gfx, Rect};
 use ortak::osd;
 use ortak::ui::*;
@@ -41,7 +42,6 @@ pub const TIMER_UI: usize = 602;
 
 const HOLD_MS: u32 = 30;
 const UI_MS: u32 = 100;
-const ROW: f32 = 60.0;
 const ICON_MOUSE: &str = "\u{E962}";
 const ICON_STOP: &str = "\u{E71A}";
 /// Aracın rengi (ikonuyla aynı), bildirimde.
@@ -366,26 +366,15 @@ fn fmt_limit(n: u32) -> String {
 
 // --- Sayfa ---
 
-#[derive(Clone, Copy, PartialEq, Debug)]
-enum Hit {
-    None,
-    /// Aracı aç / kapa.
-    Enabled,
-    Key,
-    Mode(Mode),
-    Button(Button),
-    Speed,
-    Limit,
-    Stop,
-}
-
-/// Sayfanın bölümleri (tetik, tıklama): başlıkların üst kenarı, kutular ve satırlar.
-struct Layout {
-    titles: [f32; 2],
-    panels: [Rect; 2],
-    rows: [Vec<Rect>; 2],
-    bottom: f32,
-}
+/// Sayfa kitindeki satırların kimlikleri.
+const R_ON: u32 = 0;
+const R_KEY: u32 = 1;
+const R_MODE: u32 = 2;
+const R_BUTTON: u32 = 3;
+const R_SPEED: u32 = 4;
+const R_LIMIT: u32 = 5;
+/// Başlıktaki Durdur düğmesi (`Hit::Button(STOP)`); satırlarla çakışmaz.
+const STOP: u32 = 100;
 
 pub struct Clicker {
     hwnd: HWND,
@@ -396,8 +385,8 @@ pub struct Clicker {
     /// Tetik tuşu atanıyor.
     bind: bool,
     visible: bool,
-    /// Sürüklenen kaydırıcı.
-    drag: Option<Hit>,
+    /// Sürüklenen kaydırıcının satırı.
+    drag: Option<u32>,
     scroll: f32,
     hover: Hit,
     pressed: Hit,
@@ -621,28 +610,6 @@ impl Clicker {
 
     // --- Yerleşim ---
 
-    fn layout_all(&self) -> Layout {
-        let (l, r) = (PAD, self.w - PAD);
-        let mut y = HEADER + 16.0 - self.scroll;
-        let mut titles = [0.0; 2];
-        let mut panels = [Rect::new(0.0, 0.0, 0.0, 0.0); 2];
-        let mut rows: [Vec<Rect>; 2] = Default::default();
-        for (s, n) in [3usize, 3].into_iter().enumerate() {
-            titles[s] = y;
-            let top = y + 30.0;
-            let row =
-                |i: usize| Rect::new(l + 6.0, top + 6.0 + i as f32 * ROW, r - 6.0, top + 6.0 + (i + 1) as f32 * ROW);
-            rows[s] = (0..n).map(row).collect();
-            panels[s] = Rect::new(l, top, r, top + 12.0 + n as f32 * ROW);
-            y = panels[s].b + 24.0;
-        }
-        Layout { titles, panels, rows, bottom: y + self.scroll }
-    }
-
-    fn max_scroll(&self) -> f32 {
-        (self.layout_all().bottom - self.h).max(0.0)
-    }
-
     fn chip_text(&self) -> String {
         match (self.bind, self.settings.key) {
             (true, _) => t!("press a key", "tuşa bas").into(),
@@ -651,122 +618,101 @@ impl Clicker {
         }
     }
 
-    fn key_chip(&self, g: &Gfx, row: Rect) -> Rect {
-        chip_rect(g, row.r - 12.0, row.cy(), &self.chip_text())
+    /// Sayfanın içeriği: Tetik ve Tıklama bölümleri.
+    fn items(&self) -> Vec<Item> {
+        let s = &self.settings;
+        let key_sub = if self.conflict() {
+            t!("Taken by another app: pick another key", "Başka bir uygulamada: başka tuş seç")
+        } else {
+            t!("Any key, with Ctrl / Alt / Shift if you like", "Herhangi bir tuş, istersen Ctrl / Alt / Shift ile")
+        };
+        let mode_sub = match s.mode {
+            Mode::Hold => t!("Clicks while the key is held down", "Tuş basılı olduğu sürece tıklar"),
+            Mode::Toggle => t!("Press once to start, again to stop", "Bir basış başlatır, bir basış durdurur"),
+        };
+        let seg = |labels: &[&str], sel: Option<usize>| Ctl::Seg(labels.iter().map(|l| l.to_string()).collect(), sel.unwrap_or(0));
+        vec![
+            Item::Section(t!("Trigger", "Tetik").into()),
+            Item::Row(Row::new(
+                R_ON,
+                t!("On", "Açık"),
+                t!("Off, the trigger key is released; your settings stay", "Kapalıyken tetik tuşu bırakılır; ayarların durur"),
+                Ctl::Toggle(s.enabled),
+            )),
+            Item::Row(Row::new(R_KEY, t!("Key", "Tuş"), key_sub, Ctl::Chip(self.chip_text(), self.bind))),
+            Item::Row(Row::new(
+                R_MODE,
+                t!("Mode", "Mod"),
+                mode_sub,
+                seg(&Mode::ALL.map(Mode::label), Mode::ALL.iter().position(|&m| m == s.mode)),
+            )),
+            Item::Section(t!("Clicking", "Tıklama").into()),
+            Item::Row(Row::new(
+                R_BUTTON,
+                t!("Button", "Düğme"),
+                "",
+                seg(&Button::ALL.map(Button::label), Button::ALL.iter().position(|&b| b == s.button)),
+            )),
+            Item::Row(Row::new(R_SPEED, t!("Speed", "Hız"), "", Ctl::Slider(cps_to_v(s.cps), fmt_cps(s.cps)))),
+            Item::Row(Row::new(
+                R_LIMIT,
+                t!("Stop after", "Şu kadar sonra dur"),
+                "",
+                Ctl::Slider(limit_to_v(s.limit), fmt_limit(s.limit)),
+            )),
+        ]
     }
 
-    /// Sağa yaslı seçenekler, verilen sırayla.
-    fn segs(g: &Gfx, row: Rect, labels: &[&str]) -> Vec<Rect> {
-        let mut right = row.r - 12.0;
-        let mut v: Vec<Rect> = labels
-            .iter()
-            .rev()
-            .map(|l| {
-                let w = g.measure(l, &g.f.button) + 26.0;
-                let r = Rect::new(right - w, row.cy() - 14.0, right, row.cy() + 14.0);
-                right -= w;
-                r
-            })
-            .collect();
-        v.reverse();
-        v
+    fn form(&self) -> Form {
+        Form::new(self.items(), PAD, self.w - PAD, HEADER + 16.0 - self.scroll)
     }
 
-    fn mode_segs(&self, g: &Gfx, row: Rect) -> Vec<Rect> {
-        Self::segs(g, row, &Mode::ALL.map(Mode::label))
-    }
-
-    fn button_segs(&self, g: &Gfx, row: Rect) -> Vec<Rect> {
-        Self::segs(g, row, &Button::ALL.map(Button::label))
-    }
-
-    /// Kaydırıcının izi (a..b) ve tutma alanı.
-    fn track(row: Rect) -> (f32, f32, Rect) {
-        let (a, b) = (row.l + 150.0, row.r - 100.0);
-        (a, b, Rect::new(a - 10.0, row.cy() - 14.0, b + 10.0, row.cy() + 14.0))
+    fn max_scroll(&self) -> f32 {
+        (self.form().bottom() + self.scroll - self.h).max(0.0)
     }
 
     fn stop_rect(&self, g: &Gfx) -> Rect {
         button_rect_right(g, self.head_r, HEAD_CY - 17.0, t!("Stop", "Durdur"), true)
     }
 
+    /// Başlıkta yalnız Durdur düğmesi; altı sayfa kitinin.
     fn hit(&self, g: &Gfx, x: f32, y: f32) -> Hit {
         if y < HEADER {
-            return if self.running() && self.stop_rect(g).contains(x, y) { Hit::Stop } else { Hit::None };
+            return if self.running() && self.stop_rect(g).contains(x, y) { Hit::Button(STOP) } else { Hit::None };
         }
-        let [trigger, clicking] = &self.layout_all().rows;
-        if trigger[0].contains(x, y) {
-            return Hit::Enabled;
-        }
-        if self.key_chip(g, trigger[1]).contains(x, y) {
-            return Hit::Key;
-        }
-        if let Some(i) = self.mode_segs(g, trigger[2]).iter().position(|r| r.contains(x, y)) {
-            return Hit::Mode(Mode::ALL[i]);
-        }
-        if let Some(i) = self.button_segs(g, clicking[0]).iter().position(|r| r.contains(x, y)) {
-            return Hit::Button(Button::ALL[i]);
-        }
-        if Self::track(clicking[1]).2.contains(x, y) {
-            return Hit::Speed;
-        }
-        if Self::track(clicking[2]).2.contains(x, y) {
-            return Hit::Limit;
-        }
-        Hit::None
+        self.form().hit(g, x, y)
     }
 
     /// Sürüklenen kaydırıcıya imlecin x'ini uygular.
     fn drag_to(&mut self, x: f32) {
-        let Some(which) = self.drag else { return };
-        let [_, clicking] = &self.layout_all().rows;
-        let row = if which == Hit::Speed { clicking[1] } else { clicking[2] };
-        let (a, b, _) = Self::track(row);
-        let v = ((x - a) / (b - a)).clamp(0.0, 1.0);
-        match which {
-            Hit::Speed => self.set_cps(v_to_cps(v)),
-            Hit::Limit => self.set_limit(v_to_limit(v)),
+        let Some(id) = self.drag else { return };
+        let Some(v) = self.form().slider_value(id, x) else { return };
+        self.slide(id, v);
+    }
+
+    fn slide(&mut self, id: u32, v: f32) {
+        match id {
+            R_SPEED => self.set_cps(v_to_cps(v)),
+            R_LIMIT => self.set_limit(v_to_limit(v)),
+            _ => {}
+        }
+    }
+
+    /// Tıklanan (fare bırakılınca).
+    fn act(&mut self, hit: Hit) {
+        match hit {
+            Hit::Toggle(R_ON) | Hit::Row(R_ON) => self.set_enabled(!self.settings.enabled),
+            Hit::Chip(R_KEY) => self.start_bind(),
+            Hit::Seg(R_MODE, k) => self.set_mode(Mode::ALL[k]),
+            Hit::Seg(R_BUTTON, k) => self.set_button(Button::ALL[k]),
+            Hit::Button(STOP) => self.end(true),
             _ => {}
         }
     }
 
     // --- Çizim ---
 
-    fn paint_segs(g: &Gfx, rects: &[Rect], labels: &[&str], selected: usize, hovered: Option<usize>) {
-        let (first, last) = (rects[0], rects[rects.len() - 1]);
-        g.fill(Rect::new(first.l - 3.0, first.t - 3.0, last.r + 3.0, last.b + 3.0), 8.0, pal().hover);
-        for (i, (r, l)) in rects.iter().zip(labels).enumerate() {
-            let on = i == selected;
-            let hov = hovered == Some(i);
-            if on {
-                g.fill(*r, 6.0, pal().sel);
-            } else if hov {
-                g.fill(*r, 6.0, pal().sel.alpha(0.6));
-            }
-            g.text(l, &g.f.button, *r, if on || hov { pal().text } else { pal().muted });
-        }
-    }
-
-    /// Satırın başlığı ve altındaki açıklaması; `right`: kontrolün sol kenarı.
-    fn row_text(g: &Gfx, r: Rect, title: &str, sub: &str, right: f32) {
-        let x = r.l + 14.0;
-        if sub.is_empty() {
-            g.text(title, &g.f.strong, Rect::new(x, r.t, right - 10.0, r.b), pal().text);
-        } else {
-            g.text(title, &g.f.strong, Rect::new(x, r.t + 10.0, right - 10.0, r.cy()), pal().text);
-            g.text(sub, &g.f.small, Rect::new(x, r.cy() - 2.0, right - 10.0, r.b - 8.0), pal().muted);
-        }
-    }
-
-    fn paint_slider(&self, g: &Gfx, row: Rect, v: f32, label: &str, hit: Hit) {
-        let (a, b, _) = Self::track(row);
-        let active = self.drag == Some(hit) || (self.drag.is_none() && self.hover == hit);
-        slider(g, a, b, row.cy(), v, accent(), active);
-        g.text(label, &g.f.small_right, Rect::new(b + 12.0, row.t, row.r - 12.0, row.b), pal().muted);
-    }
-
     pub fn paint(&self, g: &Gfx) {
-        let w = self.w;
         let key = self.key_name();
         let n = self.run.as_ref().map_or(0, Run::count);
         let (dot, head, color) = match () {
@@ -801,81 +747,13 @@ impl Clicker {
         let mut right = self.head_r - 8.0;
         if self.running() {
             let r = self.stop_rect(g);
-            button(g, r, t!("Stop", "Durdur"), Some(ICON_STOP), Some(accent()), self.hover == Hit::Stop);
+            button(g, r, t!("Stop", "Durdur"), Some(ICON_STOP), Some(accent()), self.hover == Hit::Button(STOP));
             right = r.l - 12.0;
         }
         status(g, self.head_x + 16.0, HEAD_CY, dot, &head, color, right);
 
-        let l = self.layout_all();
-        g.clip(Rect::new(0.0, HEADER, w, self.h), || {
-            let titles = [t!("Trigger", "Tetik"), t!("Clicking", "Tıklama")];
-            for (s, title) in titles.iter().enumerate() {
-                let t = l.titles[s];
-                g.text(title, &g.f.strong, Rect::new(PAD, t, w - PAD, t + 24.0), pal().text);
-                g.fill(l.panels[s], 12.0, pal().panel);
-                g.stroke(l.panels[s], 12.0, pal().line, 1.0);
-                for r in l.rows[s].iter().skip(1) {
-                    g.fill(Rect::new(r.l + 8.0, r.t, r.r - 8.0, r.t + 1.0), 0.0, pal().hover);
-                }
-            }
-            let [trigger, clicking] = &l.rows;
-
-            // Tetik: açık, tuş, mod.
-            let r = trigger[0];
-            Self::row_text(
-                g,
-                r,
-                t!("On", "Açık"),
-                t!("Off, the trigger key is released; your settings stay", "Kapalıyken tetik tuşu bırakılır; ayarların durur"),
-                toggle_rect(r.r - 12.0, r.cy()).l,
-            );
-            toggle(g, toggle_rect(r.r - 12.0, r.cy()), self.settings.enabled, accent(), true);
-
-            let r = trigger[1];
-            let chip_r = self.key_chip(g, r);
-            Self::row_text(
-                g,
-                r,
-                t!("Key", "Tuş"),
-                t!("Any key, with Ctrl / Alt / Shift if you like", "Herhangi bir tuş, istersen Ctrl / Alt / Shift ile"),
-                chip_r.l,
-            );
-            let (c, b) = match () {
-                _ if self.bind => (accent(), accent()),
-                _ if self.conflict() => (pal().red, pal().line),
-                _ if self.settings.key.is_none() => (pal().faint, pal().line),
-                _ if self.hover == Hit::Key => (pal().text, pal().faint),
-                _ => (pal().muted, pal().line),
-            };
-            chip(g, chip_r, &self.chip_text(), c, b);
-
-            let r = trigger[2];
-            let segs = self.mode_segs(g, r);
-            let sub = match self.settings.mode {
-                Mode::Hold => t!("Clicks while the key is held down", "Tuş basılı olduğu sürece tıklar"),
-                Mode::Toggle => t!("Press once to start, again to stop", "Bir basış başlatır, bir basış durdurur"),
-            };
-            Self::row_text(g, r, t!("Mode", "Mod"), sub, segs[0].l);
-            let sel = Mode::ALL.iter().position(|&m| m == self.settings.mode).unwrap_or(0);
-            let hov = Mode::ALL.iter().position(|&m| self.hover == Hit::Mode(m));
-            Self::paint_segs(g, &segs, &Mode::ALL.map(Mode::label), sel, hov);
-
-            // Tıklama: düğme, hız, sayı.
-            let r = clicking[0];
-            let segs = self.button_segs(g, r);
-            Self::row_text(g, r, t!("Button", "Düğme"), "", segs[0].l);
-            let sel = Button::ALL.iter().position(|&b| b == self.settings.button).unwrap_or(0);
-            let hov = Button::ALL.iter().position(|&b| self.hover == Hit::Button(b));
-            Self::paint_segs(g, &segs, &Button::ALL.map(Button::label), sel, hov);
-
-            let r = clicking[1];
-            Self::row_text(g, r, t!("Speed", "Hız"), "", Self::track(r).0);
-            self.paint_slider(g, r, cps_to_v(self.settings.cps), &fmt_cps(self.settings.cps), Hit::Speed);
-
-            let r = clicking[2];
-            Self::row_text(g, r, t!("Stop after", "Şu kadar sonra dur"), "", Self::track(r).0);
-            self.paint_slider(g, r, limit_to_v(self.settings.limit), &fmt_limit(self.settings.limit), Hit::Limit);
-        });
+        let form = self.form();
+        g.clip(Rect::new(0.0, HEADER, self.w, self.h), || form.paint(g, self.hover, self.drag));
     }
 }
 
@@ -940,10 +818,10 @@ impl ToolPage for Clicker {
 
     fn mouse_down(&mut self, g: &Gfx, x: f32, y: f32) {
         self.pressed = self.hit(g, x, y);
-        if matches!(self.pressed, Hit::Speed | Hit::Limit) {
+        if let Hit::Slider(id, v) = self.pressed {
             self.end_bind(None);
-            self.drag = Some(self.pressed);
-            self.drag_to(x);
+            self.drag = Some(id);
+            self.slide(id, v);
         }
     }
 
@@ -956,28 +834,21 @@ impl ToolPage for Clicker {
             return;
         }
         let hit = self.hit(g, x, y);
-        if hit != std::mem::replace(&mut self.pressed, Hit::None) {
+        if !hit.same(std::mem::replace(&mut self.pressed, Hit::None)) {
             return;
         }
         self.end_bind(None);
-        match hit {
-            Hit::Enabled => self.set_enabled(!self.settings.enabled),
-            Hit::Key => self.start_bind(),
-            Hit::Mode(m) => self.set_mode(m),
-            Hit::Button(b) => self.set_button(b),
-            Hit::Stop => self.end(true),
-            Hit::Speed | Hit::Limit | Hit::None => {}
-        }
+        self.act(hit);
     }
 
     fn wheel(&mut self, g: &Gfx, x: f32, y: f32, delta: f32) {
         match self.hit(g, x, y) {
-            Hit::Speed => {
+            Hit::Slider(R_SPEED, _) => {
                 let c = self.settings.cps;
                 self.set_cps(c + delta.signum() * cps_step(if delta > 0.0 { c } else { c - 0.01 }));
                 self.save();
             }
-            Hit::Limit => {
+            Hit::Slider(R_LIMIT, _) => {
                 let n = self.settings.limit;
                 let step = limit_step(if delta > 0.0 { n } else { n.saturating_sub(1) });
                 let next = if delta > 0.0 { n.saturating_add(step) } else { n.saturating_sub(step) };

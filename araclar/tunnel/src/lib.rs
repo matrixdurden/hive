@@ -23,10 +23,10 @@ use windows::Win32::UI::Input::KeyboardAndMouse::SetFocus;
 use windows::Win32::UI::WindowsAndMessaging::*;
 use windows::core::{PCWSTR, w};
 
+use ortak::form::{self, Ctl, Form, Item, Row};
 use ortak::gfx::{Gfx, Rect};
 use ortak::log;
 use ortak::ui::*;
-
 
 pub const WM_DONE: u32 = WM_APP + 30;
 pub const WM_LINE: u32 = WM_APP + 31;
@@ -249,14 +249,32 @@ pub fn run(args: &[&str]) -> Result<String, String> {
 #[derive(Clone, Copy, PartialEq, Debug)]
 enum Hit {
     None,
-    Mode(usize),
+    /// Sayfa kitindeki satırlar.
+    Form(form::Hit),
     /// Sunucu bağlantısı yazılan kutu.
     Field,
     /// Kutudakini kaydet.
-    Link,
-    Autostart,
+    Save,
     Doctor,
 }
+
+impl Hit {
+    /// Basılan ile bırakılan aynı yer mi (tıklama).
+    fn same(self, other: Hit) -> bool {
+        match (self, other) {
+            (Hit::Form(a), Hit::Form(b)) => a.same(b),
+            _ => self == other,
+        }
+    }
+}
+
+// Sayfa kitindeki satırlar.
+const R_MODE: u32 = 0;
+const R_SERVER: u32 = 1;
+const R_LINK: u32 = 2;
+const R_AUTOSTART: u32 = 3;
+/// Ağ testinin raporu (kendi çizdiğimiz alan).
+const D_REPORT: u32 = 10;
 
 const LINK_MAX: usize = 4096;
 
@@ -437,10 +455,7 @@ impl Tunnel {
 
     pub fn doctor_line(&mut self) {
         // Yeni satırlar gelince en alta kaydır.
-        if let Some(d) = &self.doctor {
-            let n = d.lock().unwrap().lines.len() as f32;
-            self.scroll = (n * LINE_H + 40.0 - (self.h - HEADER - 16.0)).max(0.0);
-        }
+        self.scroll = self.max_scroll();
         self.redraw();
     }
 
@@ -489,82 +504,123 @@ impl Tunnel {
         button_rect_right(g, self.head_r, HEAD_CY - 17.0, label, !self.doctor_open())
     }
 
-    fn circle_cy(&self) -> f32 {
-        HEADER + 92.0
+    /// Mod seçicide seçili olan: sunucu · DPI · kapalı.
+    fn current_mode(&self) -> usize {
+        match (self.st.state, self.st.mode) {
+            (Some(State::On | State::Starting), Some(Mode::Server)) => 0,
+            (Some(State::On | State::Starting), Some(Mode::Dpi)) => 1,
+            _ => 2,
+        }
     }
 
-    fn mode_rect(&self, k: usize) -> Rect {
-        let cw = 112.0;
-        let l = self.w / 2.0 - cw * 1.5 + k as f32 * cw;
-        let t = self.circle_cy() + 128.0;
-        Rect::new(l, t, l + cw, t + 36.0)
+    /// Son iş ya da son başlatmanın sonucu: (yazı, hata mı).
+    fn note(&self) -> Option<(String, bool)> {
+        self.message.clone().or_else(|| {
+            self.st.error.clone().filter(|_| self.busy.is_none()).map(|e| (format!("{} {e}", t!("Last attempt failed:", "Son deneme başarısız:")), true))
+        })
     }
 
-    fn row(&self, n: usize) -> Rect {
-        let t = self.mode_rect(0).b + 36.0 + n as f32 * 56.0;
-        Rect::new(PAD, t, self.w - PAD, t + 56.0)
+    /// Sayfa: bağlantı (mod), sunucu (şimdiki, yeni bağlantı), başlangıç. Ağ testi açıkken onun raporu.
+    fn form(&self) -> Form {
+        let items = if let Some(d) = &self.doctor {
+            let d = d.lock().unwrap();
+            let mut items = vec![Item::Section(t!("Network test", "Ağ testi").into())];
+            if !d.lines.is_empty() {
+                items.push(Item::Custom(D_REPORT, d.lines.len() as f32 * LINE_H + 32.0));
+            }
+            if d.running {
+                items.push(Item::Note(t!("Testing the network, takes 10–20 seconds…", "Ağ test ediliyor, 10–20 saniye sürer…").into(), false));
+            }
+            items
+        } else {
+            // Açıklamasız satır daha alçak: iş sürerken seçici yerinden oynamasın.
+            let sub = Some(self.state_text().1).filter(|s| !s.is_empty()).unwrap_or_else(|| t!("Please wait…", "Biraz bekle…").into());
+            let modes = vec![t!("Server", "Sunucu").into(), "DPI".into(), t!("Off", "Kapalı").into()];
+            let mut items = vec![
+                Item::Section(t!("Connection", "Bağlantı").into()),
+                Item::Row(Row::new(R_MODE, t!("Mode", "Mod"), sub, Ctl::Seg(modes, self.current_mode()))),
+            ];
+            if let Some((m, err)) = self.note() {
+                items.push(Item::Note(m, err));
+            }
+            let now = match (&self.st.host, &self.st.name) {
+                (Some(h), Some(n)) => format!("{} {n} · {h}", t!("Now:", "Şimdiki:")),
+                (Some(h), None) => format!("{} {h}", t!("Now:", "Şimdiki:")),
+                _ => t!("None yet · paste the vless:// link your server gave you", "Henüz yok · sunucunun verdiği vless:// bağlantısını yapıştır").into(),
+            };
+            // Bağlantı kutusu ve Kaydet düğmesi satırın sağında; başlığa yer kalır.
+            let space = (self.w - 2.0 * PAD - 32.0 - 150.0).clamp(160.0, 520.0);
+            items.extend([
+                Item::Section(t!("Server", "Sunucu").into()),
+                Item::Row(Row::new(R_SERVER, t!("Server", "Sunucu"), now, Ctl::None)),
+                Item::Row(Row::new(R_LINK, t!("New link", "Yeni bağlantı"), "", Ctl::Space(space))),
+                Item::Section(t!("Startup", "Başlangıç").into()),
+                Item::Row(Row::new(
+                    R_AUTOSTART,
+                    t!("Start with Windows", "Windows ile başlat"),
+                    t!("Comes back in the mode it was left · needs administrator", "Açılışta kaldığı moda döner · yönetici izni ister"),
+                    Ctl::Toggle(self.st.autostart),
+                )),
+            ]);
+            items
+        };
+        Form::new(items, PAD, self.w - PAD, HEADER + 16.0 - self.scroll)
     }
 
-    /// Kaydet düğmesi (kutunun sağında).
-    fn link_rect(&self, g: &Gfx) -> Rect {
-        let r = self.row(1);
-        button_rect_right(g, r.r, r.cy() - 17.0, t!("Save", "Kaydet"), false)
+    fn max_scroll(&self) -> f32 {
+        (self.form().bottom() - 24.0 + self.scroll + 16.0 - self.h).max(0.0)
     }
 
-    /// Bağlantı kutusu: satırın genişliği, sağda düğmeye yer kalır.
-    fn field_rect(&self, g: &Gfx) -> Rect {
-        let r = self.row(1);
-        let b = self.link_rect(g);
-        Rect::new(r.l, r.cy() - 17.0, b.l - 10.0, r.cy() + 17.0)
+    /// Yeni bağlantı satırının sağı: kutu ve Kaydet düğmesi.
+    fn link_rects(&self, g: &Gfx, f: &Form) -> Option<(Rect, Rect)> {
+        let c = f.control(R_LINK)?;
+        let save = button_rect_right(g, c.r, c.t, t!("Save", "Kaydet"), false);
+        Some((Rect::new(c.l, c.t, save.l - 8.0, c.b), save))
     }
 
     fn hit(&self, g: &Gfx, x: f32, y: f32) -> Hit {
         if self.doctor_rect(g).contains(x, y) {
             return Hit::Doctor;
         }
-        if self.doctor_open() {
+        if y < HEADER {
             return Hit::None;
         }
-        if let Some(k) = (0..3).find(|&k| self.mode_rect(k).contains(x, y)) {
-            return Hit::Mode(k);
+        let f = self.form();
+        if let Some((field, save)) = self.link_rects(g, &f) {
+            if save.contains(x, y) {
+                return Hit::Save;
+            }
+            if field.contains(x, y) {
+                return Hit::Field;
+            }
         }
-        if self.link_rect(g).contains(x, y) {
-            return Hit::Link;
+        match f.hit(g, x, y) {
+            form::Hit::None | form::Hit::Row(_) | form::Hit::Custom(_) => Hit::None,
+            h => Hit::Form(h),
         }
-        if self.field_rect(g).contains(x, y) {
-            return Hit::Field;
-        }
-        if self.row(2).contains(x, y) {
-            return Hit::Autostart;
-        }
-        Hit::None
     }
 
     // --- Çizim ---
 
-    fn paint_doctor(&self, g: &Gfx) {
+    /// Ağ testinin satırları, kart içinde.
+    fn paint_report(&self, g: &Gfx, r: Rect) {
         let Some(d) = &self.doctor else { return };
-        let d = d.lock().unwrap();
-        let area = Rect::new(0.0, HEADER, self.w, self.h);
-        g.clip(area, || {
-            let mut y = HEADER + 16.0 - self.scroll;
-            for line in &d.lines {
-                if y + LINE_H >= HEADER && y <= self.h {
-                    let t = line.trim_start();
-                    let (c, f) = match () {
-                        _ if t.starts_with('✓') => (pal().green.alpha(0.9), &g.f.text),
-                        _ if t.starts_with('✗') => (pal().red, &g.f.text),
-                        _ if !line.starts_with(' ') && !line.is_empty() => (pal().text, &g.f.strong),
-                        _ => (pal().muted, &g.f.text),
-                    };
-                    g.text(line, f, Rect::new(PAD, y, self.w - PAD, y + LINE_H), c);
-                }
-                y += LINE_H;
+        g.fill(r, 8.0, pal().panel);
+        g.stroke(r, 8.0, pal().line, 1.0);
+        let mut y = r.t + 16.0;
+        for line in &d.lock().unwrap().lines {
+            if y + LINE_H >= HEADER && y <= self.h {
+                let t = line.trim_start();
+                let (c, f) = match () {
+                    _ if t.starts_with('✓') => (pal().green.alpha(0.9), &g.f.text),
+                    _ if t.starts_with('✗') => (pal().red, &g.f.text),
+                    _ if !line.starts_with(' ') && !line.is_empty() => (pal().text, &g.f.strong),
+                    _ => (pal().muted, &g.f.text),
+                };
+                g.text(line, f, Rect::new(r.l + 16.0, y, r.r - 16.0, y + LINE_H), c);
             }
-            if d.running {
-                g.text(t!("Testing the network, takes 10–20 seconds…", "Ağ test ediliyor, 10–20 saniye sürer…"), &g.f.small, Rect::new(PAD, y + 6.0, self.w - PAD, y + 28.0), pal().faint);
-            }
-        });
+            y += LINE_H;
+        }
     }
 
     /// Durum: büyük satır ve altındaki açıklama (sayfada ve Ana sayfadaki kutucukta).
@@ -588,88 +644,33 @@ impl Tunnel {
     }
 
     pub fn paint(&self, g: &Gfx) {
-        let (w, cy) = (self.w, self.circle_cy());
-        let accent_live = self.st.state == Some(State::On);
+        // Başlık: durum ve Ağı test et.
         let dr = self.doctor_rect(g);
         if self.doctor_open() {
             button(g, dr, t!("Close", "Kapat"), None, None, self.hover == Hit::Doctor);
         } else {
             button(g, dr, t!("Test network", "Ağı test et"), Some(ICON_REFRESH), None, self.hover == Hit::Doctor);
         }
-        if self.doctor_open() {
-            self.paint_doctor(g);
-            return;
-        }
-
-        // Durum dairesi.
-        let r = 48.0;
-        let ring = Rect::new(w / 2.0 - r, cy - r, w / 2.0 + r, cy + r);
-        match self.st.state {
-            Some(State::On) => {
-                g.fill(ring, r, accent().alpha(0.12));
-                g.stroke(ring, r, accent(), 2.0);
-            }
-            Some(State::Starting | State::Stopping) => g.stroke(ring, r, accent().alpha(0.5), 2.0),
-            _ => g.stroke(ring, r, pal().line, 2.0),
-        }
-        g.text("\u{E7E8}", &g.f.icon_large, ring, if accent_live { accent() } else { pal().faint });
-
-        let (label, sub) = self.state_text();
-        text_center(g, &label, &g.f.heading, w / 2.0, cy + r + 14.0, cy + r + 44.0, pal().text);
-        text_center(g, &sub, &g.f.small, w / 2.0, cy + r + 44.0, cy + r + 66.0, pal().muted);
-
-        // Mod seçici: sunucu · DPI · kapalı.
-        let current = match (self.st.state, self.st.mode) {
-            (Some(State::On | State::Starting), Some(Mode::Server)) => 0,
-            (Some(State::On | State::Starting), Some(Mode::Dpi)) => 1,
-            _ => 2,
+        let dot = match (self.busy, self.st.state) {
+            (None, Some(State::On)) => pal().green,
+            (Some(_), _) | (_, Some(State::Starting | State::Stopping)) => pal().muted,
+            _ => pal().faint,
         };
-        let all = Rect::new(self.mode_rect(0).l, self.mode_rect(0).t, self.mode_rect(2).r, self.mode_rect(0).b);
-        g.fill(all, 8.0, pal().hover);
-        for (k, name) in [t!("Server", "Sunucu"), "DPI", t!("Off", "Kapalı")].iter().enumerate() {
-            let mr = self.mode_rect(k);
-            let inner = Rect::new(mr.l + 3.0, mr.t + 3.0, mr.r - 3.0, mr.b - 3.0);
-            let dim = k == 0 && self.st.host.is_none();
-            if k == current {
-                g.fill(inner, 6.0, if k == 2 { pal().sel } else { accent() });
-            } else if self.hover == Hit::Mode(k) {
-                g.fill(inner, 6.0, pal().sel);
+        status(g, self.head_x + 16.0, HEAD_CY, dot, &self.state_text().0, pal().muted, dr.l - 8.0);
+
+        let f = self.form();
+        let hover = if let Hit::Form(h) = self.hover { h } else { form::Hit::None };
+        g.clip(Rect::new(0.0, HEADER, self.w, self.h), || {
+            f.paint(g, hover, None);
+            if let Some(r) = f.custom(D_REPORT) {
+                self.paint_report(g, r);
             }
-            let c = match () {
-                _ if k == current && k != 2 => on_accent(),
-                _ if k == current || self.hover == Hit::Mode(k) => pal().text,
-                _ if dim => pal().faint,
-                _ => pal().muted,
-            };
-            g.text(name, &g.f.button, mr, c);
-        }
-
-        if let Some((m, err)) = self.message.as_ref().map(|(m, e)| (m.clone(), *e)).or_else(|| {
-            self.st.error.clone().filter(|_| self.busy.is_none()).map(|e| (format!("{} {e}", t!("Last attempt failed:", "Son deneme başarısız:")), true))
-        }) {
-            let t = self.mode_rect(0).b + 8.0;
-            text_center(g, &m, &g.f.small, w / 2.0, t, t + 22.0, if err { pal().red } else { pal().muted });
-        }
-
-        // Ayar satırları: sunucu (başlık, kutu + kaydet), Windows ile başlat.
-        let r0 = self.row(0);
-        let sub = match (&self.st.host, &self.st.name) {
-            (Some(h), Some(n)) => format!("{} {n} · {h}", t!("Now:", "Şimdiki:")),
-            (Some(h), None) => format!("{} {h}", t!("Now:", "Şimdiki:")),
-            _ => t!("None yet · paste the vless:// link your server gave you", "Henüz yok · sunucunun verdiği vless:// bağlantısını yapıştır").into(),
-        };
-        g.text(t!("Server", "Sunucu"), &g.f.strong, Rect::new(r0.l, r0.t + 12.0, r0.r, r0.cy()), pal().text);
-        g.text(&sub, &g.f.small, Rect::new(r0.l, r0.cy(), r0.r, r0.b - 12.0), pal().muted);
-        self.link.paint(g, self.field_rect(g), "vless://…");
-        let lr = self.link_rect(g);
-        let primary = self.link_ok().then(accent);
-        button(g, lr, t!("Save", "Kaydet"), None, primary, self.hover == Hit::Link);
-        g.fill(Rect::new(r0.l, self.row(1).b - 1.0, r0.r, self.row(1).b), 0.0, pal().hover);
-
-        let r1 = self.row(2);
-        let sub = t!("Comes back in the mode it was left · needs administrator", "Açılışta kaldığı moda döner · yönetici izni ister");
-        setting_row(g, r1, t!("Start with Windows", "Windows ile başlat"), sub, 120.0);
-        toggle(g, toggle_rect(r1.r, r1.cy()), self.st.autostart, accent(), true);
+            if let Some((field, save)) = self.link_rects(g, &f) {
+                self.link.paint(g, field, "vless://…");
+                let primary = self.link_ok().then(accent);
+                button(g, save, t!("Save", "Kaydet"), None, primary, self.hover == Hit::Save);
+            }
+        });
     }
 
     // --- Olaylar ---
@@ -720,6 +721,7 @@ impl ToolPage for Tunnel {
         self.h = h;
         self.head_x = head_x;
         self.head_r = head_r;
+        self.scroll = self.scroll.min(self.max_scroll());
     }
 
     fn interactive(&self, g: &Gfx, x: f32, y: f32) -> bool {
@@ -753,7 +755,7 @@ impl ToolPage for Tunnel {
             unsafe {
                 let _ = SetFocus(Some(self.hwnd));
             }
-        } else if self.pressed != Hit::Link {
+        } else if self.pressed != Hit::Save {
             self.link.blur();
         }
         if was != self.link.focused {
@@ -763,27 +765,27 @@ impl ToolPage for Tunnel {
 
     fn mouse_up(&mut self, g: &Gfx, x: f32, y: f32) {
         let hit = self.hit(g, x, y);
-        if hit != std::mem::replace(&mut self.pressed, Hit::None) {
+        if !hit.same(std::mem::replace(&mut self.pressed, Hit::None)) {
             return;
         }
         match hit {
-            Hit::Field => {}
-            Hit::Mode(0) => self.set_mode(Some(Mode::Server)),
-            Hit::Mode(1) => self.set_mode(Some(Mode::Dpi)),
-            Hit::Mode(_) => self.set_mode(None),
-            Hit::Link => self.add_link(),
-            Hit::Autostart => self.toggle_autostart(),
+            Hit::Form(form::Hit::Seg(R_MODE, 0)) => self.set_mode(Some(Mode::Server)),
+            Hit::Form(form::Hit::Seg(R_MODE, 1)) => self.set_mode(Some(Mode::Dpi)),
+            Hit::Form(form::Hit::Seg(R_MODE, _)) => self.set_mode(None),
+            Hit::Form(form::Hit::Toggle(R_AUTOSTART)) => self.toggle_autostart(),
+            Hit::Save => self.add_link(),
             Hit::Doctor => {
                 if self.doctor_open() {
                     if !self.doctor.as_ref().is_some_and(|d| d.lock().unwrap().running) {
                         self.doctor = None;
+                        self.scroll = 0.0;
                         self.redraw();
                     }
                 } else {
                     self.run_doctor();
                 }
             }
-            Hit::None => {}
+            _ => {}
         }
     }
 
@@ -821,13 +823,10 @@ impl ToolPage for Tunnel {
         }
     }
 
-    fn wheel(&mut self, _g: &Gfx, _x: f32, _y: f32, delta: f32) {
-        if let Some(d) = &self.doctor {
-            let n = d.lock().unwrap().lines.len() as f32;
-            let max = (n * LINE_H + 40.0 - (self.h - HEADER - 16.0)).max(0.0);
-            self.scroll = (self.scroll - delta * LINE_H * 3.0).clamp(0.0, max);
-            self.redraw();
-        }
+    fn wheel(&mut self, g: &Gfx, x: f32, y: f32, delta: f32) {
+        self.scroll = (self.scroll - delta * 60.0).clamp(0.0, self.max_scroll());
+        self.hover = self.hit(g, x, y);
+        self.redraw();
     }
 
     fn set_visible(&mut self, visible: bool) {
