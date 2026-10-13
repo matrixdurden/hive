@@ -29,7 +29,7 @@ Bütün araçlar winloom ile gelir: **Araçlar** sayfasından istediğini açars
 
 | | | |
 |:---:|---|---|
-| <img src="araclar/soundboard/ikon/soundboard-64.png" width="40"> | **Blast** | Sesi doğrudan mikrofona veren soundboard. Sanal mikrofon kurmaz; Discord, oyunlar, OBS, mikrofonu dinleyen her uygulama duyar. Myinstants'ta ses ara (kulaklıkta dinle, tek tıkla ekle); bilgisayarda az önce çalan son 10 saniyeyi kısayolla (`Ctrl+Alt+L`) listeye ekle. |
+| <img src="araclar/soundboard/ikon/soundboard-64.png" width="40"> | **Ses efektleri** | Sesi doğrudan mikrofona veren soundboard. Sanal mikrofon kurmaz; Discord, oyunlar, OBS, mikrofonu dinleyen her uygulama duyar. Myinstants'ta ses ara (kulaklıkta dinle, tek tıkla ekle); bilgisayarda az önce çalan son 10 saniyeyi kısayolla (`Ctrl+Alt+L`) listeye ekle. |
 | <img src="araclar/wallpaper/ikon/wallpaper-64.png" width="40"> | **Duvar kâğıdı** | Masaüstü ikonlarının arkasında GPU ile çizilen canlı duvar kâğıtları. Tam ekranda ve pilde kendiliğinden durur. |
 | <img src="araclar/tunnel/ikon/tunnel-64.png" width="40"> | **VPN** | Bütün bilgisayarı ağ engellerinin ötesine geçiren VPN: kendi sunucun üzerinden ya da sunucusuz DPI modunda. [Ayrı depo](https://github.com/matrixdurden/rabbithole). |
 | <img src="araclar/battery/ikon/battery-64.png" width="40"> | **Pil** | Dizüstü için üç vites: prizde, dışarıda bir iki saat, hayatta kalma. Şarj takılıp çıkınca kendi geçer, pildeyken ekran kartını uyutur, her vitesin gerçekte kaç saat gittiğini öğrenir. |

@@ -417,6 +417,12 @@ impl Drop for Engram {
 }
 
 impl ToolPage for Engram {
+    /// Asistanın adı (Ayarlar'daki "Adı"): winloom'da engram bu adla görünür.
+    fn title(&self) -> Option<String> {
+        let name = self.shared.borrow().config.name.trim().to_string();
+        (!name.is_empty()).then_some(name)
+    }
+
     /// winloom'ın arama kutusundan: Ana alt sayfasında soru olarak gönderilir.
     fn ask(&mut self, text: &str) -> bool {
         self.select(Tab::Home);

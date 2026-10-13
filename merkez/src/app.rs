@@ -306,6 +306,19 @@ impl App {
             .collect()
     }
 
+    /// Aracın görünen adı: açıksa sayfasının verdiği (engram: asistanın adı), değilse kendi adı.
+    fn tool_name(&self, i: usize) -> String {
+        self.page_ref(i).and_then(|p| p.title()).unwrap_or_else(|| TOOLS[i].name().to_string())
+    }
+
+    /// Sayfanın kenar çubuğundaki adı.
+    fn label(&self, page: Page) -> String {
+        match page {
+            Page::Tool(i) => self.tool_name(i),
+            p => p.label().to_string(),
+        }
+    }
+
     /// Açık araçlar, kenar çubuğu sırasıyla.
     fn live_tools(&self) -> Vec<usize> {
         (0..TOOLS.len()).filter(|&i| self.installed(i)).collect()
@@ -472,7 +485,7 @@ impl App {
 
     /// Canlı araç sayfasının başlığında adın bittiği x (sayfanın kendi köşesine göre).
     fn head_x(&self, i: usize) -> f32 {
-        PAD + 44.0 + self.gfx.measure(TOOLS[i].name(), &self.gfx.f.heading)
+        PAD + 44.0 + self.gfx.measure(&self.tool_name(i), &self.gfx.f.heading)
     }
 
     /// Araç sayfasına boyutunu verir; kenar çubuğunun genişliğini döndürür.
@@ -777,7 +790,7 @@ impl App {
         };
         g.text(glyph, &g.f.icon, ic, fg);
         if !self.narrow(w) {
-            g.text(page.label(), &g.f.text, Rect::new(r.l + 46.0, r.t, r.r - 10.0, r.b), fg);
+            g.text(&self.label(page), &g.f.text, Rect::new(r.l + 46.0, r.t, r.r - 10.0, r.b), fg);
         }
     }
 
@@ -812,7 +825,7 @@ impl App {
         g.stroke(sq, 8.0, pal().line, 1.0);
         g.text(TOOLS[i].glyph, &g.f.icon, sq, accent());
         let name = Rect::new(PAD + 44.0, HEAD_CY - 18.0, PAD + 260.0, HEAD_CY + 18.0);
-        g.text(TOOLS[i].name(), &g.f.heading, name, pal().text);
+        g.text(&self.tool_name(i), &g.f.heading, name, pal().text);
         if let Some(p) = self.page_ref(i) {
             p.paint(g);
             if let Some((r, text)) = p.tip() {
@@ -854,14 +867,14 @@ impl App {
                 Page::Settings => t!("language theme update start with windows quit remove", "dil tema güncelle windows ile başlat kapat kaldır").into(),
                 _ => String::new(),
             };
-            if hit(page.label()) || hit(&extra) {
+            if hit(&self.label(page)) || hit(&extra) {
                 let glyph = match page {
                     Page::Home => ICON_HOME,
                     Page::Tool(i) => TOOLS[i].glyph,
                     Page::Store => ICON_ADD,
                     Page::Settings => ICON_SETTINGS,
                 };
-                out.push((Found::Go(page), page.label().to_string(), glyph));
+                out.push((Found::Go(page), self.label(page), glyph));
             }
         }
         for (i, t) in TOOLS.iter().enumerate() {
@@ -870,10 +883,11 @@ impl App {
             }
         }
         out.truncate(FOUND_MAX - 1);
-        // Hiçbiri değilse yazılanı soru olarak alabilecek araç (engram) en sonda.
+        // Hiçbiri değilse yazılanı soru olarak alabilecek araç (engram, asistanın adıyla) en sonda.
         if let Some(i) = (0..TOOLS.len()).find(|&i| self.installed(i) && TOOLS[i].id == "engram") {
-            let text = self.search.text.trim();
-            out.push((Found::Ask(i), t!(format!("Ask engram: {text}"), format!("engram'a sor: {text}")), TOOLS[i].glyph));
+            let (text, name) = (self.search.text.trim(), self.tool_name(i));
+            let label = t!(format!("Ask {name}: {text}"), format!("{}'{} sor: {text}", name, dative(&name)));
+            out.push((Found::Ask(i), label, TOOLS[i].glyph));
         }
         out
     }
@@ -973,8 +987,8 @@ impl App {
                 // Üstte simge ve ad, altında aracın şu anki durumu (yoksa açıklaması).
                 let ic = Rect::new(r.l + 14.0, r.t + 12.0, r.l + 36.0, r.t + 36.0);
                 g.text(TOOLS[i].glyph, &g.f.icon_small, ic, accent());
-                g.text(TOOLS[i].name(), &g.f.small, Rect::new(r.l + 42.0, r.t + 12.0, r.r - 14.0, r.t + 36.0), pal().muted);
-                let (big, sub) = self.page_ref(i).and_then(|p| p.summary()).unwrap_or_else(|| (TOOLS[i].name().into(), TOOLS[i].tagline().into()));
+                g.text(&self.tool_name(i), &g.f.small, Rect::new(r.l + 42.0, r.t + 12.0, r.r - 14.0, r.t + 36.0), pal().muted);
+                let (big, sub) = self.page_ref(i).and_then(|p| p.summary()).unwrap_or_else(|| (self.tool_name(i), TOOLS[i].tagline().into()));
                 g.text(&big, &g.f.heading, Rect::new(r.l + 14.0, r.t + 42.0, r.r - 14.0, r.t + 72.0), pal().text);
                 g.text(&sub, &g.f.small, Rect::new(r.l + 14.0, r.t + 72.0, r.r - 14.0, r.b - 10.0), pal().muted);
             }
@@ -1143,11 +1157,12 @@ impl App {
             && let Hit::Nav(p) = self.hover
         {
             let r = self.nav_rect(p, w, h);
-            let tw = g.measure(p.label(), &g.f.text);
+            let label = self.label(p);
+            let tw = g.measure(&label, &g.f.text);
             let tip = Rect::new(sw + 6.0, r.cy() - 14.0, sw + 6.0 + tw + 20.0, r.cy() + 14.0);
             g.fill(tip, 4.0, pal().tip);
             g.stroke(tip, 4.0, pal().line, 1.0);
-            g.text(p.label(), &g.f.text, Rect::new(tip.l + 10.0, tip.t, tip.r, tip.b), pal().text);
+            g.text(&label, &g.f.text, Rect::new(tip.l + 10.0, tip.t, tip.r, tip.b), pal().text);
         }
         self.paint_search(w);
         self.paint_captions(w);
@@ -1769,4 +1784,18 @@ fn today() -> (u16, String) {
     let day = days[(t.wDayOfWeek as usize).min(6)];
     let month = months[(t.wMonth as usize).clamp(1, 12) - 1];
     (t.wHour, format!("{day}, {} {month}", t.wDay))
+}
+
+/// Türkçe yönelme ekinin kesme işaretinden sonrası: "Matrix'e", "engram'a", "Ayşe'ye".
+fn dative(name: &str) -> &'static str {
+    let lower = name.to_lowercase();
+    let last = lower.chars().rev().find(|c| "aeıioöuü".contains(*c));
+    let back = matches!(last, Some('a' | 'ı' | 'o' | 'u'));
+    let ends_vowel = lower.chars().last().is_some_and(|c| "aeıioöuü".contains(c));
+    match (ends_vowel, back) {
+        (true, true) => "ya",
+        (true, false) => "ye",
+        (false, true) => "a",
+        (false, false) => "e",
+    }
 }

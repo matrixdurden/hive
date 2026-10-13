@@ -29,7 +29,7 @@ Every tool comes with winloom: turn on the ones you want on the **Tools** page. 
 
 | | | |
 |:---:|---|---|
-| <img src="araclar/soundboard/ikon/soundboard-64.png" width="40"> | **Blast** | A soundboard that plays straight into your microphone. No virtual microphone: Discord, games, OBS, anything that listens to the mic hears it. Find sounds on Myinstants without leaving it (listen on your headphones, add with one click), and grab the last 10 seconds your computer played with a shortcut (`Ctrl+Alt+L`). |
+| <img src="araclar/soundboard/ikon/soundboard-64.png" width="40"> | **Soundboard** | A soundboard that plays straight into your microphone. No virtual microphone: Discord, games, OBS, anything that listens to the mic hears it. Find sounds on Myinstants without leaving it (listen on your headphones, add with one click), and grab the last 10 seconds your computer played with a shortcut (`Ctrl+Alt+L`). |
 | <img src="araclar/wallpaper/ikon/wallpaper-64.png" width="40"> | **Wallpaper** | Live wallpapers drawn by your GPU behind the desktop icons. Pauses on its own in fullscreen and on battery. |
 | <img src="araclar/tunnel/ikon/tunnel-64.png" width="40"> | **VPN** | A VPN that takes your whole computer past network blocks: through your own server, or serverless in DPI mode. [Separate repository](https://github.com/matrixdurden/rabbithole). |
 | <img src="araclar/battery/ikon/battery-64.png" width="40"> | **Battery** | Three gears for a laptop: plugged in, out for an hour or two, survival. Switches on its own when the charger comes and goes, keeps the discrete GPU asleep on battery and learns how long each gear really lasts. |

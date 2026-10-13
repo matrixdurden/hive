@@ -233,8 +233,8 @@ impl SettingsPage {
                 Ctl::FieldButton(F_VAULT, Act::Browse),
             ),
             (
-                t!("Name", "Hitap adı"),
-                t!("Personality and rules are notes too: sistem/kisilik.md, sistem/kurallar.md", "Kişilik ve kurallar da not: sistem/kisilik.md, sistem/kurallar.md").into(),
+                t!("Assistant's name", "Asistanın adı"),
+                t!("It answers to it and winloom shows it under this name", "Ona böyle seslenirsin; winloom'da da bu adla görünür").into(),
                 Ctl::Field(F_NAME),
             ),
             (t!("App", "Uygulama"), String::new(), Ctl::Section),

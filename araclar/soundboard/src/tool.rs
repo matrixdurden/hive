@@ -1,4 +1,4 @@
-//! Blast'ın (soundboard) winloom'a tanımı. Açmak mikrofon efektini bağlamaktır (yönetici).
+//! Ses efektlerinin (soundboard) winloom'a tanımı. Açmak mikrofon efektini bağlamaktır (yönetici).
 
 use windows::Win32::System::Com::{COINIT_APARTMENTTHREADED, CoInitializeEx};
 
@@ -9,7 +9,7 @@ use crate::{ARG_INSTALL, ARG_UNINSTALL, Soundboard};
 
 pub static TOOL: Tool = Tool {
     id: "soundboard",
-    names: ["Blast", "Blast"],
+    names: ["Soundboard", "Ses efektleri"],
     tagline: ["A soundboard that plays straight into your microphone", "Sesi doğrudan mikrofona veren soundboard"],
     note: ["Adds an effect to your microphone · needs admin", "Mikrofonuna bir ses efekti takar · yönetici izni ister"],
     off_note: [

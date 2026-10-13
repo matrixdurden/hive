@@ -366,6 +366,11 @@ pub trait ToolPage {
     fn take_notice(&mut self) -> Option<(String, String)> {
         None
     }
+    /// Aracın görünen adı kullanıcıya göre değişiyorsa (engram: asistanın adı); kenar çubuğu,
+    /// başlık, kutucuk ve arama bunu kullanır. `None`: aracın kendi adı.
+    fn title(&self) -> Option<String> {
+        None
+    }
     /// Arama kutusuna yazılıp araca bırakılan istek (engram: soru olarak gönderir). Aldıysa `true`.
     fn ask(&mut self, _text: &str) -> bool {
         false
