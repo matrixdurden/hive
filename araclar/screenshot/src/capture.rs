@@ -1,9 +1,10 @@
 //! Yakalama: bütün ekranlar bir kez kopyalanır (donmuş görüntü), üstünde tam ekran bir pencere
-//! kararmış hâlini gösterir; seçilen alan aydınlık, ince çerçeveli; yazı yok. Seçim bırakılınca yerinde
-//! kalır: içinde tek renk kalemle çizilir, Ctrl+C (ya da Enter) panoya kopyalar, Ctrl+S klasöre
-//! PNG olarak kaydeder (panoya da), Ctrl+Z son çizgiyi geri alır, Esc vazgeçer; seçimin dışında
-//! sürüklemek yeni seçim başlatır. Fare kıpırdadıkça yalnızca değişen bölge yeniden çizilir (4K'da
-//! da akıcı). Açıkken öbür araçlar ekran köşelerine tepki vermez. Hepsi arayüz iş parçacığında, GDI.
+//! kararmış hâlini gösterir; seçilen alan aydınlık, ince çerçeveli; yazı yok. Seçim bırakılınca
+//! yerinde kalır: içinde tek renk kalemle çizilir, Ctrl+C (ya da Enter) panoya kopyalar, Ctrl+S
+//! kaydetme yerini sorup PNG olarak kaydeder (panoya da kopyalar), Ctrl+Z son çizgiyi geri alır,
+//! Esc vazgeçer; seçimin dışında sürüklemek yeni seçim başlatır. Fare kıpırdadıkça yalnızca
+//! değişen bölge yeniden çizilir (4K'da da akıcı). Açıkken öbür araçlar ekran köşelerine tepki
+//! vermez. Hepsi arayüz iş parçacığında, GDI.
 
 use std::cell::RefCell;
 use std::path::PathBuf;
@@ -50,7 +51,7 @@ struct Shot {
     /// Çizgiler (pencere pikseli); sonuncusu çizilmekte olabilir.
     strokes: Vec<Vec<POINT>>,
     drawing: bool,
-    /// Ctrl+S'nin kaydettiği klasör.
+    /// Kaydetme penceresinin ilk açtığı klasör.
     dir: PathBuf,
 }
 
@@ -276,9 +277,13 @@ impl Shot {
             return;
         }
         let mut text = t!("Copied", "Kopyalandı").to_string();
-        if save {
-            match save_png(&self.dir, w, h, &px) {
-                Ok(name) => text = t!(format!("Copied · saved as {name}"), format!("Kopyalandı · {name} olarak kaydedildi")),
+        // Kaydetme yerini kullanıcı seçer (vazgeçerse yalnızca panoda kalır).
+        if save && let Some(path) = ask_path(&self.dir) {
+            match save_png(&path, w, h, &px) {
+                Ok(()) => {
+                    let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+                    text = t!(format!("Copied · saved as {name}"), format!("Kopyalandı · {name} olarak kaydedildi"));
+                }
                 Err(e) => ortak::log!("ekran görüntüsü kaydedilemedi: {e}"),
             }
         }
@@ -332,12 +337,36 @@ fn to_clipboard(hwnd: HWND, w: i32, h: i32, px: &[u8]) -> windows::core::Result<
     }
 }
 
-/// `dir`'e "2026-10-13 12.34.56.png" olarak yazar; dosyanın adını döndürür.
-fn save_png(dir: &std::path::Path, w: i32, h: i32, px: &[u8]) -> windows::core::Result<String> {
+/// Windows'un "Farklı kaydet" penceresi: adı tarih-saat, ilk açılışta `dir` (sonra Windows son
+/// seçilen klasörü hatırlar). Vazgeçilirse `None`.
+fn ask_path(dir: &std::path::Path) -> Option<PathBuf> {
+    use windows::Win32::UI::Shell::Common::COMDLG_FILTERSPEC;
+    use windows::Win32::UI::Shell::{FileSaveDialog, IFileSaveDialog, IShellItem, SHCreateItemFromParsingName, SIGDN_FILESYSPATH};
     let t = unsafe { windows::Win32::System::SystemInformation::GetLocalTime() };
-    let name = format!("{}-{:02}-{:02} {:02}.{:02}.{:02}.png", t.wYear, t.wMonth, t.wDay, t.wHour, t.wMinute, t.wSecond);
+    let name = format!("{}-{:02}-{:02} {:02}.{:02}.{:02}", t.wYear, t.wMonth, t.wDay, t.wHour, t.wMinute, t.wSecond);
     let _ = std::fs::create_dir_all(dir);
-    let path = wide(&dir.join(&name).display().to_string());
+    unsafe {
+        let dlg: IFileSaveDialog = CoCreateInstance(&FileSaveDialog, None, CLSCTX_INPROC_SERVER).ok()?;
+        let filter = [COMDLG_FILTERSPEC { pszName: w!("PNG"), pszSpec: w!("*.png") }];
+        let _ = dlg.SetFileTypes(&filter);
+        let _ = dlg.SetDefaultExtension(w!("png"));
+        let name = wide(&name);
+        let _ = dlg.SetFileName(PCWSTR(name.as_ptr()));
+        let d = wide(&dir.display().to_string());
+        if let Ok(item) = SHCreateItemFromParsingName::<_, _, IShellItem>(PCWSTR(d.as_ptr()), None) {
+            let _ = dlg.SetDefaultFolder(&item);
+        }
+        dlg.Show(None).ok()?;
+        let path = dlg.GetResult().ok()?.GetDisplayName(SIGDN_FILESYSPATH).ok()?;
+        let out = PathBuf::from(path.to_string().ok()?);
+        windows::Win32::System::Com::CoTaskMemFree(Some(path.0 as *const _));
+        Some(out)
+    }
+}
+
+/// Pikselleri `path`'e PNG olarak yazar.
+fn save_png(path: &std::path::Path, w: i32, h: i32, px: &[u8]) -> windows::core::Result<()> {
+    let path = wide(&path.display().to_string());
     unsafe {
         let wic: IWICImagingFactory = CoCreateInstance(&CLSID_WICImagingFactory, None, CLSCTX_INPROC_SERVER)?;
         let bmp = wic.CreateBitmapFromMemory(w as u32, h as u32, &GUID_WICPixelFormat32bppBGRA, w as u32 * 4, px)?;
@@ -356,7 +385,7 @@ fn save_png(dir: &std::path::Path, w: i32, h: i32, px: &[u8]) -> windows::core::
         frame.Commit()?;
         enc.Commit()?;
     }
-    Ok(name)
+    Ok(())
 }
 
 /// Pencereyi kapatır ve donmuş görüntüyü bırakır; `deliver` verilirse önce o alan gönderilir

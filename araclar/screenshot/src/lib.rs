@@ -1,6 +1,6 @@
 //! Ekran görüntüsü: kısayola (Print Screen) basınca ekran donar; alanı sürükleyip seçersin (tek
 //! tıklama imlecin olduğu ekranın tamamı), içine tek renk kalemle çizebilirsin. Ctrl+C panoya
-//! kopyalar, Ctrl+S Resimler\Ekran görüntüleri'ne kaydeder; Esc ya da sağ tık vazgeçer.
+//! kopyalar, Ctrl+S kaydetme yerini sorar; Esc ya da sağ tık vazgeçer.
 //!
 //! Sayfa: kısayol, kayıt klasörü.
 
