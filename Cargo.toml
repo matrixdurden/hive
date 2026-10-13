@@ -23,6 +23,9 @@ windows-core = "0.62"
 version = "0.62"
 features = [
     "ApplicationModel",
+    "Devices_Bluetooth",
+    "Devices_Bluetooth_Advertisement",
+    "Devices_Bluetooth_GenericAttributeProfile",
     "Foundation_Collections",
     "UI_Notifications",
     "UI_Notifications_Management",

@@ -17,5 +17,6 @@ battery = { path = "../araclar/battery" }
 audio = { path = "../araclar/audio" }
 dock = { path = "../araclar/dock" }
 clicker = { path = "../araclar/clicker" }
+lights = { path = "../araclar/lights" }
 engram = { path = "../araclar/engram" }
 screenshot = { path = "../araclar/screenshot" }

@@ -122,6 +122,7 @@ tepsisinden gösterir; winloom'ı kendi sayfasında öne getirmek `ortak::hub::p
   | clicker | 60–69 | 601– | 6001– |
   | dock | 70–79 | | |
   | engram | 80–89 | 0x686f, 0x6e74, 0x7663 | (klavye kancası) |
-  | **sıradaki araç** | **90–99** | **901–** | **9001–** |
+  | lights | 90–99 | 901– | |
+  | **sıradaki araç** | **100–109** | **1001–** | **10001–** |
 
   Aracın kendi açtığı pencerelerin (dock çubuğu gibi) kimlikleri bu tabloya girmez.
