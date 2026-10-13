@@ -25,7 +25,7 @@
 <img src="assets/modes.png" alt="rabbithole on goes through your own server; rabbithole dpi uses your own connection" width="100%">
 
 - **`rabbithole on`**: all traffic goes through your own server. To the network in between it looks like ordinary HTTPS to a well-known site (VLESS + Reality), so networks that block VPNs or SSH let it through.
-- **`rabbithole dpi`**: no server. Traffic leaves over your own connection, but DNS is asked over HTTPS and every TLS handshake is split into several records, so a DPI filter can neither poison names nor read which site you open.
+- **`rabbithole dpi`**: no server. Traffic leaves over your own connection, but DNS is asked over HTTPS and every TLS handshake is split into several records, so a DPI filter can neither poison names nor read which site you open. Turkish state sites (gov.tr, bel.tr, edu.tr…) are left unsplit: the filter does not block them, and the firewalls in front of many of them reset a split handshake.
 
 > [!NOTE]
 > A server in a censored country meets the same filter on its way out, so it splits handshakes and asks DNS over HTTPS too.

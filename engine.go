@@ -132,8 +132,17 @@ func tunInbound() obj {
 	}
 }
 
-// dpiRule splits every TLS handshake into several TLS records.
-var dpiRule = obj{"protocol": "tls", "action": "route-options", "tls_record_fragment": true}
+// unsplit are the Turkish state's own domains. The filter never blocks them,
+// and many sit behind a firewall that resets a handshake whose site name is
+// split across records (ulasim.denizli.bel.tr, for one); so they go as is.
+var unsplit = []string{"gov.tr", "bel.tr", "edu.tr", "k12.tr", "tsk.tr", "pol.tr"}
+
+// dpiRule splits every other TLS handshake into several TLS records.
+var dpiRule = obj{
+	"type": "logical", "mode": "and",
+	"rules":  []obj{{"protocol": "tls"}, {"domain_suffix": unsplit, "invert": true}},
+	"action": "route-options", "tls_record_fragment": true,
+}
 
 // dpiConfig needs no server: traffic leaves directly, with the two things
 // that get past a DPI filter like the Turkish ISPs' one. DNS is asked over
