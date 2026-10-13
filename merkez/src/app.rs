@@ -68,6 +68,11 @@ const TILE_H: f32 = 104.0;
 const TILE_GAP: f32 = 14.0;
 /// Ana sayfa açıkken kutucukları tazeleyen zamanlayıcı (araçların durumu değişir).
 const TIMER_HOME: usize = 9;
+/// Kenar çubuğunun başındaki arama kutusu ve altındaki boşluk.
+const SEARCH_H: f32 = 46.0;
+/// Arama sonuçlarının satırı ve en çok kaç tane.
+const FOUND_H: f32 = 40.0;
+const FOUND_MAX: usize = 8;
 /// Kenar çubuğundaki "Araçlar" başlığının yüksekliği.
 const SECTION_H: f32 = 30.0;
 
@@ -136,9 +141,23 @@ impl Page {
     }
 }
 
+/// Arama kutusunun bir sonucu.
+#[derive(Clone, PartialEq, Debug)]
+enum Found {
+    /// O sayfaya git.
+    Go(Page),
+    /// Kapalı araç: Araç ekle'de açılır.
+    TurnOn(usize),
+    /// Yazılanı araca (engram) soru olarak bırak.
+    Ask(usize),
+}
+
 #[derive(Clone, Copy, PartialEq, Debug)]
 enum Hit {
     None,
+    /// Arama kutusu ve sonuçlarından biri.
+    Search,
+    Found(usize),
     Toggle,
     Nav(Page),
     /// Aracın kendi sayfası (araç kendisi işler).
@@ -182,6 +201,9 @@ struct App {
     /// winloom kendini kaldırıyor; bitince süreç kapanır, klasör arkasından silinir.
     removing_self: bool,
     self_errors: Arc<Mutex<Vec<String>>>,
+    /// Kenar çubuğunun başındaki arama kutusu ve seçili sonuç.
+    search: TextField,
+    pick: usize,
     hover: Hit,
     pressed: Hit,
     dpi: f32,
@@ -436,16 +458,22 @@ impl App {
         let sw = self.side_w(w);
         // Dar kenar çubuğunda "Araçlar" başlığı yerine ince bir çizgi.
         let section = if self.narrow(w) { 12.0 } else { SECTION_H };
-        let t = match page {
-            Page::Home => HEADER + 4.0,
+        let top = HEADER + 4.0 + if self.narrow(w) { 0.0 } else { SEARCH_H };
+        // Araçlar sığmazsa satırları sıkışır (en az 30 px), alttaki Araç ekle'nin üstüne binmez.
+        let tools_top = top + NAV + section;
+        let store_top = h - 10.0 - 2.0 * NAV - 2.0;
+        let n = self.live_tools().len().max(1) as f32;
+        let row = ((store_top - 10.0 - tools_top) / n).clamp(30.0, NAV + 2.0);
+        let (t, height) = match page {
+            Page::Home => (top, NAV),
             Page::Tool(i) => {
-                let n = (0..i).filter(|&j| self.installed(j)).count();
-                HEADER + 4.0 + NAV + section + n as f32 * (NAV + 2.0)
+                let k = (0..i).filter(|&j| self.installed(j)).count();
+                (tools_top + k as f32 * row, row - 2.0)
             }
-            Page::Store => h - 10.0 - 2.0 * NAV - 2.0,
-            Page::Settings => h - 10.0 - NAV,
+            Page::Store => (store_top, NAV),
+            Page::Settings => (h - 10.0 - NAV, NAV),
         };
-        Rect::new(6.0, t, sw - 6.0, t + NAV)
+        Rect::new(6.0, t, sw - 6.0, t + height)
     }
 
     /// Canlı araç sayfasının başlığında adın bittiği x (sayfanın kendi köşesine göre).
@@ -626,6 +654,14 @@ impl App {
     fn hit(&self, x: f32, y: f32) -> Hit {
         let (w, h) = self.size();
         let sw = self.side_w(w);
+        if self.search.focused
+            && let Some(k) = (0..self.found().len()).find(|&k| self.found_rect(k, w).contains(x, y))
+        {
+            return Hit::Found(k);
+        }
+        if self.search_rect(w).is_some_and(|r| r.contains(x, y)) {
+            return Hit::Search;
+        }
         if x < sw {
             if Self::toggle_rect().contains(x, y) {
                 return Hit::Toggle;
@@ -710,6 +746,11 @@ impl App {
                 self.redraw();
             }
             Hit::Nav(p) => self.select(p),
+            Hit::Search => {
+                self.search.focus(false);
+                self.redraw();
+            }
+            Hit::Found(k) => self.run_found(k),
             Hit::Switch(i) => self.start_setup(i, !self.installed(i)),
             Hit::Open(i) => self.select(Page::Tool(i)),
             Hit::Autostart => {
@@ -828,6 +869,106 @@ impl App {
         let x0 = self.side_w(w) + PAGE_PAD;
         g.text(title, &g.f.heading, Rect::new(x0, HEAD_CY - 18.0, w - CAPTIONS - 12.0, HEAD_CY + 18.0), pal().text);
         g.text(sub, &g.f.small, Rect::new(x0, HEADER + 14.0, w - PAGE_PAD, HEADER + 36.0), pal().muted);
+    }
+
+    // --- Arama ---
+
+    fn search_rect(&self, w: f32) -> Option<Rect> {
+        (!self.narrow(w)).then(|| Rect::new(12.0, HEADER + 2.0, self.side_w(w) - 12.0, HEADER + 38.0))
+    }
+
+    /// Yazılana uyan sayfalar ve eylemler: (sonuç, yazı, simge).
+    fn found(&self) -> Vec<(Found, String, &'static str)> {
+        let q = self.search.text.trim().to_lowercase();
+        if q.is_empty() {
+            return Vec::new();
+        }
+        let hit = |s: &str| s.to_lowercase().contains(&q);
+        let mut out = Vec::new();
+        for page in self.pages() {
+            let extra = match page {
+                Page::Tool(i) => format!("{} {} {}", TOOLS[i].id, TOOLS[i].tagline(), TOOLS[i].names.join(" ")),
+                Page::Settings => t!("language theme update start with windows quit remove", "dil tema güncelle windows ile başlat kapat kaldır").into(),
+                _ => String::new(),
+            };
+            if hit(page.label()) || hit(&extra) {
+                let glyph = match page {
+                    Page::Home => ICON_HOME,
+                    Page::Tool(i) => TOOLS[i].glyph,
+                    Page::Store => ICON_ADD,
+                    Page::Settings => ICON_SETTINGS,
+                };
+                out.push((Found::Go(page), page.label().to_string(), glyph));
+            }
+        }
+        for (i, t) in TOOLS.iter().enumerate() {
+            if !self.installed(i) && (hit(t.name()) || hit(t.tagline()) || hit(t.id)) {
+                out.push((Found::TurnOn(i), t!(format!("Turn on: {}", t.name()), format!("Aç: {}", t.name())), t.glyph));
+            }
+        }
+        out.truncate(FOUND_MAX - 1);
+        // Hiçbiri değilse yazılanı soru olarak alabilecek araç (engram) en sonda.
+        if let Some(i) = (0..TOOLS.len()).find(|&i| self.installed(i) && TOOLS[i].id == "engram") {
+            let text = self.search.text.trim();
+            out.push((Found::Ask(i), t!(format!("Ask engram: {text}"), format!("engram'a sor: {text}")), TOOLS[i].glyph));
+        }
+        out
+    }
+
+    fn found_rect(&self, k: usize, w: f32) -> Rect {
+        let s = self.search_rect(w).unwrap_or_default();
+        let t = s.b + 6.0 + 4.0 + k as f32 * FOUND_H;
+        Rect::new(s.l + 4.0, t, s.l + 4.0 + (s.w() - 8.0).max(340.0), t + FOUND_H)
+    }
+
+    fn close_search(&mut self) {
+        self.search.blur();
+        self.search.set("");
+        self.pick = 0;
+        self.redraw();
+    }
+
+    fn run_found(&mut self, k: usize) {
+        let Some((f, _, _)) = self.found().into_iter().nth(k) else { return };
+        let text = self.search.text.trim().to_string();
+        self.close_search();
+        match f {
+            Found::Go(p) => self.select(p),
+            Found::TurnOn(_) => self.select(Page::Store),
+            Found::Ask(i) => {
+                self.select(Page::Tool(i));
+                if let Some(p) = self.page_mut(i) {
+                    p.ask(&text);
+                }
+            }
+        }
+    }
+
+    /// Arama kutusu ve sonuçları: kenar çubuğunun başında, sonuçlar içeriğin üstüne açılır.
+    fn paint_search(&self, w: f32) {
+        let Some(r) = self.search_rect(w) else { return };
+        let g = &self.gfx;
+        self.search.paint(g, r, t!("Search", "Ara"));
+        if self.search.text.is_empty() {
+            let hint = Rect::new(r.l, r.t, r.r - 12.0, r.b);
+            g.text("Ctrl+Space", &g.f.small_right, hint, pal().faint);
+        }
+        let found = self.found();
+        if !self.search.focused || found.is_empty() {
+            return;
+        }
+        let first = self.found_rect(0, w);
+        let panel = Rect::new(first.l - 4.0, first.t - 4.0, first.r + 4.0, self.found_rect(found.len() - 1, w).b + 4.0);
+        g.fill(panel, 8.0, pal().tip);
+        g.stroke(panel, 8.0, pal().line, 1.0);
+        for (k, (_, label, glyph)) in found.iter().enumerate() {
+            let fr = self.found_rect(k, w);
+            if k == self.pick || self.hover == Hit::Found(k) {
+                g.fill(fr, 6.0, pal().sel);
+            }
+            g.text(glyph, &g.f.icon_small, Rect::new(fr.l + 10.0, fr.t, fr.l + 32.0, fr.b), accent());
+            g.text(label, &g.f.text, Rect::new(fr.l + 40.0, fr.t, fr.r - 10.0, fr.b), pal().text);
+        }
     }
 
     /// Ana sayfanın `k`'inci kutucuğu: içerik genişliğine sığdığı kadar sütun.
@@ -1064,6 +1205,7 @@ impl App {
             g.stroke(tip, 4.0, pal().line, 1.0);
             g.text(p.label(), &g.f.text, Rect::new(tip.l + 10.0, tip.t, tip.r, tip.b), pal().text);
         }
+        self.paint_search(w);
         self.paint_captions(w);
 
         let lost = self.gfx.end();
@@ -1325,6 +1467,9 @@ impl App {
                 let (w, h) = self.size();
                 let sw = self.layout_tool(w, h);
                 self.pressed = self.hit(mx, my);
+                if self.search.focused && !matches!(self.pressed, Hit::Search | Hit::Found(_)) {
+                    self.close_search();
+                }
                 unsafe { SetCapture(self.hwnd) };
                 if self.pressed == Hit::Content
                     && let Some(p) = live.and_then(|i| self.tools[i].as_deref_mut())
@@ -1368,6 +1513,15 @@ impl App {
             }
             WM_CHAR => {
                 let c = char::from_u32(wp.0 as u32)?;
+                if self.search.focused {
+                    // Ctrl+Space'in boşluğu kutuya yazılmaz.
+                    let ctrl = unsafe { GetKeyState(VK_CONTROL.0 as i32) } < 0;
+                    if !ctrl && self.search.char(c) {
+                        self.pick = 0;
+                        self.redraw();
+                    }
+                    return Some(LRESULT(0));
+                }
                 let p = live.and_then(|i| self.tools[i].as_deref_mut())?;
                 if !p.char(c) {
                     return None;
@@ -1375,6 +1529,32 @@ impl App {
             }
             WM_KEYDOWN | WM_SYSKEYDOWN => {
                 let vk = VIRTUAL_KEY(wp.0 as u16);
+                let ctrl = unsafe { GetKeyState(VK_CONTROL.0 as i32) } < 0;
+                // Ctrl+Space: arama kutusu (dar kenar çubuğunda önce genişler).
+                if ctrl && vk == VK_SPACE {
+                    self.narrow_pref = false;
+                    // Pencere çok darsa kenar çubuğu yine dar kalır: kutu yok.
+                    if self.search_rect(self.size().0).is_none() {
+                        return Some(LRESULT(0));
+                    }
+                    self.search.focus(true);
+                    self.redraw();
+                    return Some(LRESULT(0));
+                }
+                if self.search.focused {
+                    let n = self.found().len();
+                    match vk {
+                        VK_DOWN if n > 0 => self.pick = (self.pick + 1) % n,
+                        VK_UP if n > 0 => self.pick = (self.pick + n - 1) % n,
+                        _ => match self.search.key(vk.0, ctrl) {
+                            FieldKey::Enter => self.run_found(self.pick),
+                            FieldKey::Escape => self.close_search(),
+                            _ => self.pick = 0,
+                        },
+                    }
+                    self.redraw();
+                    return Some(LRESULT(0));
+                }
                 if let Some(p) = live.and_then(|i| self.tools[i].as_deref_mut())
                     && p.key(vk.0)
                 {
@@ -1611,6 +1791,8 @@ pub fn run(hidden: bool, tab: Option<String>) -> Res<()> {
             page: Page::Store,
             narrow_pref: cfg.narrow,
             scroll: 0.0,
+            search: TextField::new(80),
+            pick: 0,
             autostart: autostart(),
             tools: (0..tools::COUNT).map(|_| None).collect(),
             busy: [None; tools::COUNT],

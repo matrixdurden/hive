@@ -421,6 +421,18 @@ impl Drop for Engram {
 }
 
 impl ToolPage for Engram {
+    /// winloom'ın arama kutusundan: Ana alt sayfasında soru olarak gönderilir.
+    fn ask(&mut self, text: &str) -> bool {
+        self.select(Tab::Home);
+        let ok = {
+            let mut s = self.shared.borrow_mut();
+            let cfg = s.config.clone();
+            s.brain.send(text, crate::agent::Mode::Text, &cfg)
+        };
+        self.redraw();
+        ok
+    }
+
     fn summary(&self) -> Option<(String, String)> {
         let s = self.shared.borrow();
         let state = match s.voice_state {

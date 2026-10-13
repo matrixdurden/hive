@@ -454,6 +454,10 @@ pub trait ToolPage {
     fn take_notice(&mut self) -> Option<(String, String)> {
         None
     }
+    /// Arama kutusuna yazılıp araca bırakılan istek (engram: soru olarak gönderir). Aldıysa `true`.
+    fn ask(&mut self, _text: &str) -> bool {
+        false
+    }
     /// Ana sayfadaki kutucuğu: (öne çıkan satır, altındaki satır), aracın şu anki durumu.
     /// `None`: kutucukta aracın açıklaması durur.
     fn summary(&self) -> Option<(String, String)> {
