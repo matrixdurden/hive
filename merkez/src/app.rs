@@ -169,7 +169,6 @@ enum Hit {
     Autostart,
     /// Dil: `true` Türkçe.
     Lang(bool),
-    Theme(Theme),
     /// Hazır güncellemeyi şimdi kur, yoksa şimdi bak.
     Update,
     AutoUpdate,
@@ -213,8 +212,6 @@ struct App {
     active: bool,
     cap_hover: Option<Cap>,
     cap_pressed: Option<Cap>,
-    /// Pencerenin zemini Mica (Windows 11 22H2+).
-    mica: bool,
     auto_update: bool,
     /// Hazır güncelleme tepsiden haber verildi.
     update_told: bool,
@@ -222,8 +219,6 @@ struct App {
 
 /// Başlık çubuğunu biz çiziyoruz (pencere kurulduktan sonra açılır).
 static CUSTOM_FRAME: AtomicBool = AtomicBool::new(false);
-/// Mica: pencere düğmelerini (küçült, büyüt, kapat) Windows çizer ve işler.
-static MICA: AtomicBool = AtomicBool::new(false);
 
 /// WM_NCCALCSIZE: başlık çubuğunu ve üst kenarlığı kaldırır, diğer kenarlıklar yerinde kalır.
 /// Uygulamanın durumuna bakmaz: uygulama o an meşgulken (ör. pencere geri açılırken iç içe
@@ -278,7 +273,6 @@ impl App {
             narrow: self.narrow_pref,
             tab: self.page.id().into(),
             turkish: ortak::i18n::turkish(),
-            theme: theme(),
             auto_update: self.auto_update,
         }
         .save();
@@ -599,17 +593,17 @@ impl App {
     }
 
     fn update_rect(&self, w: f32) -> Rect {
-        let r = self.settings_row(3, w);
+        let r = self.settings_row(2, w);
         button_rect_right(&self.gfx, r.r, r.cy() - 17.0, Self::update_label(), false)
     }
 
     fn quit_rect(&self, w: f32) -> Rect {
-        let r = self.settings_row(5, w);
+        let r = self.settings_row(4, w);
         button_rect_right(&self.gfx, r.r, r.cy() - 17.0, t!("Quit", "Çık"), false)
     }
 
     fn remove_hive_rect(&self, w: f32) -> Rect {
-        let r = self.settings_row(6, w);
+        let r = self.settings_row(5, w);
         button_rect_right(&self.gfx, r.r, r.cy() - 17.0, t!("Remove", "Kaldır"), false)
     }
 
@@ -621,34 +615,6 @@ impl App {
         let en_w = g.measure("English", &g.f.button) + 26.0;
         let tr = Rect::new(r.r - 3.0 - tr_w, r.cy() - 14.0, r.r - 3.0, r.cy() + 14.0);
         [Rect::new(tr.l - en_w, tr.t, tr.l, tr.b), tr]
-    }
-
-    /// Tema seçici: [Claude, Windows], satırın sağına yaslı.
-    fn theme_rects(&self, w: f32) -> [(Rect, Theme); 2] {
-        let r = self.settings_row(2, w);
-        let g = &self.gfx;
-        let win_w = g.measure("Windows", &g.f.button) + 26.0;
-        let cl_w = g.measure("Claude", &g.f.button) + 26.0;
-        let win = Rect::new(r.r - 3.0 - win_w, r.cy() - 14.0, r.r - 3.0, r.cy() + 14.0);
-        [(Rect::new(win.l - cl_w, win.t, win.l, win.b), Theme::Claude), (win, Theme::Windows)]
-    }
-
-    /// Temayı değiştirir: palet, pencerenin zemini (Mica ya da düz) ve pencere düğmeleri.
-    fn set_theme(&mut self, t: Theme) {
-        if t == theme() {
-            return;
-        }
-        set_theme(t);
-        let mica = pal().mica;
-        apply_backdrop(self.hwnd, mica);
-        self.gfx.set_transparent(mica);
-        self.mica = mica;
-        self.cap_hover = None;
-        self.save();
-        unsafe {
-            let _ = SetWindowPos(self.hwnd, None, 0, 0, 0, 0, SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER);
-        }
-        self.redraw();
     }
 
     fn hit(&self, x: f32, y: f32) -> Hit {
@@ -704,14 +670,12 @@ impl App {
                     Hit::Autostart
                 } else if let Some(k) = self.lang_rects(w).iter().position(|r| r.contains(x, y)) {
                     Hit::Lang(k == 1)
-                } else if let Some(&(_, t)) = self.theme_rects(w).iter().find(|(r, _)| r.contains(x, y)) {
-                    Hit::Theme(t)
                 } else if util::installed_copy().is_some()
                     && crate::update::status() != crate::update::Status::Checking
                     && self.update_rect(w).contains(x, y)
                 {
                     Hit::Update
-                } else if self.settings_row(4, w).contains(x, y) && x > self.settings_row(4, w).r - 120.0 {
+                } else if self.settings_row(3, w).contains(x, y) && x > self.settings_row(3, w).r - 120.0 {
                     Hit::AutoUpdate
                 } else if self.quit_rect(w).contains(x, y) {
                     Hit::Quit
@@ -768,7 +732,6 @@ impl App {
                 crate::shell::sync_shortcuts(&installed);
                 self.redraw();
             }
-            Hit::Theme(t) => self.set_theme(t),
             Hit::Update => {
                 if matches!(crate::update::status(), crate::update::Status::Ready(_)) {
                     crate::update::install(false);
@@ -1098,27 +1061,8 @@ impl App {
             g.text(label, &g.f.button, rect, if on || hovered { pal().text } else { pal().muted });
         }
 
-        let r = self.settings_row(2, w);
-        setting_row(g, r, t!("Theme", "Tema"), "", 220.0);
-        let rects = self.theme_rects(w);
-        g.fill(Rect::new(rects[0].0.l - 3.0, rects[0].0.t - 3.0, rects[1].0.r + 3.0, rects[1].0.b + 3.0), 8.0, pal().hover);
-        for (rect, t) in rects {
-            let on = theme() == t;
-            let hovered = self.hover == Hit::Theme(t);
-            if on {
-                g.fill(rect, 6.0, pal().sel);
-            } else if hovered {
-                g.fill(rect, 6.0, pal().sel.alpha(0.6));
-            }
-            let label = match t {
-                Theme::Claude => "Claude",
-                Theme::Windows => "Windows",
-            };
-            g.text(label, &g.f.button, rect, if on || hovered { pal().text } else { pal().muted });
-        }
-
         // Sürüm ve güncelleme durumu; hazır güncelleme varsa "Güncelle".
-        let r = self.settings_row(3, w);
+        let r = self.settings_row(2, w);
         use crate::update::Status;
         let status = crate::update::status();
         let sub = match &status {
@@ -1141,7 +1085,7 @@ impl App {
             button(g, self.update_rect(w), Self::update_label(), None, primary, self.hover == Hit::Update);
         }
 
-        let r = self.settings_row(4, w);
+        let r = self.settings_row(3, w);
         let sub = t!(
             "Downloads new versions from GitHub, verifies and installs them",
             "Yeni sürümleri GitHub'dan indirir, doğrular ve kurar"
@@ -1149,12 +1093,12 @@ impl App {
         setting_row(g, r, t!("Automatic updates", "Otomatik güncelle"), sub, 120.0);
         toggle(g, toggle_rect(r.r, r.cy()), self.auto_update, accent(), !dev);
 
-        let r = self.settings_row(5, w);
+        let r = self.settings_row(4, w);
         let sub = t!("winloom and the tools' engines shut down completely", "winloom ve araçların motorları tamamen kapanır");
         setting_row(g, r, t!("Quit", "Kapat"), sub, 120.0);
         button(g, self.quit_rect(w), t!("Quit", "Çık"), None, None, self.hover == Hit::Quit);
 
-        let r = self.settings_row(6, w);
+        let r = self.settings_row(5, w);
         let title = t!("Remove winloom", "winloom'ı kaldır");
         if self.removing_self {
             let sub = t!("Removing… each tool is removed and checked in turn", "Kaldırılıyor… araçlar sırayla kaldırılıp denetleniyor");
@@ -1231,9 +1175,6 @@ impl App {
     }
 
     fn paint_captions(&self, w: f32) {
-        if self.mica {
-            return;
-        }
         let g = &self.gfx;
         for c in Cap::ALL {
             let r = Self::cap_rect(c, w);
@@ -1407,11 +1348,6 @@ impl App {
                 self.hover = Hit::None;
                 self.scroll = self.scroll.min(self.max_scroll());
                 self.sync_visible();
-                self.redraw();
-            }
-            WM_SETTINGCHANGE => {
-                // Windows'ta vurgu rengi ya da tema değişti.
-                reset_accent();
                 self.redraw();
             }
             WM_DPICHANGED => {
@@ -1656,42 +1592,22 @@ fn with_app<T>(f: impl FnOnce(&mut App) -> T) -> Option<T> {
     APP.with(|a| a.try_borrow_mut().ok().and_then(|mut a| a.as_mut().map(f)))
 }
 
-/// Pencerenin zemini. Mica (Windows teması, Windows 11 22H2+): bütün pencere camın üstünde,
-/// içerik saydam çizilir, pencere düğmelerini Windows çizer. Değilse temanın düz rengi; gölge ve
-/// köşeler DWM'de kalır (başlık çubuğu WM_NCCALCSIZE'da kaldırılıyor).
-fn apply_backdrop(hwnd: HWND, mica: bool) {
-    use windows::Win32::Graphics::Dwm::{DWMSBT_MAINWINDOW, DWMSBT_NONE, DWMWA_SYSTEMBACKDROP_TYPE};
-    MICA.store(mica, Ordering::Relaxed);
+/// Pencerenin zemini: temanın düz rengi; gölge ve köşeler DWM'de kalır (başlık çubuğu
+/// WM_NCCALCSIZE'da kaldırılıyor).
+fn apply_backdrop(hwnd: HWND) {
     unsafe {
-        if mica {
-            let margins = MARGINS { cxLeftWidth: -1, cxRightWidth: -1, cyTopHeight: -1, cyBottomHeight: -1 };
-            let _ = DwmExtendFrameIntoClientArea(hwnd, &margins);
-            let backdrop = DWMSBT_MAINWINDOW;
-            let _ = DwmSetWindowAttribute(hwnd, DWMWA_SYSTEMBACKDROP_TYPE, &backdrop as *const _ as _, 4);
-        } else {
-            let backdrop = DWMSBT_NONE;
-            let _ = DwmSetWindowAttribute(hwnd, DWMWA_SYSTEMBACKDROP_TYPE, &backdrop as *const _ as _, 4);
-            // COLORREF 0x00BBGGRR.
-            let c = pal().bg.0;
-            let caption = COLORREF((c & 0xff) << 16 | (c & 0xff00) | (c >> 16) & 0xff);
-            let _ = DwmSetWindowAttribute(hwnd, DWMWINDOWATTRIBUTE(35), &caption as *const _ as _, 4);
-            let margins = MARGINS { cxLeftWidth: 0, cxRightWidth: 0, cyTopHeight: 1, cyBottomHeight: 0 };
-            let _ = DwmExtendFrameIntoClientArea(hwnd, &margins);
-        }
+        // COLORREF 0x00BBGGRR.
+        let c = pal().bg.0;
+        let caption = COLORREF((c & 0xff) << 16 | (c & 0xff00) | (c >> 16) & 0xff);
+        let _ = DwmSetWindowAttribute(hwnd, DWMWINDOWATTRIBUTE(35), &caption as *const _ as _, 4);
+        let margins = MARGINS { cxLeftWidth: 0, cxRightWidth: 0, cyTopHeight: 1, cyBottomHeight: 0 };
+        let _ = DwmExtendFrameIntoClientArea(hwnd, &margins);
     }
 }
 
 unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
     if msg == WM_NCCALCSIZE && wp.0 != 0 && CUSTOM_FRAME.load(Ordering::Relaxed) {
         return nc_calc_size(hwnd, msg, wp, lp);
-    }
-    // Mica'da pencere düğmeleri Windows'un: üstüne gelme, basma ve tıklama onda. Kapat düğmesi
-    // WM_CLOSE gönderir, o da winloom'ı tepsiye gizler.
-    if MICA.load(Ordering::Relaxed) {
-        let mut r = LRESULT(0);
-        if unsafe { windows::Win32::Graphics::Dwm::DwmDefWindowProc(hwnd, msg, wp, lp, &mut r) }.as_bool() {
-            return r;
-        }
     }
     if msg == WM_DESTROY {
         APP.with(|a| drop(a.borrow_mut().take()));
@@ -1770,13 +1686,10 @@ pub fn run(hidden: bool, tab: Option<String>) -> Res<()> {
         let dark = BOOL(1);
         let _ = DwmSetWindowAttribute(hwnd, DWMWA_USE_IMMERSIVE_DARK_MODE, &dark as *const _ as _, 4);
         let cfg = Config::load();
-        set_theme(cfg.theme);
-        let mica = pal().mica;
-        apply_backdrop(hwnd, mica);
+        apply_backdrop(hwnd);
         DragAcceptFiles(hwnd, true);
 
         let mut gfx = Gfx::new()?;
-        gfx.set_transparent(mica);
         let logo = gfx.load_image(&[
             (24, include_bytes!("../ikon/icon-24.png")),
             (32, include_bytes!("../ikon/icon-32.png")),
@@ -1808,7 +1721,6 @@ pub fn run(hidden: bool, tab: Option<String>) -> Res<()> {
             active: true,
             cap_hover: None,
             cap_pressed: None,
-            mica,
             auto_update: cfg.auto_update,
             update_told: false,
         };

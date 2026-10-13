@@ -1,19 +1,17 @@
 //! Ortak renkler ve parçalar: kenar çubuğu ve bütün araç sayfaları aynı görünür. Renkler
-//! `pal()`'dan gelir (Claude ya da Windows teması); düğme, anahtar ve kaydırıcılar temanın vurgu
-//! rengindedir. Araçların kendi renkleri yalnızca ikonlarda kalır.
+//! `pal()`'dan gelir (tek, sade tema); düğme, anahtar ve kaydırıcılar vurgu rengindedir.
 
-use std::cell::Cell;
 use std::path::PathBuf;
 
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
 
 use crate::gfx::{Color, Gfx, Rect};
 
-/// Arayüzün renkleri. İki tema var: Claude (sıcak koyu, kil turuncusu vurgu, opak) ve Windows
-/// (Windows 11 Ayarlar uygulaması: Mica zemin, yarı saydam katmanlar, sistemin vurgu rengi).
+/// Arayüzün renkleri: tek, sade tema. Nötr koyu griler, beyaz yazı; vurgu da renk değil beyaz
+/// (seçili satır, anahtar, ana düğme).
 #[derive(Clone, Copy)]
 pub struct Palette {
-    /// Pencerenin zemini (kenar çubuğu); Mica'da saydam.
+    /// Pencerenin zemini (kenar çubuğu).
     pub bg: Color,
     /// İçerik alanının katmanı ve kenarlığı.
     pub layer: Color,
@@ -34,112 +32,30 @@ pub struct Palette {
     pub knob: Color,
     pub accent: Color,
     pub on_accent: Color,
-    /// Zemin Windows'un Mica camı mı.
-    pub mica: bool,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum Theme {
-    Claude,
-    Windows,
-}
-
-impl Theme {
-    pub fn id(self) -> &'static str {
-        match self {
-            Theme::Claude => "claude",
-            Theme::Windows => "windows",
-        }
-    }
-
-    pub fn from_id(s: &str) -> Option<Self> {
-        [Theme::Claude, Theme::Windows].into_iter().find(|t| t.id() == s)
-    }
-}
-
-const CLAUDE: Palette = Palette {
-    bg: Color::rgb(0x1b1a18),
-    layer: Color::rgb(0x161514),
-    layer_line: Color(0xdedcd1, 0.08),
-    hover: Color(0xf0eee6, 0.06),
-    sel: Color(0xf0eee6, 0.09),
-    line: Color(0xdedcd1, 0.12),
-    panel: Color(0xf0eee6, 0.045),
-    text: Color::rgb(0xf2f0ec),
-    muted: Color::rgb(0xa8a49d),
-    faint: Color::rgb(0x8c877f),
-    green: Color::rgb(0x7ec27a),
-    red: Color::rgb(0xf08a7e),
-    tip: Color::rgb(0x30302e),
-    knob: Color::rgb(0x3a3a37),
-    accent: Color::rgb(0xd97757),
-    // Beyaz yazı kil turuncusunun üstünde okunmuyor (3:1): koyu yazı.
-    on_accent: Color::rgb(0x1a1310),
-    mica: false,
-};
-
-/// Windows 11 (WinUI) koyu tema değerleri; vurgu rengi sistemden okunup `windows()` içinde konur.
-const WINDOWS: Palette = Palette {
-    bg: Color::rgb(0x202020),
-    layer: Color(0x3a3a3a, 0.3),
-    layer_line: Color(0x000000, 0.1),
+const SADE: Palette = Palette {
+    bg: Color::rgb(0x161616),
+    layer: Color::rgb(0x101010),
+    layer_line: Color(0xffffff, 0.06),
     hover: Color(0xffffff, 0.06),
-    sel: Color(0xffffff, 0.09),
-    line: Color(0xffffff, 0.08),
-    panel: Color(0xffffff, 0.05),
-    text: Color::rgb(0xffffff),
-    muted: Color(0xffffff, 0.786),
-    faint: Color(0xffffff, 0.5),
-    green: Color::rgb(0x6ccb5f),
-    red: Color::rgb(0xff99a4),
-    tip: Color::rgb(0x2c2c2c),
-    knob: Color::rgb(0x454545),
-    accent: Color::rgb(0x60cdff),
-    on_accent: Color(0x000000, 0.9),
-    mica: false,
+    sel: Color(0xffffff, 0.10),
+    line: Color(0xffffff, 0.10),
+    panel: Color(0xffffff, 0.04),
+    text: Color::rgb(0xededed),
+    muted: Color::rgb(0xa3a3a3),
+    faint: Color::rgb(0x7c7c7c),
+    green: Color::rgb(0x8fcf8a),
+    red: Color::rgb(0xf09089),
+    tip: Color::rgb(0x262626),
+    knob: Color::rgb(0x333333),
+    accent: Color::rgb(0xededed),
+    on_accent: Color::rgb(0x111111),
 };
 
-fn windows(mica: bool) -> Palette {
-    // Vurgu rengi gri seçilmişse (doygunluk yok) düğmeler arka plandan ayrılmıyor: Windows'un
-    // varsayılan mavisi.
-    let sys = crate::theme::current().accent.0;
-    let ch = |s: u32| ((sys >> s) & 0xff) as f32 / 255.0;
-    let (r, g, b) = (ch(16), ch(8), ch(0));
-    let sat = r.max(g).max(b) - r.min(g).min(b);
-    let accent = if sat < 0.15 { WINDOWS.accent } else { Color::rgb(sys) };
-    let lum = 0.2126 * r + 0.7152 * g + 0.0722 * b;
-    let on_accent = if sat < 0.15 || lum > 0.5 { Color(0x000000, 0.9) } else { Color::rgb(0xffffff) };
-    Palette { bg: if mica { Color(0, 0.0) } else { WINDOWS.bg }, accent, on_accent, mica, ..WINDOWS }
-}
-
-thread_local! {
-    static THEME: Cell<Theme> = const { Cell::new(Theme::Claude) };
-    static PALETTE: Cell<Option<Palette>> = const { Cell::new(None) };
-}
-
-/// Geçerli tema.
-pub fn theme() -> Theme {
-    THEME.with(|t| t.get())
-}
-
-/// Temayı değiştirir; palet bir sonraki çizimde yeniden kurulur.
-pub fn set_theme(t: Theme) {
-    THEME.with(|c| c.set(t));
-    reset_accent();
-}
-
-/// Geçerli palet (ilk çağrıda kurulur).
+/// Geçerli palet.
 pub fn pal() -> Palette {
-    PALETTE.with(|p| {
-        p.get().unwrap_or_else(|| {
-            let v = match theme() {
-                Theme::Claude => CLAUDE,
-                Theme::Windows => windows(crate::theme::mica()),
-            };
-            p.set(Some(v));
-            v
-        })
-    })
+    SADE
 }
 
 pub fn accent() -> Color {
@@ -151,10 +67,6 @@ pub fn on_accent() -> Color {
     pal().on_accent
 }
 
-/// Windows'ta vurgu rengi ya da tema değişti: bir sonraki çizimde yeniden okunur.
-pub fn reset_accent() {
-    PALETTE.with(|p| p.set(None));
-}
 
 /// Araç sayfasının üst çubuğu ve kenar boşluğu.
 pub const HEADER: f32 = 48.0;

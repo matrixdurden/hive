@@ -44,7 +44,6 @@ pub struct Config {
     /// Son açık sekme.
     pub tab: String,
     pub turkish: bool,
-    pub theme: crate::ui::Theme,
     /// Not klasörü.
     pub vault: PathBuf,
     pub anthropic_key: String,
@@ -96,7 +95,6 @@ impl Default for Config {
             narrow: false,
             tab: String::new(),
             turkish: crate::i18n::system_turkish(),
-            theme: crate::ui::Theme::Claude,
             vault: home.join("Documents").join("engram"),
             anthropic_key: String::new(),
             elevenlabs_key: String::new(),
@@ -143,7 +141,6 @@ impl Config {
                 "dar" => c.narrow = v == "1",
                 "sekme" => c.tab = v.to_string(),
                 "dil" => c.turkish = v == "tr",
-                "tema" => c.theme = crate::ui::Theme::from_id(v).unwrap_or(c.theme),
                 "notlar" if !v.is_empty() => c.vault = PathBuf::from(v),
                 "anthropic" => c.anthropic_key = unprotect(v),
                 "elevenlabs" => c.elevenlabs_key = unprotect(v),
@@ -188,11 +185,10 @@ impl Config {
         let dir = data_dir();
         let _ = std::fs::create_dir_all(&dir);
         let text = format!(
-            "dar={}\nsekme={}\ndil={}\ntema={}\nnotlar={}\nanthropic={}\nelevenlabs={}\npicovoice={}\nmodel={}\ngece_model={}\ncaba={}\nses={}\nses_model={}\nkisayol={}\nkisayol_mod={}\nhitap={}\nuyandirma_sozu={}\ndinle={}\ngece_saat={}\ngece_son={}\nbutce={}\nbilgisayar={}\nonay={}\nses_motoru={}\nmikrofon={}\ngroq={}\nyerel_ses={}\nyerel_hiz={}\ngemini={}\ngemini_ses={}\nsadece_ben={}\n",
+            "dar={}\nsekme={}\ndil={}\nnotlar={}\nanthropic={}\nelevenlabs={}\npicovoice={}\nmodel={}\ngece_model={}\ncaba={}\nses={}\nses_model={}\nkisayol={}\nkisayol_mod={}\nhitap={}\nuyandirma_sozu={}\ndinle={}\ngece_saat={}\ngece_son={}\nbutce={}\nbilgisayar={}\nonay={}\nses_motoru={}\nmikrofon={}\ngroq={}\nyerel_ses={}\nyerel_hiz={}\ngemini={}\ngemini_ses={}\nsadece_ben={}\n",
             self.narrow as u8,
             self.tab,
             if self.turkish { "tr" } else { "en" },
-            self.theme.id(),
             self.vault.display(),
             protect(&self.anthropic_key),
             protect(&self.elevenlabs_key),
