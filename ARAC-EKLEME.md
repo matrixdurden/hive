@@ -21,9 +21,10 @@ winloom/
 
 - **Hafif:** winloom'ın içinde çalışır. Pil, Ses aygıtları, Dock ve Tıklayıcı bu türden.
   Sayfa ve iş aynı crate'te durur.
-- **Ağır:** kendi sürecinde çalışır, winloom onu açar ve kapatır. Duvar kâğıdı (`motor/`,
-  winloom.exe'nin içinde taşınır, açılınca diske yazılır) ve VPN (rabbithole, açılınca GitHub'dan
-  indirilir) bu türden. Mikrofon, ekran kartı, ağ gibi ağır ya da riskli işler buraya girer:
+- **Ağır:** kendi sürecinde çalışır, winloom onu açar ve kapatır. Duvar kâğıdı ve engram
+  (`motor/`, winloom.exe'nin içinde taşınır, açılınca diske yazılır) ve VPN (rabbithole, açılınca
+  GitHub'dan indirilir) bu türden. engram kendi penceresini de açar; `--hub` ile winloom'ın aracı
+  olarak çalışır (tepsi ikonu, kısayol, oturumda başlama winloom'ın). Mikrofon, ekran kartı, ağ gibi ağır ya da riskli işler buraya girer:
   çökerse winloom'ı ve öbür araçları düşürmez.
 
 Kullanıcı ikisini aynı görür: Araçlar sayfasında bir kart, aç/kapa anahtarı, kenar çubuğunda bir
@@ -105,6 +106,7 @@ sayfa. Tepside yalnızca winloom'ın ikonu olur; araçların tepsi ikonu ve kend
   | audio | 50–59 | 501– | 5001– |
   | clicker | 60–69 | 601– | 6001– |
   | dock | 70–79 | | |
-  | **sıradaki araç** | **80–89** | **801–** | **8001–** |
+  | engram | | 801– | |
+  | **sıradaki araç** | **90–99** | **901–** | **9001–** |
 
   Aracın kendi açtığı pencerelerin (dock çubuğu gibi) kimlikleri bu tabloya girmez.

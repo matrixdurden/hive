@@ -1,0 +1,10 @@
+[package]
+name = "engram"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "winloom aracı · engram: konuştukça not tutan, notlarından cevap veren sesli ikinci beyin"
+
+[dependencies]
+ortak.workspace = true
+windows.workspace = true

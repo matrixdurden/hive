@@ -4,12 +4,13 @@ INSTALL_DIR      := $(WIN_LOCALAPPDATA)/Programs/winloom
 OUT              := target/x86_64-pc-windows-gnu/release
 VERSION          := $(shell grep -m1 '^version' Cargo.toml | cut -d'"' -f2)
 
-.PHONY: build install stop log ikon release
+.PHONY: build install stop log ikon release engram-ses
 
-# winloom.exe'nin içine gömülenler önce: soundboard'un mikrofon efekti DLL'i ve duvar kâğıdı motoru.
+# winloom.exe'nin içine gömülenler önce: soundboard'un mikrofon efekti DLL'i, duvar kâğıdı ve engram motorları.
 build:
 	cargo build --release -p soundboard-apo
 	cargo build --release -p wallpaper-motor
+	cargo build --release -p engram-motor
 	cargo build --release -p winloom
 
 # Windows tarafına kopyala ve başlat (çalışan kopya kapatılır).
@@ -39,3 +40,14 @@ release: build
 	# Eski adıyla (hive) kurulu sürümler güncellemeyi hive.exe adıyla arar: aynı dosya o adla da yüklenir.
 	cp $(OUT)/winloom.exe $(OUT)/hive.exe && cp $(OUT)/winloom.exe.sha256 $(OUT)/hive.exe.sha256
 	gh release create "v$(VERSION)" $(OUT)/winloom.exe $(OUT)/winloom.exe.sha256 $(OUT)/hive.exe $(OUT)/hive.exe.sha256 --title "winloom $(VERSION)" --generate-notes
+
+# engram'ın yerel sesi (XTTS v2, ekran kartında): WSL'de ~/.local/share/engram-xtts altına ortam ve sunucu.
+# İlk açılışta model (~1,8 GB) Hugging Face'ten iner. Lisans: Coqui Public Model License (ticari değil).
+SES_DIR := $(HOME)/.local/share/engram-xtts
+engram-ses:
+	mkdir -p "$(SES_DIR)"
+	test -x "$(SES_DIR)/.venv/bin/python" || uv venv -q --python 3.11 "$(SES_DIR)/.venv"
+	uv pip install -q --python "$(SES_DIR)/.venv/bin/python" coqui-tts "transformers>=4.57,<5" speechbrain
+	uv pip install -q --python "$(SES_DIR)/.venv/bin/python" "torch==2.7.1" "torchaudio==2.7.1" --index-url https://download.pytorch.org/whl/cu128
+	cp araclar/engram/motor/araclar/xtts_sunucu.py "$(SES_DIR)/sunucu.py"
+	@echo "Yerel ses kuruldu: $(SES_DIR)"
