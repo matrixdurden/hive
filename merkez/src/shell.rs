@@ -315,6 +315,7 @@ pub fn install_self(hidden: bool) -> Result<(), String> {
         if !copied {
             return Err(format!("{} yazılamadı: {last}", dst.display()));
         }
+        icon_changed(&dst);
     }
     if fresh {
         unsafe {
@@ -332,4 +333,15 @@ pub fn install_self(hidden: bool) -> Result<(), String> {
         .map_err(|e| e.to_string())?;
     log!("winloom kuruldu: {}", dst.display());
     Ok(())
+}
+
+/// Aynı yoldaki exe'nin simgesi değişmiş olabilir: Windows'un simge önbelleği (Başlat menüsü,
+/// dock, görev çubuğu) eskisini göstermesin.
+fn icon_changed(exe: &Path) {
+    use windows::Win32::UI::Shell::{SHCNE_ASSOCCHANGED, SHCNE_UPDATEITEM, SHCNF_FLUSH, SHCNF_IDLIST, SHCNF_PATHW, SHChangeNotify};
+    let path = wide(&exe.display().to_string());
+    unsafe {
+        SHChangeNotify(SHCNE_UPDATEITEM, SHCNF_PATHW | SHCNF_FLUSH, Some(path.as_ptr().cast()), None);
+        SHChangeNotify(SHCNE_ASSOCCHANGED, SHCNF_IDLIST, None, None);
+    }
 }
