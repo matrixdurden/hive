@@ -1,5 +1,5 @@
 //! Yakalama: bütün ekranlar bir kez kopyalanır (donmuş görüntü), üstünde tam ekran bir pencere
-//! kararmış hâlini gösterir; seçilen alan aydınlık, köşesinde boyutu. Seçim bırakılınca yerinde
+//! kararmış hâlini gösterir; seçilen alan aydınlık, ince çerçeveli; yazı yok. Seçim bırakılınca yerinde
 //! kalır: içinde tek renk kalemle çizilir, Ctrl+C (ya da Enter) panoya kopyalar, Ctrl+S klasöre
 //! PNG olarak kaydeder (panoya da), Ctrl+Z son çizgiyi geri alır, Esc vazgeçer; seçimin dışında
 //! sürüklemek yeni seçim başlatır. Fare kıpırdadıkça yalnızca değişen bölge yeniden çizilir (4K'da
@@ -39,7 +39,6 @@ struct Shot {
     src: (HDC, HBITMAP),
     dim: (HDC, HBITMAP),
     buf: (HDC, HBITMAP),
-    font: HFONT,
     /// Kalem (ekran pikseli kalınlığında).
     pen: HPEN,
     pen_w: i32,
@@ -120,8 +119,6 @@ pub fn start(dir: PathBuf) {
         let dpi = GetDpiForWindow(hwnd).max(96);
         let pen_w = (PEN_W * dpi as i32 / 96).max(2);
         let pen = CreatePen(PS_SOLID, pen_w, COLORREF(PEN));
-        let px = (13 * dpi / 72) as i32;
-        let font = CreateFontW(-px, 0, 0, 0, FW_SEMIBOLD.0 as i32, 0, 0, 0, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, 0, w!("Segoe UI"));
         SHOT.with_borrow_mut(|s| {
             *s = Some(Shot {
                 hwnd,
@@ -130,7 +127,6 @@ pub fn start(dir: PathBuf) {
                 src,
                 dim,
                 buf,
-                font,
                 pen,
                 pen_w,
                 anchor: None,
@@ -156,13 +152,13 @@ fn union(a: RECT, b: RECT) -> RECT {
     RECT { left: a.left.min(b.left), top: a.top.min(b.top), right: a.right.max(b.right), bottom: a.bottom.max(b.bottom) }
 }
 
-/// Seçimin, boyut etiketinin ve altındaki ipucunun kapladığı yer (yeniden çizim için geniş).
+/// Seçimin ve çerçevesinin kapladığı yer.
 fn footprint(r: RECT) -> RECT {
-    RECT { left: r.left - 4, top: r.top - 48, right: r.right.max(r.left + 560) + 8, bottom: r.bottom + 56 }
+    RECT { left: r.left - 2, top: r.top - 2, right: r.right + 2, bottom: r.bottom + 2 }
 }
 
 impl Shot {
-    /// Tamponun `area` bölgesini baştan kurar: karartılmış zemin, aydınlık seçim, çerçeve, boyut.
+    /// Tamponun `area` bölgesini baştan kurar: karartılmış zemin, aydınlık seçim, çizgiler, çerçeve.
     fn compose(&self, area: RECT) {
         unsafe {
             let (l, t) = (area.left.max(0), area.top.max(0));
@@ -177,38 +173,7 @@ impl Shot {
             self.draw_strokes(dc, 0, 0);
             let white = CreateSolidBrush(COLORREF(0x00ededed));
             let _ = FrameRect(dc, &s, white);
-            // Boyut: seçimin sol üstünün hemen üstünde (yer yoksa içinde).
-            let mut text = wide(&format!("{} × {}", s.right - s.left, s.bottom - s.top));
-            text.pop();
-            let old = SelectObject(dc, self.font.into());
-            let mut m = RECT::default();
-            DrawTextW(dc, &mut text, &mut m, DT_CALCRECT | DT_SINGLELINE);
-            let (tw, th) = (m.right - m.left + 16, m.bottom - m.top + 8);
-            let top = if s.top - th - 6 >= 0 { s.top - th - 6 } else { s.top + 6 };
-            let mut label = RECT { left: s.left, top, right: s.left + tw, bottom: top + th };
-            let back = CreateSolidBrush(COLORREF(0x00161616));
-            FillRect(dc, &label, back);
-            SetBkMode(dc, TRANSPARENT);
-            SetTextColor(dc, COLORREF(0x00ededed));
-            DrawTextW(dc, &mut text, &mut label, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
-            // Seçim yerleşince altında ne yapılabileceği (yer yoksa içinde).
-            if self.placed {
-                let mut hint = wide(t!(
-                    "Draw inside · Ctrl+C copy · Ctrl+S save · Ctrl+Z undo · Esc",
-                    "İçinde çiz · Ctrl+C kopyala · Ctrl+S kaydet · Ctrl+Z geri al · Esc"
-                ));
-                hint.pop();
-                let mut m = RECT::default();
-                DrawTextW(dc, &mut hint, &mut m, DT_CALCRECT | DT_SINGLELINE);
-                let (hw, hh) = (m.right - m.left + 16, m.bottom - m.top + 8);
-                let top = if s.bottom + hh + 6 <= self.h { s.bottom + 6 } else { s.bottom - hh - 6 };
-                let mut r = RECT { left: s.left, top, right: s.left + hw, bottom: top + hh };
-                FillRect(dc, &r, back);
-                DrawTextW(dc, &mut hint, &mut r, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
-            }
-            SelectObject(dc, old);
             let _ = DeleteObject(white.into());
-            let _ = DeleteObject(back.into());
         }
     }
 
@@ -411,7 +376,6 @@ fn finish(deliver: Option<RECT>, save: bool) {
             let _ = DeleteDC(dc);
             let _ = DeleteObject(bmp.into());
         }
-        let _ = DeleteObject(shot.font.into());
         let _ = DeleteObject(shot.pen.into());
     }
 }
