@@ -1,15 +1,15 @@
 [package]
-name = "hive"
-version = "0.4.2"
+name = "winloom"
+version = "0.5.0"
 edition = "2024"
-description = "hive: matrixdurden'in Windows araçları tek yerde: soundboard, duvar kâğıdı, tünel, pil, ses aygıtları, dock, müzik"
+description = "winloom: matrixdurden'in Windows araçları tek yerde: soundboard, duvar kâğıdı, tünel, pil, ses aygıtları, dock, müzik, tıklayıcı"
 license = "MIT"
 
 [dependencies]
 windows-numerics = "0.3"
 # Ses aygıtları aracının ses olayı dinleyicisi (#[implement]).
 windows-core = "0.62"
-# soundboard motoru (../soundboard): hive sürecinde çalışır, sayfası src/soundboard.rs.
+# soundboard motoru (../soundboard): winloom sürecinde çalışır, sayfası src/soundboard.rs.
 soundboard_engine = { package = "soundboard", path = "../soundboard" }
 
 [dependencies.windows]

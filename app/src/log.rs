@@ -6,7 +6,7 @@ use std::time::Instant;
 static START: OnceLock<Instant> = OnceLock::new();
 static FILE: Mutex<Option<File>> = Mutex::new(None);
 
-/// Her açılışta %LOCALAPPDATA%\Programs\hive\<ad> dosyasını sıfırdan başlatır.
+/// Her açılışta %LOCALAPPDATA%\Programs\winloom\<ad> dosyasını sıfırdan başlatır.
 pub fn init(name: &str) {
     START.get_or_init(Instant::now);
     let dir = crate::util::data_dir();

@@ -1,12 +1,13 @@
 //! Araç kataloğu ve eklenti gibi kurma / kaldırma. Kurulum işleri arka plan iş parçacığında
 //! çalışır (yönetici izni, indirme, motoru durdurma beklemesi arayüzü kilitlemesin).
 //!
-//! - soundboard: motoru hive'ın içinde; kurmak mikrofon efektini bağlamaktır (yönetici).
-//! - wallpaper: motoru hive'ın içinde gömülü; kurmak exe'yi yazmaktır.
+//! - soundboard: motoru winloom'ın içinde; kurmak mikrofon efektini bağlamaktır (yönetici).
+//! - wallpaper: motoru winloom'ın içinde gömülü; kurmak exe'yi yazmaktır.
 //! - tunnel: GitHub'daki son sürüm indirilir, SHA-256'sı doğrulanır, kendi kurulumu çalışır.
-//! - battery: motoru hive'ın içinde; kurmak mevcut güç ayarlarını yedekleyip uygulamaların GPU tercihini yazmaktır.
-//! - audio: motoru hive'ın içinde; kurmak yalnızca kısayol dosyasını yazmaktır.
-//! - dock: motoru (dock) hive'ın içinde; kurmak ayarları ve dock'un ilk listesini yazmaktır.
+//! - battery: motoru winloom'ın içinde; kurmak mevcut güç ayarlarını yedekleyip uygulamaların GPU tercihini yazmaktır.
+//! - audio: motoru winloom'ın içinde; kurmak yalnızca kısayol dosyasını yazmaktır.
+//! - dock: motoru (dock) winloom'ın içinde; kurmak ayarları ve dock'un ilk listesini yazmaktır.
+//! - clicker: motoru winloom'ın içinde; kurmak yalnızca ayar dosyasını yazmaktır.
 
 use std::os::windows::process::CommandExt;
 use std::process::{Command, Stdio};
@@ -19,7 +20,7 @@ use windows::Win32::System::Threading::{OpenProcess, PROCESS_TERMINATE, Terminat
 use windows::Win32::UI::WindowsAndMessaging::{FindWindowW, GetWindowThreadProcessId};
 use windows::core::{PCWSTR, w};
 
-use crate::{audio, battery, dock, log, net, shell, soundboard, tunnel, util, wallpaper};
+use crate::{audio, battery, clicker, dock, log, net, shell, soundboard, tunnel, util, wallpaper};
 
 pub const SOUNDBOARD: usize = 0;
 pub const WALLPAPER: usize = 1;
@@ -27,7 +28,8 @@ pub const TUNNEL: usize = 2;
 pub const BATTERY: usize = 3;
 pub const AUDIO: usize = 4;
 pub const DOCK: usize = 5;
-pub const COUNT: usize = 6;
+pub const CLICKER: usize = 6;
+pub const COUNT: usize = 7;
 
 pub struct Tool {
     pub id: &'static str,
@@ -71,7 +73,7 @@ macro_rules! icons {
 pub static TOOLS: [Tool; COUNT] = [
     Tool {
         id: "soundboard",
-        names: ["Soundboard", "Soundboard"],
+        names: ["Blast", "Blast"],
         tagline: ["A soundboard that plays straight into your microphone", "Sesi doğrudan mikrofona veren soundboard"],
         note: ["Adds an effect to your microphone · needs admin", "Mikrofonuna bir ses efekti takar · yönetici izni ister"],
         icons: icons!("soundboard"),
@@ -85,8 +87,8 @@ pub static TOOLS: [Tool; COUNT] = [
     },
     Tool {
         id: "tunnel",
-        names: ["Tunnel", "Tünel"],
-        tagline: ["Tunnels your whole computer past network blocks", "Bütün bilgisayarı ağ engellerinin ötesine geçiren tünel"],
+        names: ["VPN", "VPN"],
+        tagline: ["A VPN that takes your whole computer past network blocks", "Bütün bilgisayarı ağ engellerinin ötesine geçiren VPN"],
         note: ["Downloaded from GitHub when turned on (~40 MB) · needs admin", "Açınca GitHub'dan indirilir (~40 MB) · yönetici izni ister"],
         icons: icons!("tunnel"),
     },
@@ -110,6 +112,13 @@ pub static TOOLS: [Tool; COUNT] = [
         tagline: ["A dock in place of the taskbar", "Görev çubuğunun yerine bir dock"],
         note: ["Replaces the taskbar · turn it off and the taskbar is back", "Görev çubuğunun yerine geçer · kapatınca görev çubuğu geri gelir"],
         icons: icons!("dock"),
+    },
+    Tool {
+        id: "clicker",
+        names: ["Clicker", "Tıklayıcı"],
+        tagline: ["Clicks for you while you hold a key", "Tuşu basılı tuttuğun sürece senin yerine tıklar"],
+        note: ["No internet needed", "İnternet gerekmez"],
+        icons: icons!("clicker"),
     },
 ];
 
@@ -156,7 +165,7 @@ pub fn migrate() {
     }
 }
 
-/// Aracın motorunu ve sayfasını başlatır (araç açıkken hive'ın açılışında ya da açılınca).
+/// Aracın motorunu ve sayfasını başlatır (araç açıkken winloom'ın açılışında ya da açılınca).
 pub fn start(i: usize, hwnd: windows::Win32::Foundation::HWND) -> Box<dyn crate::ui::ToolPage> {
     match i {
         SOUNDBOARD => {
@@ -167,6 +176,7 @@ pub fn start(i: usize, hwnd: windows::Win32::Foundation::HWND) -> Box<dyn crate:
         BATTERY => Box::new(battery::Battery::start(hwnd)),
         AUDIO => Box::new(audio::Audio::start(hwnd)),
         DOCK => Box::new(dock::Dock::start(hwnd)),
+        CLICKER => Box::new(clicker::Clicker::start(hwnd)),
         _ => Box::new(tunnel::Tunnel::start(hwnd)),
     }
 }
@@ -179,6 +189,7 @@ pub fn installed(i: usize) -> bool {
         BATTERY => battery::installed(),
         AUDIO => audio::installed(),
         DOCK => dock::installed(),
+        CLICKER => clicker::installed(),
         _ => tunnel::installed(),
     }
 }
@@ -200,6 +211,7 @@ pub fn run(i: usize, install: bool) -> Result<(), String> {
         (BATTERY, true) => battery::install(),
         (AUDIO, true) => audio::install(),
         (DOCK, true) => dock::install(),
+        (CLICKER, true) => clicker::install(),
         (_, true) => rabbithole_install(),
         (_, false) => uninstall(i),
     }
@@ -220,6 +232,7 @@ fn uninstall(i: usize) -> Result<(), String> {
         BATTERY => battery::uninstall()?,
         AUDIO => audio::uninstall()?,
         DOCK => dock::uninstall()?,
+        CLICKER => clicker::uninstall()?,
         _ => {
             tunnel::run(&["remove"])?;
             // Program Files'taki exe kendini silemez: tunnel arkasında birkaç saniye içinde
@@ -259,6 +272,7 @@ pub fn leftovers(i: usize) -> Vec<String> {
         BATTERY => battery::leftovers(),
         AUDIO => audio::leftovers(),
         DOCK => dock::leftovers(),
+        CLICKER => clicker::leftovers(),
         _ => {
             let mut l: Vec<String> =
                 [tunnel::install_dir(), tunnel::data_dir()].into_iter().filter_map(exists).collect();
@@ -327,7 +341,7 @@ fn rabbithole_install() -> Result<(), String> {
     }
 }
 
-/// soundboard artık hive içinde çalışıyor: ayrı kopya açıksa kapatılır (ortak belleğe aynı anda
+/// soundboard artık winloom içinde çalışıyor: ayrı kopya açıksa kapatılır (ortak belleğe aynı anda
 /// iki yazar olamaz), Windows ile başlaması kaldırılır.
 pub fn retire_standalone_lyrebird() {
     unsafe {

@@ -1,5 +1,5 @@
 //! soundboard sayfası. Motor (çözme, ortak bellek, kulaklık, kısayollar) ../soundboard'da ve
-//! hive sürecinde çalışır; mikrofon efekti (APO) audiodg.exe içinde.
+//! winloom sürecinde çalışır; mikrofon efekti (APO) audiodg.exe içinde.
 //!
 //! Sayfa: üstte mikrofon durumu ve "hepsini sustur", altında iki sekme, en altta iki ses düzeyi.
 //! - Seslerim: listedeki sesler. Sağ üstte "Son 10 saniye" (bilgisayarda az önce çalanı listeye
@@ -16,9 +16,6 @@ use windows::Win32::Media::Multimedia::mciSendStringW;
 use windows::Win32::System::Com::{
     CLSCTX_INPROC_SERVER, COINIT_APARTMENTTHREADED, CoCreateInstance, CoInitializeEx, CoTaskMemFree,
 };
-use windows::Win32::System::DataExchange::{CloseClipboard, GetClipboardData, OpenClipboard};
-use windows::Win32::System::Memory::{GlobalLock, GlobalUnlock};
-use windows::Win32::System::Ole::CF_UNICODETEXT;
 use windows::Win32::System::SystemInformation::GetLocalTime;
 use windows::Win32::UI::Input::KeyboardAndMouse::*;
 use windows::Win32::UI::Shell::Common::COMDLG_FILTERSPEC;
@@ -29,7 +26,7 @@ use windows::core::{PCWSTR, w};
 use crate::gfx::{Color, Gfx, Rect};
 use crate::log;
 use crate::ui::*;
-use crate::util::{Res, error_box, wide};
+use crate::util::{Res, clipboard_text, error_box, wide};
 use crate::{myinstants, osd};
 use soundboard_engine::bus::{self, Bus};
 use soundboard_engine::clip::{self, Clipper};
@@ -112,6 +109,7 @@ enum Hit {
     ClipKey,
     Row(usize),
     RowKey(usize),
+    RowRename(usize),
     RowRemove(usize),
     Slider(usize),
     /// Boş listedeki "Ses bul".
@@ -145,7 +143,10 @@ pub enum Modal {
 struct Item {
     id: u64,
     path: PathBuf,
-    name: String,
+    /// Dosya adı (uzantısız).
+    stem: String,
+    /// Kullanıcının verdiği ad.
+    label: Option<String>,
     hotkey: Option<Hotkey>,
     conflict: bool,
     missing: bool,
@@ -153,11 +154,18 @@ struct Item {
 
 impl Item {
     fn new(id: u64, s: Sound) -> Self {
-        let name =
+        let stem =
             s.path.file_stem().map_or_else(|| s.path.display().to_string(), |n| n.to_string_lossy().into_owned());
-        Self { id, missing: !s.path.is_file(), path: s.path, name, hotkey: s.hotkey, conflict: false }
+        Self { id, missing: !s.path.is_file(), path: s.path, stem, label: s.name, hotkey: s.hotkey, conflict: false }
+    }
+
+    fn name(&self) -> &str {
+        self.label.as_deref().unwrap_or(&self.stem)
     }
 }
+
+const NAME_MAX: usize = 80;
+const ICON_RENAME: &str = "\u{E70F}";
 
 /// Myinstants sonucu.
 struct Found {
@@ -232,7 +240,7 @@ pub struct Soundboard {
     registered: Vec<i32>,
     modal: Option<Modal>,
     dll_current: bool,
-    /// Sayfanın boyutu ve başlık yazısının bittiği x (hive her olaydan önce verir).
+    /// Sayfanın boyutu ve başlık yazısının bittiği x (winloom her olaydan önce verir).
     w: f32,
     h: f32,
     head_x: f32,
@@ -257,6 +265,8 @@ pub struct Soundboard {
     /// Kulaklıkta çalan önizleme ve beklenen (inerken).
     preview: Option<String>,
     want_preview: Option<String>,
+    /// Adı düzenlenen ses ve kutusu.
+    rename: Option<(usize, TextField)>,
 }
 
 fn is_audio(p: &Path) -> bool {
@@ -330,6 +340,7 @@ impl Soundboard {
             fetched: Arc::default(),
             preview: None,
             want_preview: None,
+            rename: None,
         };
         l.register();
         l.refresh_mic();
@@ -358,7 +369,7 @@ impl Soundboard {
             ear: self.level[1],
             stop: self.stop,
             clip: self.clip,
-            sounds: self.items.iter().map(|i| Sound { path: i.path.clone(), hotkey: i.hotkey }).collect(),
+            sounds: self.items.iter().map(|i| Sound { path: i.path.clone(), hotkey: i.hotkey, name: i.label.clone() }).collect(),
         }
         .save();
     }
@@ -457,7 +468,7 @@ impl Soundboard {
         for p in files {
             if !self.items.iter().any(|i| i.path == p) {
                 self.next_id += 1;
-                self.items.push(Item::new(self.next_id, Sound { path: p, hotkey: None }));
+                self.items.push(Item::new(self.next_id, Sound { path: p, hotkey: None, name: None }));
             }
         }
         if self.items.len() != before {
@@ -467,9 +478,48 @@ impl Soundboard {
         }
     }
 
+    // --- Ad düzenleme ---
+
+    fn start_rename(&mut self, n: usize) {
+        let Some(name) = self.items.get(n).map(|i| i.name().to_string()) else { return };
+        self.end_bind(None);
+        self.end_rename(true);
+        let mut f = TextField::new(NAME_MAX);
+        f.set(&name);
+        f.focus(true);
+        self.rename = Some((n, f));
+        unsafe {
+            let _ = SetFocus(Some(self.hwnd));
+        }
+        self.redraw();
+    }
+
+    /// `commit`: kutudakini ad yap (boşsa ya da dosya adıyla aynıysa verilen ad silinir).
+    fn end_rename(&mut self, commit: bool) {
+        let Some((n, f)) = self.rename.take() else { return };
+        if commit && let Some(item) = self.items.get_mut(n) {
+            let name = f.text.trim().to_string();
+            let label = (!name.is_empty() && name != item.stem).then_some(name);
+            if label != item.label {
+                item.label = label;
+                self.save();
+            }
+        }
+        self.redraw();
+    }
+
+    /// Ad kutusu: satırda adın yerinde, sağdaki ikonlara kadar.
+    fn rename_rect(&self, n: usize) -> Rect {
+        let r = self.row_rect(n);
+        Rect::new(r.l + 32.0, r.t + 3.0, self.w - 92.0, r.b - 3.0)
+    }
+
     fn remove(&mut self, n: usize) {
         if n >= self.items.len() {
             return;
+        }
+        if self.rename.as_ref().is_some_and(|(i, _)| *i == n) {
+            self.rename = None;
         }
         let item = self.items.remove(n);
         if self.playing.iter().any(|p| p.id == item.id) {
@@ -574,6 +624,7 @@ impl Soundboard {
     // --- Sekmeler ---
 
     fn set_tab(&mut self, tab: Tab) {
+        self.end_rename(true);
         if self.tab == tab {
             return;
         }
@@ -710,12 +761,19 @@ impl Soundboard {
     fn row_key_rect(&self, g: &Gfx, n: usize) -> Rect {
         let item = &self.items[n];
         let text = self.chip_text(item.hotkey, self.bind == Some(Bind::Sound(n)));
-        chip_rect(g, self.w - 56.0, self.row_rect(n).cy(), &text)
+        // Sağda düzenle ve kaldır ikonlarına yer kalır.
+        chip_rect(g, self.w - 92.0, self.row_rect(n).cy(), &text)
     }
 
     fn remove_rect(&self, n: usize) -> Rect {
         let r = self.row_rect(n);
         Rect::new(self.w - 50.0, r.t + 6.0, self.w - 22.0, r.b - 6.0)
+    }
+
+    /// Kaldır'ın solunda: adı düzenle.
+    fn rename_icon_rect(&self, n: usize) -> Rect {
+        let r = self.row_rect(n);
+        Rect::new(self.w - 82.0, r.t + 6.0, self.w - 54.0, r.b - 6.0)
     }
 
     fn search_rect(&self) -> Rect {
@@ -808,9 +866,12 @@ impl Soundboard {
             return Hit::None;
         }
         let n = n as usize;
+        let editing = self.rename.as_ref().is_some_and(|(i, _)| *i == n);
         if self.remove_rect(n).contains(x, y) {
             Hit::RowRemove(n)
-        } else if self.row_key_rect(g, n).contains(x, y) {
+        } else if self.rename_icon_rect(n).contains(x, y) {
+            Hit::RowRename(n)
+        } else if !editing && self.row_key_rect(g, n).contains(x, y) {
             Hit::RowKey(n)
         } else {
             Hit::Row(n)
@@ -955,7 +1016,8 @@ impl Soundboard {
                 if r.b < list.t || r.t > list.b {
                     continue;
                 }
-                let hovered = matches!(self.hover, Hit::Row(i) | Hit::RowKey(i) | Hit::RowRemove(i) if i == n);
+                let hovered = matches!(self.hover, Hit::Row(i) | Hit::RowKey(i) | Hit::RowRename(i) | Hit::RowRemove(i) if i == n);
+                let editing = self.rename.as_ref().filter(|(i, _)| *i == n).map(|(_, f)| f);
                 let playing = self.playing.iter().find(|p| p.id == item.id);
                 if playing.is_some() {
                     g.fill(r, 8.0, accent().alpha(if hovered { 0.12 } else { 0.08 }));
@@ -964,8 +1026,8 @@ impl Soundboard {
                 }
                 let binding = self.bind == Some(Bind::Sound(n));
                 let key = self.row_key_rect(g, n);
-                let show_chip = item.hotkey.is_some() || binding || hovered;
-                let name_right = if show_chip { key.l - 10.0 } else { w - 56.0 };
+                let show_chip = editing.is_none() && (item.hotkey.is_some() || binding || hovered);
+                let name_right = if show_chip { key.l - 10.0 } else { w - 92.0 };
                 let (icon, icon_color) = if playing.is_some() {
                     (ICON_PAUSE, accent())
                 } else {
@@ -977,19 +1039,30 @@ impl Soundboard {
                     _ if playing.is_some() => accent(),
                     _ => pal().text,
                 };
-                g.text(&item.name, &g.f.text, Rect::new(r.l + 36.0, r.t, name_right, r.b), name_color);
+                if let Some(f) = editing {
+                    f.paint(g, self.rename_rect(n), &item.stem);
+                } else {
+                    g.text(item.name(), &g.f.text, Rect::new(r.l + 36.0, r.t, name_right, r.b), name_color);
+                }
                 if show_chip {
                     let (c, b) =
                         self.chip_colors(binding, item.conflict, item.hotkey.is_none(), self.hover == Hit::RowKey(n));
                     chip(g, key, &self.chip_text(item.hotkey, binding), c, b);
                 }
-                if hovered {
+                if hovered || editing.is_some() {
                     let rm = self.remove_rect(n);
                     let over = self.hover == Hit::RowRemove(n);
                     if over {
                         g.fill(rm, 6.0, pal().line);
                     }
                     g.text(ICON_REMOVE, &g.f.icon_small, rm, if over { pal().text } else { pal().faint });
+                    let rn = self.rename_icon_rect(n);
+                    let over = self.hover == Hit::RowRename(n);
+                    if over {
+                        g.fill(rn, 6.0, pal().line);
+                    }
+                    let c = if over || editing.is_some() { pal().text } else { pal().faint };
+                    g.text(ICON_RENAME, &g.f.icon_small, rn, c);
                 }
                 if let Some(p) = playing
                     && p.duration > 0.0
@@ -1105,6 +1178,7 @@ impl Soundboard {
         }
         if !visible {
             self.end_bind(None);
+            self.end_rename(true);
             self.hover = Hit::None;
             self.stop_preview();
         }
@@ -1154,6 +1228,12 @@ impl Soundboard {
         if self.bind.is_some() && !matches!(hit, Hit::RowKey(_) | Hit::StopKey | Hit::ClipKey) {
             self.end_bind(None);
         }
+        // Düzenlenen satırın dışına tıklamak adı kaydeder.
+        if let Some((n, _)) = &self.rename
+            && !matches!(hit, Hit::Row(i) | Hit::RowRename(i) if i == *n)
+        {
+            self.end_rename(true);
+        }
         if let Hit::Slider(k) = hit {
             self.drag = Some(k);
             self.slide_to(k, x);
@@ -1179,7 +1259,15 @@ impl Soundboard {
             Hit::AddFiles => self.modal = Some(Modal::AddFiles),
             Hit::Clip => self.save_clip(),
             Hit::ClipKey => self.start_bind(Bind::Clip),
+            Hit::Row(n) if self.rename.as_ref().is_some_and(|(i, _)| *i == n) => {}
             Hit::Row(n) => self.toggle(n),
+            Hit::RowRename(n) => {
+                if self.rename.as_ref().is_some_and(|(i, _)| *i == n) {
+                    self.end_rename(true);
+                } else {
+                    self.start_rename(n);
+                }
+            }
             Hit::RowKey(n) => self.start_bind(Bind::Sound(n)),
             Hit::RowRemove(n) => self.remove(n),
             Hit::Search => {
@@ -1227,6 +1315,15 @@ impl Soundboard {
             return true;
         }
         let ctrl = unsafe { GetKeyState(VK_CONTROL.0 as i32) } < 0;
+        if let Some((_, f)) = &mut self.rename {
+            match f.key(vk, ctrl) {
+                FieldKey::Enter => self.end_rename(true),
+                FieldKey::Escape => self.end_rename(false),
+                FieldKey::Handled => self.redraw(),
+                FieldKey::Ignored => {}
+            }
+            return true;
+        }
         if ctrl && VIRTUAL_KEY(vk) == VK_F {
             self.set_tab(Tab::Find);
             self.selected = !self.query.is_empty();
@@ -1250,6 +1347,7 @@ impl Soundboard {
 
     pub fn kill_focus(&mut self) {
         self.end_bind(None);
+        self.end_rename(true);
     }
 
     pub fn hotkey(&mut self, id: i32) {
@@ -1283,8 +1381,8 @@ impl Soundboard {
         self.refresh_mic();
         if code == 1 {
             error_box(t!(
-                "Could not connect to the microphone.\n\nDetails: %LOCALAPPDATA%\\Programs\\hive\\hive.log",
-                "Mikrofona bağlanamadı.\n\nAyrıntılar: %LOCALAPPDATA%\\Programs\\hive\\hive.log"
+                "Could not connect to the microphone.\n\nDetails: %LOCALAPPDATA%\\Programs\\winloom\\winloom.log",
+                "Mikrofona bağlanamadı.\n\nAyrıntılar: %LOCALAPPDATA%\\Programs\\winloom\\winloom.log"
             ));
         }
     }
@@ -1295,6 +1393,12 @@ impl Soundboard {
 impl Soundboard {
     /// Ses bul açıkken yazılanlar arama kutusuna gider; her şey seçiliyse yerine geçer.
     pub fn char(&mut self, c: char) -> bool {
+        if let Some((_, f)) = &mut self.rename {
+            if f.char(c) {
+                self.redraw();
+            }
+            return true;
+        }
         if self.tab != Tab::Find || self.bind.is_some() || c.is_control() {
             return false;
         }
@@ -1537,26 +1641,6 @@ impl Soundboard {
     }
 }
 
-/// Panodaki yazı.
-fn clipboard_text() -> Option<String> {
-    unsafe {
-        OpenClipboard(None).ok()?;
-        let text = (|| {
-            let h = GetClipboardData(CF_UNICODETEXT.0 as u32).ok()?;
-            let p = GlobalLock(HGLOBAL(h.0)) as *const u16;
-            if p.is_null() {
-                return None;
-            }
-            let len = (0..).take_while(|&i| *p.add(i) != 0).count();
-            let s = String::from_utf16_lossy(std::slice::from_raw_parts(p, len));
-            let _ = GlobalUnlock(HGLOBAL(h.0));
-            Some(s)
-        })();
-        let _ = CloseClipboard();
-        text
-    }
-}
-
 fn add_dialog(hwnd: HWND) -> Res<Vec<PathBuf>> {
     unsafe {
         let dlg: IFileOpenDialog = CoCreateInstance(&FileOpenDialog, None, CLSCTX_INPROC_SERVER)?;
@@ -1676,7 +1760,7 @@ impl ToolPage for Soundboard {
 }
 
 impl Drop for Soundboard {
-    /// Kaldırılınca kısayollar ve zamanlayıcılar bırakılır (pencere hive'la yaşamaya devam eder).
+    /// Kaldırılınca kısayollar ve zamanlayıcılar bırakılır (pencere winloom'la yaşamaya devam eder).
     fn drop(&mut self) {
         self.unregister();
         self.player.stop_all();

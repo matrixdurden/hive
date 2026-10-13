@@ -3,6 +3,10 @@ use std::path::PathBuf;
 use windows::Win32::System::Registry::{
     HKEY, KEY_READ, RRF_NOEXPAND, RRF_RT_ANY, RRF_RT_REG_EXPAND_SZ, RRF_RT_REG_SZ, RegCloseKey, RegGetValueW, RegOpenKeyExW,
 };
+use windows::Win32::System::DataExchange::{CloseClipboard, GetClipboardData, OpenClipboard};
+use windows::Win32::Foundation::HGLOBAL;
+use windows::Win32::System::Memory::{GlobalLock, GlobalUnlock};
+use windows::Win32::System::Ole::CF_UNICODETEXT;
 use windows::Win32::UI::WindowsAndMessaging::{MB_ICONERROR, MB_OK, MessageBoxW};
 use windows::core::{PCWSTR, w};
 
@@ -16,13 +20,13 @@ pub fn wide(s: &str) -> Vec<u16> {
 pub fn error_box(msg: &str) {
     let text = wide(msg);
     unsafe {
-        MessageBoxW(None, PCWSTR(text.as_ptr()), w!("hive"), MB_ICONERROR | MB_OK);
+        MessageBoxW(None, PCWSTR(text.as_ptr()), w!("winloom"), MB_ICONERROR | MB_OK);
     }
 }
 
-/// %LOCALAPPDATA%\Programs\hive — kurulu exe, ayarlar ve log burada durur.
+/// %LOCALAPPDATA%\Programs\winloom — kurulu exe, ayarlar ve log burada durur.
 pub fn data_dir() -> PathBuf {
-    local_programs().join("hive")
+    local_programs().join("winloom")
 }
 
 /// %LOCALAPPDATA%\Programs
@@ -36,6 +40,26 @@ pub fn local_programs() -> PathBuf {
 pub fn installed_copy() -> Option<String> {
     let exe = std::env::current_exe().ok()?.display().to_string();
     (!exe.starts_with(r"\\")).then_some(exe)
+}
+
+/// Panodaki yazı.
+pub fn clipboard_text() -> Option<String> {
+    unsafe {
+        OpenClipboard(None).ok()?;
+        let text = (|| {
+            let h = GetClipboardData(CF_UNICODETEXT.0 as u32).ok()?;
+            let p = GlobalLock(HGLOBAL(h.0)) as *const u16;
+            if p.is_null() {
+                return None;
+            }
+            let len = (0..).take_while(|&i| *p.add(i) != 0).count();
+            let s = String::from_utf16_lossy(std::slice::from_raw_parts(p, len));
+            let _ = GlobalUnlock(HGLOBAL(h.0));
+            Some(s)
+        })();
+        let _ = CloseClipboard();
+        text
+    }
 }
 
 /// Kayıt defteri anahtarı var mı.

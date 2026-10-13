@@ -1,5 +1,5 @@
 // assets/icon.ico'yu exe'ye gömer (kaynak 1: pencere, görev çubuğu, tepsi) ve duvar kâğıdı motorunun
-// yolunu verir: hive onu içinde taşır, duvar kâğıdı açılınca diske yazar. Motor önce derlenmeli (`make build`).
+// yolunu verir: winloom onu içinde taşır, duvar kâğıdı açılınca diske yazar. Motor önce derlenmeli (`make build`).
 use std::path::{Path, PathBuf};
 
 fn main() {

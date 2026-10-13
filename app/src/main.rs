@@ -9,6 +9,7 @@ mod app;
 mod wallpaper;
 mod config;
 mod battery;
+mod clicker;
 mod gfx;
 mod dock;
 mod frame;
@@ -33,20 +34,20 @@ use windows::Win32::UI::HiDpi::{DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2, SetP
 use windows::core::w;
 
 // kullanım (Türkçe adlar da geçer: --sekme, --gizli, --kur, --kaldir, --kalinti):
-//   hive                  pencereyi aç (son sekmede)
-//   hive --tab <ad>       o sekmede aç: soundboard, wallpaper, tunnel, battery, audio, dock, tools, settings
-//   hive --hidden         tepside başlat
-//   hive --install        kendini %LOCALAPPDATA%\Programs\hive'a kur ve başlat (güncelleme de;
+//   winloom                  pencereyi aç (son sekmede)
+//   winloom --tab <ad>       o sekmede aç: soundboard, wallpaper, tunnel, battery, audio, dock, clicker, tools, settings
+//   winloom --hidden         tepside başlat
+//   winloom --install        kendini %LOCALAPPDATA%\Programs\winloom'a kur ve başlat (güncelleme de;
 //                         --hidden ile pencere açmadan)
-//   hive --uninstall      hive'ı ve kurulu araçları iz bırakmadan kaldır
-//   hive --leftovers      kurulu olmayan araçlardan kalan iz var mı, listele
-//   hive --soundboard-test  her mikrofona test sesi gönder, geri geliyor mu ölç
-//   hive --battery-test  Pil aracının okuduğu pil, ekran ve ekran kartı bilgilerini yazdır
-//   hive --audio-test   Ses aygıtları aracının gördüğü çıkışları ve medya oturumlarını yazdır
-//   hive --dock-test    dock'un gördüğü pencereleri ve dock'taki öğeleri yazdır
-//   hive --dock-pin <yol>  dock'a sabitle (sağ tık menüsünden)
-//   hive --music-test [klasör]  medya oturumlarını yazdır; klasöre müzik şeridinin önizlemesini çiz
-//   hive --update-test  son yayına bak, yeniyse indirip doğrula (kurmaz)
+//   winloom --uninstall      winloom'ı ve kurulu araçları iz bırakmadan kaldır
+//   winloom --leftovers      kurulu olmayan araçlardan kalan iz var mı, listele
+//   winloom --soundboard-test  her mikrofona test sesi gönder, geri geliyor mu ölç
+//   winloom --battery-test  Pil aracının okuduğu pil, ekran ve ekran kartı bilgilerini yazdır
+//   winloom --audio-test   Ses aygıtları aracının gördüğü çıkışları ve medya oturumlarını yazdır
+//   winloom --dock-test    dock'un gördüğü pencereleri ve dock'taki öğeleri yazdır
+//   winloom --dock-pin <yol>  dock'a sabitle (sağ tık menüsünden)
+//   winloom --music-test [klasör]  medya oturumlarını yazdır; klasöre müzik şeridinin önizlemesini çiz
+//   winloom --update-test  son yayına bak, yeniyse indirip doğrula (kurmaz)
 
 /// Bayrak İngilizce ya da Türkçe adıyla verilmiş mi.
 fn flag(args: &[String], en: &str, tr: &str) -> bool {
@@ -54,7 +55,7 @@ fn flag(args: &[String], en: &str, tr: &str) -> bool {
 }
 
 fn main() {
-    // soundboard motoru da hive'ın log dosyasına yazsın.
+    // soundboard motoru da winloom'ın log dosyasına yazsın.
     soundboard_engine::log::set_sink(|args| log::write(args));
     let args: Vec<String> = std::env::args().skip(1).collect();
     i18n::set_turkish(config::Config::load().turkish);
@@ -187,10 +188,10 @@ fn main() {
         _ => {}
     }
     // İndirilip çift tıklanan exe de kendini kurar (WSL'deki geliştirme kopyası hariç).
-    if util::installed_copy().is_some_and(|exe| !exe.eq_ignore_ascii_case(&util::data_dir().join("hive.exe").display().to_string())) {
+    if util::installed_copy().is_some_and(|exe| !exe.eq_ignore_ascii_case(&util::data_dir().join("winloom.exe").display().to_string())) {
         log::init("kurulum.log");
         if let Err(e) = shell::install_self(false) {
-            util::error_box(&format!("{}\n\n{e}", t!("hive could not be installed:", "hive kurulamadı:")));
+            util::error_box(&format!("{}\n\n{e}", t!("winloom could not be installed:", "winloom kurulamadı:")));
         }
         return;
     }
@@ -208,18 +209,19 @@ fn main() {
     }
 
     // Tek kopya: zaten çalışıyorsa sekmeyi ona ilet.
-    let _mutex = unsafe { CreateMutexW(None, true, w!("Local\\hive-tek-kopya")) };
+    let _mutex = unsafe { CreateMutexW(None, true, w!("Local\\winloom-tek-kopya")) };
     if unsafe { GetLastError() } == ERROR_ALREADY_EXISTS {
         app::forward(tab.as_deref());
         return;
     }
-    log::init("hive.log");
+    log::init("winloom.log");
     unsafe {
         let _ = SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
     }
+    shell::migrate_from_hive();
     tools::migrate();
     if let Err(e) = app::run(hidden, tab) {
         log!("hata: {e}");
-        util::error_box(&format!("{}\n\n{e}", t!("hive could not start:", "hive başlatılamadı:")));
+        util::error_box(&format!("{}\n\n{e}", t!("winloom could not start:", "winloom başlatılamadı:")));
     }
 }

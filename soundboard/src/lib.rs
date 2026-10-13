@@ -6,7 +6,7 @@
 //!   mikrofonlara takar ve çıkarır (yönetici ister).
 //! - `clip` bilgisayarda çalan sesin son 10 saniyesini tutar, istenince wav'a yazar.
 //!
-//! Arayüz hive'da; motor onun sürecinde çalışır.
+//! Arayüz winloom'da; motor onun sürecinde çalışır.
 
 pub mod bus;
 pub mod clip;

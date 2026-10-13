@@ -1,11 +1,7 @@
-//! Süreçler: listeleme, uygulama başına ekran kartı tercihi ve pildeyken ayrık ekran kartını (RTX)
-//! kimin uyanık tuttuğu. Bunun için nvidia-smi kullanılmaz: o aracın kendisi kartı uyandırır.
-//! Windows'un GPU performans sayaçları uyandırmaz.
+//! Süreçler: listeleme ve uygulama başına ekran kartı tercihi.
 
 use windows::Win32::Foundation::*;
-use windows::Win32::Graphics::Dxgi::*;
 use windows::Win32::System::Diagnostics::ToolHelp::*;
-use windows::Win32::System::Performance::*;
 use windows::Win32::System::Registry::*;
 use windows::Win32::System::Threading::*;
 use windows::core::{PCWSTR, PWSTR};
@@ -136,61 +132,6 @@ pub fn igpu_targets(names: &[String]) -> Vec<String> {
     }
     for k in known.into_iter().filter(|p| p.is_file()) {
         push_unique(&mut out, k.display().to_string());
-    }
-    out
-}
-
-// --- RTX'i kim kullanıyor ---
-
-/// NVIDIA bağdaştırıcısının LUID'si, performans sayaçlarındaki yazımla (`0xHIGH_0xLOW`).
-pub fn nvidia_luid() -> Option<String> {
-    unsafe {
-        let f: IDXGIFactory1 = CreateDXGIFactory1().ok()?;
-        for i in 0.. {
-            let Ok(a) = f.EnumAdapters1(i) else { break };
-            let d = a.GetDesc1().ok()?;
-            if d.VendorId == 0x10DE {
-                return Some(format!("0x{:08x}_0x{:08x}", d.AdapterLuid.HighPart as u32, d.AdapterLuid.LowPart));
-            }
-        }
-    }
-    None
-}
-
-/// O bağdaştırıcıda ayrılmış belleği olan süreçler: (pid, bayt).
-pub fn gpu_users(luid: &str) -> Vec<(u32, i64)> {
-    let mut out = Vec::new();
-    let needle = format!("luid_{luid}");
-    unsafe {
-        let mut q = PDH_HQUERY(std::ptr::null_mut());
-        if PdhOpenQueryW(PCWSTR::null(), 0, &mut q) != 0 {
-            return out;
-        }
-        let mut c = PDH_HCOUNTER(std::ptr::null_mut());
-        let path = wide(r"\GPU Process Memory(*)\Dedicated Usage");
-        if PdhAddEnglishCounterW(q, PCWSTR(path.as_ptr()), 0, &mut c) == 0 && PdhCollectQueryData(q) == 0 {
-            let (mut size, mut count) = (0u32, 0u32);
-            if PdhGetFormattedCounterArrayW(c, PDH_FMT_LARGE, &mut size, &mut count, None) == PDH_MORE_DATA && size > 0
-            {
-                let mut buf = vec![0u64; size as usize / 8 + 1];
-                let items = buf.as_mut_ptr() as *mut PDH_FMT_COUNTERVALUE_ITEM_W;
-                if PdhGetFormattedCounterArrayW(c, PDH_FMT_LARGE, &mut size, &mut count, Some(items)) == 0 {
-                    for it in std::slice::from_raw_parts(items, count as usize) {
-                        // pid_1234_luid_0x00000000_0x000163a9_phys_0
-                        let name = it.szName.to_string().unwrap_or_default().to_ascii_lowercase();
-                        if !name.contains(&needle) {
-                            continue;
-                        }
-                        let pid =
-                            name.strip_prefix("pid_").and_then(|s| s.split('_').next()).and_then(|s| s.parse().ok());
-                        if let Some(pid) = pid {
-                            out.push((pid, it.FmtValue.Anonymous.largeValue));
-                        }
-                    }
-                }
-            }
-        }
-        let _ = PdhCloseQuery(q);
     }
     out
 }

@@ -32,8 +32,8 @@ use crate::tray::Tray;
 use crate::ui::*;
 use crate::util::{self, Res, wide};
 
-pub const CLASS: PCWSTR = w!("hive");
-pub const NAME: &str = "hive";
+pub const CLASS: PCWSTR = w!("winloom");
+pub const NAME: &str = "winloom";
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 const WM_TRAY: u32 = WM_APP + 1;
@@ -41,7 +41,7 @@ const WM_TRAY: u32 = WM_APP + 1;
 const WM_TOOL_SETUP: u32 = WM_APP + 2;
 /// Uygulama meşgulken gelen sekme isteği sonradan uygulanır.
 const WM_PENDING_TAB: u32 = WM_APP + 3;
-/// hive'ın kendini kaldırması bitti (hatalar `self_errors`'ta).
+/// winloom'ın kendini kaldırması bitti (hatalar `self_errors`'ta).
 const WM_SELF_DONE: u32 = WM_APP + 4;
 /// Yeni sürüm kuruluyor: çalışan kopya tamamen kapansın (WM_CLOSE yalnızca gizler).
 pub const WM_EXIT: u32 = WM_APP + 5;
@@ -156,7 +156,7 @@ struct App {
     gfx: Gfx,
     tray: Tray,
     icons: Vec<ImageId>,
-    /// hive'ın kendi ikonu (kenar çubuğunun başında).
+    /// winloom'ın kendi ikonu (kenar çubuğunun başında).
     logo: ImageId,
     page: Page,
     narrow_pref: bool,
@@ -170,7 +170,7 @@ struct App {
     /// Son kurulum / kaldırma hatası, araç kartında görünür.
     errors: [Option<String>; tools::COUNT],
     results: Arc<Mutex<Vec<SetupResult>>>,
-    /// hive kendini kaldırıyor; bitince süreç kapanır, klasör arkasından silinir.
+    /// winloom kendini kaldırıyor; bitince süreç kapanır, klasör arkasından silinir.
     removing_self: bool,
     self_errors: Arc<Mutex<Vec<String>>>,
     hover: Hit,
@@ -364,6 +364,10 @@ impl App {
                 "The dock and its music strip close; the Windows taskbar and your desktop icons come back as they were.",
                 "Dock ve müzik şeridi kapanır; Windows görev çubuğu ve masaüstü simgelerin eski haline döner."
             ),
+            tools::CLICKER => t!(
+                "Its trigger key is released and its settings are deleted.",
+                "Tetik tuşu bırakılır, ayarları silinir."
+            ),
             _ => t!(
                 "The tunnel closes; the service, network adapter and your server link are deleted.",
                 "Tünel kapanır; hizmet, ağ bağdaştırıcısı ve sunucu bağlantın silinir."
@@ -374,7 +378,7 @@ impl App {
             format!("Turn off {name}?\n\n{detail}\n\nNo trace of it is left on this computer; you can turn it on again any time."),
             format!("{name} kapatılsın mı?\n\n{detail}\n\nBilgisayarda hiçbir izi kalmaz; istediğin zaman yeniden açabilirsin.")
         ));
-        unsafe { MessageBoxW(Some(self.hwnd), PCWSTR(text.as_ptr()), w!("hive"), MB_YESNO | MB_ICONQUESTION) == IDYES }
+        unsafe { MessageBoxW(Some(self.hwnd), PCWSTR(text.as_ptr()), w!("winloom"), MB_YESNO | MB_ICONQUESTION) == IDYES }
     }
 
     /// Kurulum ya da kaldırma arka planda; bitince WM_TOOL_SETUP gelir.
@@ -485,8 +489,8 @@ impl App {
         toggle_rect(c.r - 20.0, c.cy())
     }
 
-    /// hive'ı kaldır: önce kurulu bütün araçlar (her biri kendi kalıntı denetimiyle), sonra
-    /// hive'ın kendi kayıtları ve kısayolları; klasörü süreç kapanınca silinir.
+    /// winloom'ı kaldır: önce kurulu bütün araçlar (her biri kendi kalıntı denetimiyle), sonra
+    /// winloom'ın kendi kayıtları ve kısayolları; klasörü süreç kapanınca silinir.
     fn start_self_remove(&mut self) {
         if self.removing_self || self.busy.iter().any(Option::is_some) {
             return;
@@ -495,24 +499,24 @@ impl App {
         let names: Vec<&str> = tools.iter().map(|&i| TOOLS[i].name()).collect();
         let list = names.join(", ");
         let text = wide(&match (crate::i18n::turkish(), names.is_empty()) {
-            (false, true) => "Remove hive?\n\nNo trace is left on this computer.".to_string(),
+            (false, true) => "Remove winloom?\n\nNo trace is left on this computer.".to_string(),
             (false, false) => format!(
-                "Remove hive and the tools that are on ({list})?\n\nTheir settings and data are deleted too; no trace is \
+                "Remove winloom and the tools that are on ({list})?\n\nTheir settings and data are deleted too; no trace is \
                  left on this computer. The soundboard and the tunnel ask for administrator permission."
             ),
-            (true, true) => "hive kaldırılsın mı?\n\nBilgisayarda hiçbir iz kalmaz.".to_string(),
+            (true, true) => "winloom kaldırılsın mı?\n\nBilgisayarda hiçbir iz kalmaz.".to_string(),
             (true, false) => format!(
-                "hive ve açık araçlar ({list}) kaldırılsın mı?\n\nAraçların ayarları ve verileri de silinir; \
+                "winloom ve açık araçlar ({list}) kaldırılsın mı?\n\nAraçların ayarları ve verileri de silinir; \
                  bilgisayarda hiçbir iz kalmaz. Soundboard ve Tünel için yönetici izni istenir."
             ),
         });
         let yes = unsafe {
-            MessageBoxW(Some(self.hwnd), PCWSTR(text.as_ptr()), w!("hive"), MB_YESNO | MB_ICONWARNING) == IDYES
+            MessageBoxW(Some(self.hwnd), PCWSTR(text.as_ptr()), w!("winloom"), MB_YESNO | MB_ICONWARNING) == IDYES
         };
         if !yes {
             return;
         }
-        log!("hive kaldırılıyor: {names:?}");
+        log!("winloom kaldırılıyor: {names:?}");
         self.tools.iter_mut().for_each(|t| *t = None);
         self.page = Page::Settings;
         self.removing_self = true;
@@ -536,7 +540,7 @@ impl App {
     fn self_remove_done(&mut self) {
         let errors = std::mem::take(&mut *self.self_errors.lock().unwrap());
         if errors.is_empty() {
-            log!("hive kaldırıldı");
+            log!("winloom kaldırıldı");
             crate::shell::remove_self_later();
             unsafe {
                 let _ = DestroyWindow(self.hwnd);
@@ -544,10 +548,10 @@ impl App {
             return;
         }
         self.removing_self = false;
-        let head = t!("hive could not be removed; nothing was left half done:", "hive kaldırılamadı, hiçbir şey yarım bırakılmadı:");
+        let head = t!("winloom could not be removed; nothing was left half done:", "winloom kaldırılamadı, hiçbir şey yarım bırakılmadı:");
         let text = wide(&format!("{head}\n\n{}", errors.join("\n")));
         unsafe {
-            MessageBoxW(Some(self.hwnd), PCWSTR(text.as_ptr()), w!("hive"), MB_OK | MB_ICONERROR);
+            MessageBoxW(Some(self.hwnd), PCWSTR(text.as_ptr()), w!("winloom"), MB_OK | MB_ICONERROR);
         }
         self.sync_tools();
     }
@@ -816,8 +820,8 @@ impl App {
             w,
             t!("Tools", "Araçlar"),
             t!(
-                "All of them come with hive: turn on what you want. Turned off, a tool leaves no trace.",
-                "Hepsi hive ile gelir: istediğini aç. Kapattığın araç bilgisayarda iz bırakmaz."
+                "All of them come with winloom: turn on what you want. Turned off, a tool leaves no trace.",
+                "Hepsi winloom ile gelir: istediğini aç. Kapattığın araç bilgisayarda iz bırakmaz."
             ),
         );
         g.clip(Rect::new(self.side_w(w), HEADER + 40.0, w, h), || {
@@ -915,8 +919,8 @@ impl App {
             Status::Checking => t!("Looking for a new version…", "Yeni sürüm var mı bakılıyor…").to_string(),
             Status::Current => t!("This is the latest version", "En son sürüm bu").to_string(),
             Status::Ready(v) => t!(
-                format!("{v} is ready · installs now or the next time hive starts"),
-                format!("{v} hazır · şimdi ya da hive bir sonraki açılışında kurulur")
+                format!("{v} is ready · installs now or the next time winloom starts"),
+                format!("{v} hazır · şimdi ya da winloom bir sonraki açılışında kurulur")
             ),
             Status::Failed(e) => t!(format!("Could not check: {e}"), format!("Bakılamadı: {e}")),
             Status::Idle if self.auto_update => {
@@ -939,12 +943,12 @@ impl App {
         toggle(g, toggle_rect(r.r, r.cy()), self.auto_update, accent(), !dev);
 
         let r = self.settings_row(5, w);
-        let sub = t!("hive and the tools' engines shut down completely", "hive ve araçların motorları tamamen kapanır");
+        let sub = t!("winloom and the tools' engines shut down completely", "winloom ve araçların motorları tamamen kapanır");
         setting_row(g, r, t!("Quit", "Kapat"), sub, 120.0);
         button(g, self.quit_rect(w), t!("Quit", "Çık"), None, None, self.hover == Hit::Quit);
 
         let r = self.settings_row(5, w);
-        let title = t!("Remove hive", "hive'ı kaldır");
+        let title = t!("Remove winloom", "winloom'ı kaldır");
         if self.removing_self {
             let sub = t!("Removing… each tool is removed and checked in turn", "Kaldırılıyor… araçlar sırayla kaldırılıp denetleniyor");
             setting_row(g, r, title, sub, 120.0);
@@ -1122,7 +1126,7 @@ impl App {
     }
 
     /// İkinci kopyadan ya da komut satırından: sekmeyi aç; "kaldir" ise (Windows'un Uygulamalar
-    /// listesinden) hive'ı kaldırmayı başlat.
+    /// listesinden) winloom'ı kaldırmayı başlat.
     fn open_tab(&mut self, tab: &str) {
         if tab.trim() == "kaldir" {
             self.select(Page::Settings);
@@ -1332,8 +1336,8 @@ impl App {
                 {
                     self.update_told = true;
                     let text = t!(
-                        format!("hive {v} is ready: it installs the next time hive starts, or now from Settings."),
-                        format!("hive {v} hazır: bir sonraki açılışta kurulur, istersen Ayarlar'dan hemen."),
+                        format!("winloom {v} is ready: it installs the next time winloom starts, or now from Settings."),
+                        format!("winloom {v} hazır: bir sonraki açılışta kurulur, istersen Ayarlar'dan hemen."),
                     );
                     self.tray.notify(t!("Update ready", "Güncelleme hazır"), &text);
                 }
@@ -1434,7 +1438,7 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
         return nc_calc_size(hwnd, msg, wp, lp);
     }
     // Mica'da pencere düğmeleri Windows'un: üstüne gelme, basma ve tıklama onda. Kapat düğmesi
-    // WM_CLOSE gönderir, o da hive'ı tepsiye gizler.
+    // WM_CLOSE gönderir, o da winloom'ı tepsiye gizler.
     if MICA.load(Ordering::Relaxed) {
         let mut r = LRESULT(0);
         if unsafe { windows::Win32::Graphics::Dwm::DwmDefWindowProc(hwnd, msg, wp, lp, &mut r) }.as_bool() {
@@ -1515,7 +1519,7 @@ pub fn run(hidden: bool, tab: Option<String>) -> Res<()> {
         let hwnd = CreateWindowExW(
             WINDOW_EX_STYLE(0),
             CLASS,
-            w!("hive"),
+            w!("winloom"),
             WS_OVERLAPPEDWINDOW,
             CW_USEDEFAULT,
             CW_USEDEFAULT,

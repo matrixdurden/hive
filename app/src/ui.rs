@@ -277,13 +277,133 @@ pub fn status(g: &Gfx, l: f32, cy: f32, dot: Color, text: &str, color: Color, ma
     (l + 16.0 + tw).min(max_r)
 }
 
+/// Tek satırlık metin alanı: yazma, Backspace, Ctrl+A (hepsini seç), Ctrl+V, Esc, Enter.
+/// Odak sayfanın elindedir: `focused` iken sayfa tuşları ve karakterleri buraya verir.
+#[derive(Default)]
+pub struct TextField {
+    pub text: String,
+    /// Yazının tamamı seçili (yeni yazı yerine geçer).
+    pub selected: bool,
+    pub focused: bool,
+    pub max: usize,
+}
+
+/// `TextField::key`'in sonucu.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum FieldKey {
+    Enter,
+    Escape,
+    Handled,
+    Ignored,
+}
+
+impl TextField {
+    pub fn new(max: usize) -> Self {
+        Self { max, ..Default::default() }
+    }
+
+    pub fn set(&mut self, text: &str) {
+        self.text = text.chars().take(self.max).collect();
+        self.selected = false;
+    }
+
+    pub fn focus(&mut self, select_all: bool) {
+        self.focused = true;
+        self.selected = select_all && !self.text.is_empty();
+    }
+
+    pub fn blur(&mut self) {
+        self.focused = false;
+        self.selected = false;
+    }
+
+    fn push_str(&mut self, s: &str) {
+        if std::mem::take(&mut self.selected) {
+            self.text.clear();
+        }
+        let room = self.max.saturating_sub(self.text.chars().count());
+        self.text.extend(s.chars().filter(|c| !c.is_control()).take(room));
+    }
+
+    /// Yazılan karakter (WM_CHAR); kullandıysa `true`.
+    pub fn char(&mut self, c: char) -> bool {
+        if !self.focused || c.is_control() {
+            return false;
+        }
+        self.push_str(&c.to_string());
+        true
+    }
+
+    /// Tuş (WM_KEYDOWN); `ctrl` basılı mı.
+    pub fn key(&mut self, vk: u16, ctrl: bool) -> FieldKey {
+        use windows::Win32::UI::Input::KeyboardAndMouse::{VIRTUAL_KEY, VK_A, VK_BACK, VK_DELETE, VK_ESCAPE, VK_RETURN, VK_V};
+        if !self.focused {
+            return FieldKey::Ignored;
+        }
+        match VIRTUAL_KEY(vk) {
+            VK_RETURN => FieldKey::Enter,
+            VK_ESCAPE => FieldKey::Escape,
+            VK_BACK | VK_DELETE => {
+                if std::mem::take(&mut self.selected) || ctrl {
+                    self.text.clear();
+                } else if VIRTUAL_KEY(vk) == VK_BACK {
+                    self.text.pop();
+                }
+                FieldKey::Handled
+            }
+            VK_A if ctrl => {
+                self.selected = !self.text.is_empty();
+                FieldKey::Handled
+            }
+            VK_V if ctrl => {
+                if let Some(t) = crate::util::clipboard_text() {
+                    let line = t.lines().next().unwrap_or("").trim().to_string();
+                    self.push_str(&line);
+                }
+                FieldKey::Handled
+            }
+            _ => FieldKey::Ignored,
+        }
+    }
+
+    /// Kutuyu çizer: odaktayken vurgu renginde alt çizgi ve imleç, boşken `placeholder`.
+    pub fn paint(&self, g: &Gfx, r: Rect, placeholder: &str) {
+        g.fill(r, 4.0, pal().hover);
+        g.stroke(r, 4.0, pal().line, 1.0);
+        if self.focused {
+            g.fill(Rect::new(r.l + 1.0, r.b - 2.0, r.r - 1.0, r.b), 1.0, accent());
+        }
+        let inner = Rect::new(r.l + 10.0, r.t, r.r - 10.0, r.b);
+        if self.text.is_empty() {
+            g.text(placeholder, &g.f.text, inner, pal().faint);
+        } else {
+            let tw = g.measure(&self.text, &g.f.text);
+            if self.selected {
+                g.fill(Rect::new(inner.l - 2.0, r.t + 7.0, (inner.l + tw + 2.0).min(inner.r), r.b - 7.0), 2.0, accent().alpha(0.35));
+            }
+            g.clip(inner, || {
+                // Uzun yazı sola kayar: sonu hep görünür.
+                let shift = (tw - inner.w()).max(0.0);
+                g.text(&self.text, &g.f.text, Rect::new(inner.l - shift, r.t, inner.l - shift + tw + 4.0, r.b), pal().text);
+            });
+            if self.focused && !self.selected {
+                let x = (inner.l + tw + 1.0).min(inner.r);
+                g.fill(Rect::new(x, r.t + 8.0, x + 1.0, r.b - 8.0), 0.0, pal().text);
+            }
+        }
+        if self.focused && self.text.is_empty() {
+            g.fill(Rect::new(inner.l, r.t + 8.0, inner.l + 1.0, r.b - 8.0), 0.0, pal().text);
+        }
+    }
+}
+
 /// `s`'yi `cx` etrafında ortalar (tek satır).
 pub fn text_center(g: &Gfx, s: &str, format: &windows::Win32::Graphics::DirectWrite::IDWriteTextFormat, cx: f32, t: f32, b: f32, c: Color) {
     let tw = g.measure(s, format);
     g.text(s, format, Rect::new(cx - tw / 2.0 - 1.0, t, cx + tw / 2.0 + 2.0, b), c);
 }
 
-/// Araç sayfası: hive başlıkta ikonu ve adı çizer, olayları sayfanın kendi köşesine göre
+/// Araç sayfası: winloom başlıkta ikonu ve adı çizer, olayları sayfanın kendi köşesine göre
 /// (x - kenar çubuğu) iletir. Zamanlayıcı ve kendi mesajları ayrıca yönlendirilir.
 pub trait ToolPage {
     /// Sayfanın boyutu, başlıktaki adın bittiği x ve başlık düğmelerinin sağ sınırı (pencere
@@ -311,7 +431,7 @@ pub trait ToolPage {
     }
     /// Sayfa ekrana geldi ya da gitti.
     fn set_visible(&mut self, visible: bool);
-    /// hive'ın penceresine gelen, aracın kendi mesajı (WM_APP + n), zamanlayıcısı ya da
+    /// winloom'ın penceresine gelen, aracın kendi mesajı (WM_APP + n), zamanlayıcısı ya da
     /// kısayolu: işlediyse dönüş değeri. Her araç yalnızca kendi kimliklerine bakar.
     fn message(&mut self, _g: &mut Gfx, _msg: u32, _wp: WPARAM, _lp: LPARAM) -> Option<LRESULT> {
         None
@@ -320,7 +440,7 @@ pub trait ToolPage {
     fn binding(&self) -> bool {
         false
     }
-    /// hive'ın penceresi odağı kaybetti.
+    /// winloom'ın penceresi odağı kaybetti.
     fn kill_focus(&mut self) {}
     /// Sürüklenen ya da seçilen dosyalar.
     fn add_files(&mut self, _paths: Vec<PathBuf>) {}

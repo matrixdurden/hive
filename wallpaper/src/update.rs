@@ -2,7 +2,7 @@
 //! doğrular ve kurulum klasörüne `cheshire.exe.yeni` olarak koyar. Geçiş `apply` ile olur: çalışan
 //! exe silinemez ama yeniden adlandırılabilir, bu yüzden ayrı bir güncelleyici programa gerek yok.
 //!
-//! Motorun eski, tek başına sürümünden kalma: hive'ın içinde (hub modu) çalışmaz, motoru hive
+//! Motorun eski, tek başına sürümünden kalma: winloom'ın içinde (hub modu) çalışmaz, motoru winloom
 //! günceller. Yayın düzeni: etiket `vX.Y.Z`, varlıklar `cheshire.exe` ve `cheshire.exe.sha256`.
 //! Taslak ve ön sürümler `latest` sayılmaz, kullanıcılara gitmez.
 

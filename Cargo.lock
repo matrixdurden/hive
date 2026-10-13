@@ -187,16 +187,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "hive"
-version = "0.4.2"
-dependencies = [
- "soundboard",
- "windows",
- "windows-core",
- "windows-numerics",
-]
-
-[[package]]
 name = "indexmap"
 version = "2.14.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -933,6 +923,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3949bd5b99cafdf1c7ca86b43ca564028dfe27d66958f2470940f73d86d75b37"
 dependencies = [
  "windows-link",
+]
+
+[[package]]
+name = "winloom"
+version = "0.5.0"
+dependencies = [
+ "soundboard",
+ "windows",
+ "windows-core",
+ "windows-numerics",
 ]
 
 [[package]]

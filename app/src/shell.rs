@@ -1,4 +1,4 @@
-//! Başlat menüsü: hive ve kurulu her araç için bir kısayol. Araç kısayolu hive'ı
+//! Başlat menüsü: winloom ve kurulu her araç için bir kısayol. Araç kısayolu winloom'ı
 //! o aracın sekmesinde açar (`--sekme`), simgesi aracın kendi simgesidir; Windows aramasında
 //! "Pil" yazınca normal bir uygulama gibi çıkar.
 
@@ -21,7 +21,7 @@ fn programs_dir() -> Option<PathBuf> {
     Some(PathBuf::from(appdata).join(r"Microsoft\Windows\Start Menu\Programs"))
 }
 
-/// Başlat menüsündeki "<ad> · hive" kısayolunu siler (artık olmayan bir aracınki).
+/// Başlat menüsündeki "<ad> · winloom" kısayolunu siler (artık olmayan bir aracınki).
 pub fn remove_link(name: &str) {
     if let Some(d) = programs_dir() {
         let _ = std::fs::remove_file(d.join(link_name(name)));
@@ -55,10 +55,10 @@ fn create(link: &Path, exe: &str, args: &str, icon: Option<&Path>, description: 
     }
 }
 
-/// Kısayolun dosya adı: Başlat menüsünde "Pil · hive" (adlar genel olduğundan başka
+/// Kısayolun dosya adı: Başlat menüsünde "Pil · winloom" (adlar genel olduğundan başka
 /// programlarınkiyle karışmasın).
 fn link_name(name: &str) -> String {
-    format!("{name} · hive.lnk")
+    format!("{name} · winloom.lnk")
 }
 
 fn tool_link(i: usize) -> Option<PathBuf> {
@@ -71,6 +71,7 @@ fn stale_links(dir: &Path, i: usize) -> Vec<PathBuf> {
     let current = link_name(t.name());
     [format!("{}.lnk", t.id), link_name(t.names[0]), link_name(t.names[1])]
         .into_iter()
+        .chain(OLD_TOOL_NAMES.iter().map(|n| link_name(n)))
         .filter(|n| *n != current)
         .map(|n| dir.join(n))
         .collect()
@@ -104,7 +105,7 @@ pub fn tool_leftovers(i: usize) -> Vec<String> {
 pub fn sync_shortcuts(installed: &[bool]) {
     let (Some(exe), Some(dir)) = (util::installed_copy(), programs_dir()) else { return };
     let _ = std::fs::remove_file(dir.join("matrixtools.lnk")); // eski adı
-    if let Err(e) = create(&dir.join("hive.lnk"), &exe, "", None, t!("Your Windows tools in one place", "Windows araçların tek yerde")) {
+    if let Err(e) = create(&dir.join("winloom.lnk"), &exe, "", None, t!("Your Windows tools in one place", "Windows araçların tek yerde")) {
         log!("Başlat menüsü kısayolu yazılamadı: {e}");
         return;
     }
@@ -130,7 +131,73 @@ pub fn sync_shortcuts(installed: &[bool]) {
     }
 }
 
-const UNINSTALL: PCWSTR = w!(r"Software\Microsoft\Windows\CurrentVersion\Uninstall\hive");
+const UNINSTALL: PCWSTR = w!(r"Software\Microsoft\Windows\CurrentVersion\Uninstall\winloom");
+
+// --- Eski ad: hive (0.4 ve öncesi) ---
+
+/// Eski sürümün pencere sınıfı.
+const OLD_CLASS: PCWSTR = w!("hive");
+const OLD_UNINSTALL: PCWSTR = w!(r"Software\Microsoft\Windows\CurrentVersion\Uninstall\hive");
+
+/// Araçların eski görünen adları: Başlat menüsündeki eski kısayollar bunlarla silinir.
+const OLD_TOOL_NAMES: [&str; 3] = ["Soundboard", "Tunnel", "Tünel"];
+
+/// hive olarak kurulmuş sürümden kalanlar winloom'a taşınır: `Programs\hive` klasörü (ayarlar,
+/// araç verileri, log) olduğu gibi `Programs\winloom` olur, Windows ile başlama görevi, Uygulamalar
+/// kaydı ve Başlat menüsü kısayolları yenisiyle değiştirilir. Çalışan eski hive varsa önce kapatılır.
+/// Bir kez olur; sonraki açılışlarda eski klasör yoktur.
+pub fn migrate_from_hive() {
+    let old = util::local_programs().join("hive");
+    if !old.is_dir() {
+        return;
+    }
+    stop_running();
+    let new = util::data_dir();
+    if !new.exists() {
+        match std::fs::rename(&old, &new) {
+            Ok(()) => log!("hive klasörü winloom'a taşındı"),
+            Err(e) => {
+                log!("hive klasörü taşınamadı: {e}");
+                return;
+            }
+        }
+    } else {
+        // Yeni klasör zaten var (geliştirme kopyası kurulmuş): eskiden yalnızca eksikler gelir.
+        for e in std::fs::read_dir(&old).into_iter().flatten().flatten() {
+            let dst = new.join(e.file_name());
+            if !dst.exists() {
+                let _ = std::fs::rename(e.path(), dst);
+            }
+        }
+        let _ = std::fs::remove_dir_all(&old);
+    }
+    for f in ["hive.exe", "hive.log", "kurulum.log"] {
+        let _ = std::fs::remove_file(new.join(f));
+    }
+    unsafe {
+        let _ = windows::Win32::System::Com::CoInitializeEx(None, windows::Win32::System::Com::COINIT_APARTMENTTHREADED);
+        let _ = RegDeleteTreeW(HKEY_CURRENT_USER, OLD_UNINSTALL);
+        let _ = RegDeleteKeyValueW(HKEY_CURRENT_USER, RUN, OLD_CLASS);
+        let _ = RegDeleteKeyValueW(HKEY_CURRENT_USER, RUN_APPROVED, OLD_CLASS);
+    }
+    // Eski görev varsa yenisi onun yerine kurulur (kullanıcı kapatmışsa kapalı kalır).
+    let old_task = BSTR::from(format!("hive ({})", std::env::var("USERNAME").unwrap_or_default()));
+    if let Ok(root) = task_root()
+        && unsafe { root.GetTask(&old_task) }.is_ok()
+    {
+        let _ = unsafe { root.DeleteTask(&old_task, 0) };
+        if let Some(exe) = util::installed_copy() {
+            set_autostart(Some(&exe));
+        }
+    }
+    if let Some(dir) = programs_dir() {
+        let _ = std::fs::remove_file(dir.join("hive.lnk"));
+        for name in TOOLS.iter().flat_map(|t| t.names).chain(OLD_TOOL_NAMES) {
+            let _ = std::fs::remove_file(dir.join(format!("{name} · hive.lnk")));
+        }
+    }
+    log!("hive kaydı winloom'a taşındı");
+}
 
 fn set_str(key: HKEY, name: PCWSTR, value: &str) {
     let v = wide(value);
@@ -145,7 +212,7 @@ fn set_dword(key: HKEY, name: PCWSTR, value: u32) {
     }
 }
 
-/// Windows'un Uygulamalar listesine kayıt: oradan kaldırınca `hive --kaldir` çalışır.
+/// Windows'un Uygulamalar listesine kayıt: oradan kaldırınca `winloom --kaldir` çalışır.
 pub fn register_app() {
     let Some(exe) = util::installed_copy() else { return };
     let size_kb = std::fs::metadata(&exe).map_or(0, |m| m.len() / 1024) as u32;
@@ -156,7 +223,7 @@ pub fn register_app() {
         {
             return;
         }
-        set_str(key, w!("DisplayName"), "hive");
+        set_str(key, w!("DisplayName"), "winloom");
         set_str(key, w!("DisplayVersion"), env!("CARGO_PKG_VERSION"));
         set_str(key, w!("Publisher"), "matrixdurden");
         set_str(key, w!("DisplayIcon"), &format!("\"{exe}\",0"));
@@ -174,9 +241,9 @@ const RUN_APPROVED: PCWSTR = w!(r"Software\Microsoft\Windows\CurrentVersion\Expl
 
 /// Windows ile başlama, Görev Zamanlayıcı'da oturum açılınca çalışan bir görevle: Run kaydındakiler
 /// masaüstü yüklendikten sonra hep birlikte açılır, görev ise ondan önce ve gecikmesiz çalışır.
-/// Böylece hive ilk açılan olur. Görev kullanıcıya özel, yönetici izni gerekmez.
+/// Böylece winloom ilk açılan olur. Görev kullanıcıya özel, yönetici izni gerekmez.
 fn task_name() -> String {
-    format!("hive ({})", std::env::var("USERNAME").unwrap_or_default())
+    format!("winloom ({})", std::env::var("USERNAME").unwrap_or_default())
 }
 
 fn task_root() -> windows::core::Result<windows::Win32::System::TaskScheduler::ITaskFolder> {
@@ -224,7 +291,7 @@ pub fn set_autostart(exe: Option<&str>) {
     let xml = format!(
         r#"<?xml version="1.0" encoding="UTF-16"?>
 <Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
-  <RegistrationInfo><Author>hive</Author><Description>{desc}</Description></RegistrationInfo>
+  <RegistrationInfo><Author>winloom</Author><Description>{desc}</Description></RegistrationInfo>
   <Triggers><LogonTrigger><Enabled>true</Enabled><UserId>{user}</UserId></LogonTrigger></Triggers>
   <Principals><Principal id="Author"><UserId>{user}</UserId><LogonType>InteractiveToken</LogonType><RunLevel>LeastPrivilege</RunLevel></Principal></Principals>
   <Settings>
@@ -236,7 +303,7 @@ pub fn set_autostart(exe: Option<&str>) {
   </Settings>
   <Actions Context="Author"><Exec><Command>{exe}</Command><Arguments>--hidden</Arguments></Exec></Actions>
 </Task>"#,
-        desc = xml_escape(t!("Starts hive first when you sign in", "Oturum açınca hive'ı ilk sırada başlatır")),
+        desc = xml_escape(t!("Starts winloom first when you sign in", "Oturum açınca winloom'ı ilk sırada başlatır")),
         exe = xml_escape(exe),
     );
     let none = VARIANT::default();
@@ -253,7 +320,7 @@ pub fn set_autostart(exe: Option<&str>) {
 pub fn migrate_autostart() {
     let Some(exe) = util::installed_copy() else { return };
     unsafe {
-        if RegGetValueW(HKEY_CURRENT_USER, RUN, w!("hive"), RRF_RT_REG_SZ, None, None, None).is_err() {
+        if RegGetValueW(HKEY_CURRENT_USER, RUN, w!("winloom"), RRF_RT_REG_SZ, None, None, None).is_err() {
             return;
         }
         let mut flags = [0u8; 12];
@@ -261,7 +328,7 @@ pub fn migrate_autostart() {
         let disabled = RegGetValueW(
             HKEY_CURRENT_USER,
             RUN_APPROVED,
-            w!("hive"),
+            w!("winloom"),
             RRF_RT_REG_BINARY,
             None,
             Some(flags.as_mut_ptr().cast()),
@@ -272,23 +339,23 @@ pub fn migrate_autostart() {
         if !disabled {
             set_autostart(Some(&exe));
         }
-        let _ = RegDeleteKeyValueW(HKEY_CURRENT_USER, RUN, w!("hive"));
-        let _ = RegDeleteKeyValueW(HKEY_CURRENT_USER, RUN_APPROVED, w!("hive"));
+        let _ = RegDeleteKeyValueW(HKEY_CURRENT_USER, RUN, w!("winloom"));
+        let _ = RegDeleteKeyValueW(HKEY_CURRENT_USER, RUN_APPROVED, w!("winloom"));
     }
     log!("Windows ile başlama Run kaydından göreve taşındı");
 }
 
-/// hive'ın kendi izleri: Uygulamalar kaydı, Windows ile başlama, Başlat menüsü kısayolu.
+/// winloom'ın kendi izleri: Uygulamalar kaydı, Windows ile başlama, Başlat menüsü kısayolu.
 /// Klasörü süreç kapandıktan sonra `remove_self_later` siler.
 pub fn unregister_app() {
     set_autostart(None);
     unsafe {
         let _ = RegDeleteTreeW(HKEY_CURRENT_USER, UNINSTALL);
-        let _ = RegDeleteKeyValueW(HKEY_CURRENT_USER, RUN, w!("hive"));
-        let _ = RegDeleteKeyValueW(HKEY_CURRENT_USER, RUN_APPROVED, w!("hive"));
+        let _ = RegDeleteKeyValueW(HKEY_CURRENT_USER, RUN, w!("winloom"));
+        let _ = RegDeleteKeyValueW(HKEY_CURRENT_USER, RUN_APPROVED, w!("winloom"));
     }
     if let Some(dir) = programs_dir() {
-        let _ = std::fs::remove_file(dir.join("hive.lnk"));
+        let _ = std::fs::remove_file(dir.join("winloom.lnk"));
     }
 }
 
@@ -304,13 +371,16 @@ pub fn remove_self_later() {
         .spawn();
 }
 
-/// Çalışan hive'ı kapatır: önce kibarca (WM_EXIT), 5 saniyede kapanmazsa (eski sürüm mesajı
-/// tanımıyorsa) süreci sonlandırır. wallpaper motoru hive'ın gittiğini görüp kendisi kapanır.
+/// Çalışan winloom'ı kapatır: önce kibarca (WM_EXIT), 5 saniyede kapanmazsa (eski sürüm mesajı
+/// tanımıyorsa) süreci sonlandırır. wallpaper motoru winloom'ın gittiğini görüp kendisi kapanır.
 fn stop_running() {
     use windows::Win32::Foundation::{CloseHandle, LPARAM, WPARAM};
     use windows::Win32::System::Threading::{OpenProcess, PROCESS_TERMINATE, TerminateProcess};
     use windows::Win32::UI::WindowsAndMessaging::{FindWindowW, GetWindowThreadProcessId, PostMessageW};
-    let find = || unsafe { FindWindowW(crate::app::CLASS, PCWSTR::null()).ok() };
+    // Eski adıyla (hive) çalışan sürüm de kapatılır: güncelleme onun üstüne gelir.
+    let find = || unsafe {
+        FindWindowW(crate::app::CLASS, PCWSTR::null()).ok().or_else(|| FindWindowW(OLD_CLASS, PCWSTR::null()).ok())
+    };
     let Some(h) = find() else { return };
     unsafe {
         let _ = PostMessageW(Some(h), crate::app::WM_EXIT, WPARAM(0), LPARAM(0));
@@ -329,18 +399,19 @@ fn stop_running() {
             let _ = CloseHandle(p);
         }
     }
-    log!("çalışan hive kapanmadı, sonlandırıldı (pid {pid})");
+    log!("çalışan winloom kapanmadı, sonlandırıldı (pid {pid})");
 }
 
-/// İndirilen exe (ya da `hive --kur`): kendini %LOCALAPPDATA%\Programs\hive'a kurar ve oradan
-/// başlatır. Çalışan bir hive varsa önce kapanır; aynı yol güncelleme için de kullanılır.
+/// İndirilen exe (ya da `winloom --kur`): kendini %LOCALAPPDATA%\Programs\winloom'a kurar ve oradan
+/// başlatır. Çalışan bir winloom varsa önce kapanır; aynı yol güncelleme için de kullanılır.
 pub fn install_self(hidden: bool) -> Result<(), String> {
     use std::os::windows::process::CommandExt;
     let src = std::env::current_exe().map_err(|e| e.to_string())?;
-    let dst = util::data_dir().join("hive.exe");
+    let dst = util::data_dir().join("winloom.exe");
     // İlk kurulumda Windows ile başlama açık gelir; güncelleme kullanıcının seçimine dokunmaz.
     let fresh = !dst.exists();
     stop_running();
+    migrate_from_hive();
     std::fs::create_dir_all(util::data_dir()).map_err(|e| e.to_string())?;
     if src != dst {
         // Kapanan kopya exe'yi birkaç saniye tutabilir.
@@ -365,12 +436,12 @@ pub fn install_self(hidden: bool) -> Result<(), String> {
     }
     let mut cmd = std::process::Command::new(&dst);
     if hidden {
-        // Kendiliğinden yapılan güncelleme: pencere açılmaz, hive tepside başlar.
+        // Kendiliğinden yapılan güncelleme: pencere açılmaz, winloom tepside başlar.
         cmd.arg("--hidden");
     }
     cmd.creation_flags(0x0000_0008) // DETACHED_PROCESS
         .spawn()
         .map_err(|e| e.to_string())?;
-    log!("hive kuruldu: {}", dst.display());
+    log!("winloom kuruldu: {}", dst.display());
     Ok(())
 }

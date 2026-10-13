@@ -1,4 +1,4 @@
-//! tunnel: ağ engellerini aşan tünel. Motoru bir Windows hizmeti (`tunnel`); kullanıcılar
+//! tunnel (VPN): ağ engellerini aşan tünel. Motoru bir Windows hizmeti (`rabbithole`); kullanıcılar
 //! onu yönetici izni olmadan başlatıp durdurabilir. Sayfa durumu hizmet yöneticisinden ve
 //! `%ProgramData%\tunnel` dosyalarından okur; yönetici isteyen işler (sunucu bağlantısı,
 //! Windows ile başlat) ve ağ testi için `tunnel.exe` çalıştırılır.
@@ -12,9 +12,8 @@ use std::time::{Duration, Instant};
 
 use windows::Win32::Foundation::*;
 use windows::Win32::Graphics::Gdi::InvalidateRect;
-use windows::Win32::System::DataExchange::{CloseClipboard, GetClipboardData, OpenClipboard};
-use windows::Win32::System::Memory::{GlobalLock, GlobalUnlock};
 use windows::Win32::System::Services::*;
+use windows::Win32::UI::Input::KeyboardAndMouse::SetFocus;
 use windows::Win32::UI::WindowsAndMessaging::*;
 use windows::core::{PCWSTR, w};
 
@@ -45,7 +44,7 @@ pub fn data_dir() -> PathBuf {
     std::env::var_os("ProgramData").map_or_else(|| PathBuf::from(r"C:\ProgramData"), PathBuf::from).join("rabbithole")
 }
 
-/// Hizmet kurulu mu (hive'da "kurulu" sayılmak için).
+/// Hizmet kurulu mu (winloom'da "kurulu" sayılmak için).
 pub fn installed() -> bool {
     Service::open(SERVICE_QUERY_STATUS).is_some()
 }
@@ -215,7 +214,7 @@ fn switch(target: Option<Mode>) -> Result<String, String> {
             let _ = ControlService(svc.svc, SERVICE_CONTROL_STOP, &mut ss);
         }
         if !svc.wait(SERVICE_STOPPED, Duration::from_secs(15)) {
-            return Err(t!("the tunnel did not stop within 15 seconds", "tünel 15 saniyede durmadı").into());
+            return Err(t!("the VPN did not stop within 15 seconds", "VPN 15 saniyede durmadı").into());
         }
     }
     let Some(mode) = target else { return Ok(t!("turned off", "kapatıldı").into()) };
@@ -241,37 +240,19 @@ pub fn run(args: &[&str]) -> Result<String, String> {
     }
 }
 
-fn clipboard_text(hwnd: HWND) -> Option<String> {
-    unsafe {
-        OpenClipboard(Some(hwnd)).ok()?;
-        let text = (|| {
-            let h = GetClipboardData(13).ok()?; // CF_UNICODETEXT
-            let hg = HGLOBAL(h.0);
-            let p = GlobalLock(hg) as *const u16;
-            if p.is_null() {
-                return None;
-            }
-            let mut n = 0;
-            while *p.add(n) != 0 {
-                n += 1;
-            }
-            let s = String::from_utf16_lossy(std::slice::from_raw_parts(p, n));
-            let _ = GlobalUnlock(hg);
-            Some(s)
-        })();
-        let _ = CloseClipboard();
-        text
-    }
-}
-
 #[derive(Clone, Copy, PartialEq, Debug)]
 enum Hit {
     None,
     Mode(usize),
+    /// Sunucu bağlantısı yazılan kutu.
+    Field,
+    /// Kutudakini kaydet.
     Link,
     Autostart,
     Doctor,
 }
+
+const LINK_MAX: usize = 4096;
 
 #[derive(Default)]
 struct Doctor {
@@ -289,6 +270,8 @@ pub struct Tunnel {
     result: Arc<Mutex<Option<Result<String, String>>>>,
     message: Option<(String, bool)>,
     doctor: Option<Arc<Mutex<Doctor>>>,
+    /// Sunucu bağlantısı (vless://) buraya yazılır ya da yapıştırılır.
+    link: TextField,
     scroll: f32,
     hover: Hit,
     pressed: Hit,
@@ -309,6 +292,7 @@ impl Tunnel {
             result: Arc::default(),
             message: None,
             doctor: None,
+            link: TextField::new(LINK_MAX),
             scroll: 0.0,
             hover: Hit::None,
             pressed: Hit::None,
@@ -376,14 +360,14 @@ impl Tunnel {
         self.spawn(label, move || switch(target));
     }
 
+    /// Kutudaki bağlantıyı kaydeder (sunucu denenir); olduysa kutu boşalır.
     fn add_link(&mut self) {
-        let text = clipboard_text(self.hwnd).unwrap_or_default();
-        let link = text.trim().to_string();
+        let link = self.link.text.trim().to_string();
         if !link.starts_with("vless://") {
             self.message = Some((
                 t!(
-                    "No vless:// link on the clipboard: copy the link from your server first",
-                    "Panoda vless:// bağlantısı yok: önce sunucundan aldığın bağlantıyı kopyala"
+                    "That is not a vless:// link: paste the link your server gave you",
+                    "Bu bir vless:// bağlantısı değil: sunucunun verdiği bağlantıyı yapıştır"
                 )
                 .into(),
                 true,
@@ -391,8 +375,17 @@ impl Tunnel {
             self.redraw();
             return;
         }
-        let added = t!("Server link added", "Sunucu bağlantısı eklendi");
+        if self.busy.is_some() {
+            return;
+        }
+        self.link.set("");
+        self.link.blur();
+        let added = t!("Server link saved", "Sunucu bağlantısı kaydedildi");
         self.spawn(t!("Trying the server…", "Sunucu deneniyor…"), move || run(&["client", &link]).map(|_| added.into()));
+    }
+
+    fn link_ok(&self) -> bool {
+        self.link.text.trim().starts_with("vless://")
     }
 
     fn toggle_autostart(&mut self) {
@@ -502,14 +495,21 @@ impl Tunnel {
     }
 
     fn row(&self, n: usize) -> Rect {
-        let t = self.mode_rect(0).b + 48.0 + n as f32 * 64.0;
-        Rect::new(PAD, t, self.w - PAD, t + 64.0)
+        let t = self.mode_rect(0).b + 36.0 + n as f32 * 56.0;
+        Rect::new(PAD, t, self.w - PAD, t + 56.0)
     }
 
+    /// Kaydet düğmesi (kutunun sağında).
     fn link_rect(&self, g: &Gfx) -> Rect {
-        let r = self.row(0);
-        let label = if self.st.host.is_some() { t!("Change", "Değiştir") } else { t!("Paste link", "Panodan ekle") };
-        button_rect_right(g, r.r, r.cy() - 17.0, label, false)
+        let r = self.row(1);
+        button_rect_right(g, r.r, r.cy() - 17.0, t!("Save", "Kaydet"), false)
+    }
+
+    /// Bağlantı kutusu: satırın genişliği, sağda düğmeye yer kalır.
+    fn field_rect(&self, g: &Gfx) -> Rect {
+        let r = self.row(1);
+        let b = self.link_rect(g);
+        Rect::new(r.l, r.cy() - 17.0, b.l - 10.0, r.cy() + 17.0)
     }
 
     fn hit(&self, g: &Gfx, x: f32, y: f32) -> Hit {
@@ -525,7 +525,10 @@ impl Tunnel {
         if self.link_rect(g).contains(x, y) {
             return Hit::Link;
         }
-        if self.row(1).contains(x, y) {
+        if self.field_rect(g).contains(x, y) {
+            return Hit::Field;
+        }
+        if self.row(2).contains(x, y) {
             return Hit::Autostart;
         }
         Hit::None
@@ -637,19 +640,22 @@ impl Tunnel {
             text_center(g, &m, &g.f.small, w / 2.0, t, t + 22.0, if err { pal().red } else { pal().muted });
         }
 
-        // Ayar satırları.
+        // Ayar satırları: sunucu (başlık, kutu + kaydet), Windows ile başlat.
         let r0 = self.row(0);
         let sub = match (&self.st.host, &self.st.name) {
-            (Some(h), Some(n)) => format!("{n} · {h}"),
-            (Some(h), None) => h.clone(),
-            _ => t!("None · copy the vless:// link from your server and paste it here", "Yok · sunucundan aldığın vless:// bağlantısını kopyalayıp buradan ekle").into(),
+            (Some(h), Some(n)) => format!("{} {n} · {h}", t!("Now:", "Şimdiki:")),
+            (Some(h), None) => format!("{} {h}", t!("Now:", "Şimdiki:")),
+            _ => t!("None yet · paste the vless:// link your server gave you", "Henüz yok · sunucunun verdiği vless:// bağlantısını yapıştır").into(),
         };
-        setting_row(g, r0, t!("Server link", "Sunucu bağlantısı"), &sub, 150.0);
+        g.text(t!("Server", "Sunucu"), &g.f.strong, Rect::new(r0.l, r0.t + 12.0, r0.r, r0.cy()), pal().text);
+        g.text(&sub, &g.f.small, Rect::new(r0.l, r0.cy(), r0.r, r0.b - 12.0), pal().muted);
+        self.link.paint(g, self.field_rect(g), "vless://…");
         let lr = self.link_rect(g);
-        let label = if self.st.host.is_some() { t!("Change", "Değiştir") } else { t!("Paste link", "Panodan ekle") };
-        button(g, lr, label, None, None, self.hover == Hit::Link);
+        let primary = self.link_ok().then(accent);
+        button(g, lr, t!("Save", "Kaydet"), None, primary, self.hover == Hit::Link);
+        g.fill(Rect::new(r0.l, self.row(1).b - 1.0, r0.r, self.row(1).b), 0.0, pal().hover);
 
-        let r1 = self.row(1);
+        let r1 = self.row(2);
         let sub = t!("Comes back in the mode it was left · needs administrator", "Açılışta kaldığı moda döner · yönetici izni ister");
         setting_row(g, r1, t!("Start with Windows", "Windows ile başlat"), sub, 120.0);
         toggle(g, toggle_rect(r1.r, r1.cy()), self.st.autostart, accent(), true);
@@ -671,6 +677,7 @@ impl Tunnel {
                 let _ = KillTimer(Some(self.hwnd), TIMER_POLL);
                 let _ = KillTimer(Some(self.hwnd), TIMER_PING);
                 self.hover = Hit::None;
+                self.link.blur();
             }
         }
     }
@@ -725,6 +732,18 @@ impl ToolPage for Tunnel {
 
     fn mouse_down(&mut self, g: &Gfx, x: f32, y: f32) {
         self.pressed = self.hit(g, x, y);
+        let was = self.link.focused;
+        if self.pressed == Hit::Field {
+            self.link.focus(false);
+            unsafe {
+                let _ = SetFocus(Some(self.hwnd));
+            }
+        } else if self.pressed != Hit::Link {
+            self.link.blur();
+        }
+        if was != self.link.focused {
+            self.redraw();
+        }
     }
 
     fn mouse_up(&mut self, g: &Gfx, x: f32, y: f32) {
@@ -733,6 +752,7 @@ impl ToolPage for Tunnel {
             return;
         }
         match hit {
+            Hit::Field => {}
             Hit::Mode(0) => self.set_mode(Some(Mode::Server)),
             Hit::Mode(1) => self.set_mode(Some(Mode::Dpi)),
             Hit::Mode(_) => self.set_mode(None),
@@ -749,6 +769,40 @@ impl ToolPage for Tunnel {
                 }
             }
             Hit::None => {}
+        }
+    }
+
+    fn key(&mut self, vk: u16) -> bool {
+        use windows::Win32::UI::Input::KeyboardAndMouse::{GetKeyState, VK_CONTROL};
+        let ctrl = unsafe { GetKeyState(VK_CONTROL.0 as i32) } < 0;
+        match self.link.key(vk, ctrl) {
+            FieldKey::Ignored => return false,
+            FieldKey::Enter => self.add_link(),
+            FieldKey::Escape => {
+                if self.link.text.is_empty() {
+                    self.link.blur();
+                } else {
+                    self.link.set("");
+                }
+            }
+            FieldKey::Handled => {}
+        }
+        self.redraw();
+        true
+    }
+
+    fn char(&mut self, c: char) -> bool {
+        let used = self.link.char(c);
+        if used {
+            self.redraw();
+        }
+        used
+    }
+
+    fn kill_focus(&mut self) {
+        if self.link.focused {
+            self.link.blur();
+            self.redraw();
         }
     }
 

@@ -239,7 +239,7 @@ pub struct App {
     next_frame: Instant,
     dirty: bool,
     status: String,
-    /// Son yükleme hatası (hive'a bildirilir).
+    /// Son yükleme hatası (winloom'a bildirilir).
     error: Option<String>,
     /// En son yayımlanan durum: değişmediyse dosya yeniden yazılmaz.
     published: String,
@@ -261,7 +261,7 @@ impl App {
         let cfg = Config::load();
         crate::weather::set_location(cfg.location.as_deref());
         ensure_wallpapers();
-        // hive modunda kayıtlar ve güncelleme hive'da.
+        // winloom modunda kayıtlar ve güncelleme winloom'da.
         if !hub::active() {
             shell::register();
         }
@@ -329,7 +329,7 @@ impl App {
 
     /// Dosyayı okur, ayrıştırır ve derlemeyi arka plana atar; bitince `finish_load`. Derleme
     /// büyük shader'larda saniyeler sürer (Do more: ~20 s): o sırada önceki duvar kâğıdı çalışmaya
-    /// devam eder, hive'ın arayüzü ve masaüstü donmaz.
+    /// devam eder, winloom'ın arayüzü ve masaüstü donmaz.
     fn load(&mut self, file: &str) {
         let path = util::wallpapers_dir().join(file);
         let parsed = std::fs::read_to_string(&path)
@@ -605,7 +605,7 @@ impl App {
         self.cfg.set_param(&file, &p.name, text);
     }
 
-    /// hive'dan gelen komut (bkz. hub.rs).
+    /// winloom'dan gelen komut (bkz. hub.rs).
     fn command(&mut self, line: &str) {
         let (cmd, arg) = line.trim().split_once(' ').unwrap_or((line.trim(), ""));
         let arg = arg.trim();
@@ -616,7 +616,7 @@ impl App {
                     hub::set(h);
                     self.tray.hide();
                     self.published.clear();
-                    log!("hive'a bağlandı");
+                    log!("winloom'a bağlandı");
                 }
             }
             "duvar" => {
@@ -656,7 +656,7 @@ impl App {
         self.cfg.save();
     }
 
-    /// hive'a durum: satır başına `anahtar=değer`. Değişmediyse yazılmaz.
+    /// winloom'a durum: satır başına `anahtar=değer`. Değişmediyse yazılmaz.
     fn publish(&mut self, paused: Option<Reason>) {
         if !hub::active() {
             return;
@@ -797,9 +797,9 @@ impl App {
             }
             self.ensure_placed();
 
-            // hive kapandıysa (çöktüyse) motor da kapanır.
+            // winloom kapandıysa (çöktüyse) motor da kapanır.
             if !hub::alive() {
-                log!("hive kapandı, çıkılıyor");
+                log!("winloom kapandı, çıkılıyor");
                 break;
             }
             let paused = self.policy.reason(self.cfg.pause_on_battery);
@@ -853,7 +853,7 @@ impl App {
                 let left = t.saturating_duration_since(Instant::now());
                 delay = Some(delay.map_or(left, |d| d.min(left)));
             }
-            // Arada uyan: hive yaşıyor mu, masaüstündeki yerimiz duruyor mu.
+            // Arada uyan: winloom yaşıyor mu, masaüstündeki yerimiz duruyor mu.
             let tick = Duration::from_secs(2);
             delay = Some(delay.map_or(tick, |d| d.min(tick)));
 

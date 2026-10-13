@@ -31,7 +31,7 @@ use super::look;
 use super::media::{Cmd, Now, Remote};
 use crate::dock::Geometry;
 
-const CLASS: PCWSTR = w!("hive-music");
+const CLASS: PCWSTR = w!("winloom-music");
 const TIMER_TICK: usize = 1;
 /// Dock'un yeri arada bir okunur (simge eklenince hap genişler, ekran değişir).
 const TIMER_DOCK: usize = 2;
@@ -79,7 +79,7 @@ impl Style {
     }
 }
 
-/// Widget'ın ayarları (hive'ın sayfasından).
+/// Widget'ın ayarları (winloom'ın sayfasından).
 #[derive(Clone)]
 pub struct Options {
     pub hide_idle: bool,
@@ -1154,7 +1154,7 @@ fn create(remote: Remote, o: Options) -> windows::core::Result<Widget> {
         let hwnd = CreateWindowExW(
             WS_EX_LAYERED | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE | WS_EX_TOPMOST,
             CLASS,
-            w!("hive music"),
+            w!("winloom music"),
             WS_POPUP,
             0,
             0,

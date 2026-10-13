@@ -1,5 +1,5 @@
 //! Duvar kâğıdı: GPU ile çizilen canlı duvar kâğıdı. Motor ayrı bir süreç (`cheshire.exe --hub`):
-//! GPU tarafındaki bir çökme hive'ı götürmesin. Komutlar `WM_COPYDATA` ile gider, motor
+//! GPU tarafındaki bir çökme winloom'ı götürmesin. Komutlar `WM_COPYDATA` ile gider, motor
 //! durumunu `durum.txt`'ye yazıp WM_STATE ile haber verir (bkz. wallpaper/src/hub.rs).
 //!
 //! Sayfa: üstte durum ve düğmeler, ortada küçük resimli galeri, altta seçili duvar kâğıdının
@@ -41,7 +41,7 @@ pub const WM_THUMB: u32 = WM_APP + 41;
 /// Motor başlatılmaya hazır (eskisi kapandı, exe güncel).
 pub const WM_RELAUNCH: u32 = WM_APP + 42;
 
-/// Motor hive'ın içinde gelir: kurulum ve güncelleme bu kopyayı yazmaktır, internet gerekmez.
+/// Motor winloom'ın içinde gelir: kurulum ve güncelleme bu kopyayı yazmaktır, internet gerekmez.
 static ENGINE: &[u8] = include_bytes!(env!("WALLPAPER_EXE"));
 
 const SWATCHES: [&str; 6] = ["#4fc3f7", "#ff6ec7", "#b388ff", "#69f0ae", "#ffd740", "#ffffff"];
@@ -141,7 +141,7 @@ fn stop_engine() {
     }
 }
 
-/// Exe hive'daki sürümle aynı değilse yazar (çalışan motor kapalı olmalı).
+/// Exe winloom'daki sürümle aynı değilse yazar (çalışan motor kapalı olmalı).
 fn write_engine() -> Result<(), String> {
     if std::fs::read(exe()).is_ok_and(|d| d == ENGINE) {
         return Ok(());
@@ -165,7 +165,7 @@ fn write_engine() -> Result<(), String> {
     Err(format!("{} {last}", t!("could not write cheshire.exe:", "cheshire.exe yazılamadı:")))
 }
 
-/// Motorun eski, tek başına sürümünün kendi kayıtları (Windows ile başlama, Programlar listesi): artık hive yönetiyor.
+/// Motorun eski, tek başına sürümünün kendi kayıtları (Windows ile başlama, Programlar listesi): artık winloom yönetiyor.
 fn remove_standalone_registrations() {
     unsafe {
         let _ = RegDeleteKeyValueW(HKEY_CURRENT_USER, w!(r"Software\Microsoft\Windows\CurrentVersion\Run"), w!("cheshire"));
@@ -231,7 +231,7 @@ fn send(line: &str) -> bool {
 }
 
 /// `WM_COPYDATA` gönderilmek zorunda (veri çağrı süresince yaşamalı) ve gönderen, motor mesajı
-/// işleyene kadar bekler. Motor o sırada shader derliyorsa bu saniyeler sürer: hive'ın arayüzü
+/// işleyene kadar bekler. Motor o sırada shader derliyorsa bu saniyeler sürer: winloom'ın arayüzü
 /// donmasın diye komutlar tek bir arka plan iş parçacığından sırayla gider.
 fn send_async(line: String) {
     use std::sync::mpsc::{Sender, channel};
@@ -441,7 +441,7 @@ pub struct Wallpaper {
 }
 
 impl Wallpaper {
-    /// Sayfayı kurar ve motoru başlatır: önceki motor (eski bir hive'dan ya da tepsideki ayrı
+    /// Sayfayı kurar ve motoru başlatır: önceki motor (eski bir winloom'dan ya da tepsideki ayrı
     /// duvar kâğıdı motorundan) kapatılır, exe güncel değilse yazılır, sonra WM_RELAUNCH ile `--hub` açılır.
     pub fn start(hwnd: HWND) -> Self {
         let st = parse_state(&std::fs::read_to_string(app_dir().join("durum.txt")).unwrap_or_default());
@@ -1078,7 +1078,7 @@ impl ToolPage for Wallpaper {
 }
 
 impl Drop for Wallpaper {
-    /// hive kapanırken ya da araç kaldırılırken motor da kapanır (duvar kâğıdı Windows'unkine döner).
+    /// winloom kapanırken ya da araç kaldırılırken motor da kapanır (duvar kâğıdı Windows'unkine döner).
     fn drop(&mut self) {
         send("cik");
     }
@@ -1089,7 +1089,7 @@ fn add_dialog(hwnd: HWND) -> Res<Vec<PathBuf>> {
         let dlg: IFileOpenDialog = CoCreateInstance(&FileOpenDialog, None, CLSCTX_INPROC_SERVER)?;
         dlg.SetOptions(dlg.GetOptions()? | FOS_ALLOWMULTISELECT | FOS_FILEMUSTEXIST | FOS_FORCEFILESYSTEM)?;
         dlg.SetTitle(t!(w!("Add wallpapers"), w!("Duvar kâğıdı ekle")))?;
-        dlg.SetFileTypes(&[COMDLG_FILTERSPEC { pszName: t!(w!("hive wallpaper"), w!("hive duvar kâğıdı")), pszSpec: w!("*.cheshire") }])?;
+        dlg.SetFileTypes(&[COMDLG_FILTERSPEC { pszName: t!(w!("winloom wallpaper"), w!("winloom duvar kâğıdı")), pszSpec: w!("*.cheshire") }])?;
         if dlg.Show(Some(hwnd)).is_err() {
             return Ok(Vec::new());
         }

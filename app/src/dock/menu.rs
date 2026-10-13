@@ -17,7 +17,7 @@ use super::apps::{self, IconSource};
 use super::theme::{self, Theme};
 use crate::gfx::{Gfx, ImageId, Rect};
 
-const CLASS: PCWSTR = w!("hive-dock-menu");
+const CLASS: PCWSTR = w!("winloom-dock-menu");
 const WM_MOUSELEAVE: u32 = 0x02A3;
 const TIMER_SLIDE: usize = 1;
 

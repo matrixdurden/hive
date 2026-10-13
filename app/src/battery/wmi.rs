@@ -1,5 +1,5 @@
 //! WMI (root\wmi): pilin anlık durumu (kalan mWh, deşarj mW, dolu kapasite) ve dizüstü ekranının
-//! parlaklığı. COM başlatılmış iş parçacığında çağrılır (hive'ın ana iş parçacığı öyle).
+//! parlaklığı. COM başlatılmış iş parçacığında çağrılır (winloom'ın ana iş parçacığı öyle).
 
 use windows::Win32::System::Com::*;
 use windows::Win32::System::Rpc::{RPC_C_AUTHN_WINNT, RPC_C_AUTHZ_NONE};

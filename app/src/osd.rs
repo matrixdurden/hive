@@ -236,7 +236,7 @@ fn place(popup: &Popup, icon: &str, color: u32, text: &str) {
 }
 
 thread_local! {
-    /// Arayüz iş parçacığında ilk bildirimde açılır, hive kapanınca gider.
+    /// Arayüz iş parçacığında ilk bildirimde açılır, winloom kapanınca gider.
     static POPUP: RefCell<Option<Popup>> = const { RefCell::new(None) };
 }
 
@@ -244,7 +244,7 @@ thread_local! {
 pub fn show(icon: &str, color: u32, text: &str) {
     POPUP.with_borrow_mut(|p| {
         if p.is_none() {
-            *p = Popup::new(w!("hive-osd"), Some(osd_proc), 240);
+            *p = Popup::new(w!("winloom-osd"), Some(osd_proc), 240);
         }
         if let Some(p) = p {
             place(p, icon, color, text);

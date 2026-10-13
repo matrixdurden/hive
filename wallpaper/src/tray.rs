@@ -47,7 +47,7 @@ pub enum Event {
     Compiled,
     /// Kurulum ya da kaldırma çalışan kopyayı kapatıyor.
     Quit,
-    /// hive'dan gelen komut (bkz. hub.rs).
+    /// winloom'dan gelen komut (bkz. hub.rs).
     Command(String),
 }
 
@@ -127,7 +127,7 @@ pub fn send_to_running(file_name: &str) -> bool {
     }
 }
 
-/// Çalışan motora hive komutu iletir (bkz. hub.rs).
+/// Çalışan motora winloom komutu iletir (bkz. hub.rs).
 pub fn send_command(line: &str) -> bool {
     unsafe {
         let Ok(hwnd) = FindWindowW(CLASS, PCWSTR::null()) else { return false };
@@ -151,7 +151,7 @@ pub enum Item {
 pub struct Tray {
     pub hwnd: HWND,
     icon: HICON,
-    /// hive modunda simge gösterilmez; gizli pencere yine sistem yayınlarını dinler.
+    /// winloom modunda simge gösterilmez; gizli pencere yine sistem yayınlarını dinler.
     visible: std::cell::Cell<bool>,
 }
 
@@ -218,7 +218,7 @@ impl Tray {
         }
     }
 
-    /// Simgeyi kaldırır (çalışan motor hive'a bağlanınca).
+    /// Simgeyi kaldırır (çalışan motor winloom'a bağlanınca).
     pub fn hide(&self) {
         if self.visible.replace(false) {
             unsafe {

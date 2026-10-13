@@ -119,7 +119,7 @@ pub fn raise() {
     widget::raise();
 }
 
-/// `hive --music-test [klasör]`: medya oturumlarını yazdırır; klasör verilirse şeridi her arka
+/// `winloom --music-test [klasör]`: medya oturumlarını yazdırır; klasör verilirse şeridi her arka
 /// planla pencere açmadan PNG'ye çizer.
 pub fn probe(out: Option<&str>) -> String {
     let (mut s, now) = media::probe();

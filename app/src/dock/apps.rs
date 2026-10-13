@@ -37,7 +37,7 @@ const HOSTS: [&str; 5] = ["javaw.exe", "java.exe", "pythonw.exe", "python.exe", 
 
 /// Görev çubuğunun da göstermediği kabuk pencereleri: masaüstü, görev çubuğu, dock ve görev
 /// görünümü (Win+Tab; ekranı kaplar ama tam ekran uygulama değildir).
-const SHELL_CLASSES: [&str; 6] = ["Progman", "WorkerW", "Shell_TrayWnd", "Shell_SecondaryTrayWnd", "hive-dock", "XamlExplorerHostIslandWindow"];
+const SHELL_CLASSES: [&str; 6] = ["Progman", "WorkerW", "Shell_TrayWnd", "Shell_SecondaryTrayWnd", "winloom-dock", "XamlExplorerHostIslandWindow"];
 
 pub fn class_name(hwnd: HWND) -> String {
     let mut buf = [0u16; 128];
@@ -557,7 +557,7 @@ pub fn close(hwnd: HWND) {
     }
 }
 
-/// `hive --dock-test`: dock'un gördüğü pencereler ve sabitlenmiş öğeler.
+/// `winloom --dock-test`: dock'un gördüğü pencereler ve sabitlenmiş öğeler.
 pub fn probe(pins: &[String]) -> String {
     let mut s = String::from("pencereler:\n");
     for w in windows() {
@@ -631,7 +631,7 @@ pub fn show_in_folder(path: &str) {
 }
 
 /// Pencerelerin süreçlerini sonlandırır (yanıt vermeyen uygulama için). Kabuk (explorer.exe)
-/// ve hive'ın kendisi atlanır.
+/// ve winloom'ın kendisi atlanır.
 pub fn force_quit(windows: &[HWND]) {
     let me = std::process::id();
     let mut done = Vec::new();

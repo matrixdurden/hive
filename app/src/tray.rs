@@ -36,13 +36,13 @@ impl Tray {
                 d.hIcon = HICON(h.0);
             }
         }
-        for (dst, src) in d.szTip.iter_mut().zip("hive".encode_utf16()) {
+        for (dst, src) in d.szTip.iter_mut().zip("winloom".encode_utf16()) {
             *dst = src;
         }
         d
     }
 
-    /// Bildirim balonu (araçların uyarıları: Pil aracının vites değişimi, RTX bekçisi).
+    /// Bildirim balonu (araçların uyarıları: Pil aracının vites değişimi, pil uyarısı).
     pub fn notify(&self, title: &str, text: &str) {
         let mut d = self.data();
         d.uFlags = NIF_INFO;

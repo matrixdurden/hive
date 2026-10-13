@@ -22,7 +22,7 @@ use super::apps::{self, IconSource};
 use super::theme::{self, Theme};
 use crate::gfx::{Color, Gfx, ImageId, Rect};
 
-const CLASS: PCWSTR = w!("hive-dock-stack");
+const CLASS: PCWSTR = w!("winloom-dock-stack");
 const WM_MOUSELEAVE: u32 = 0x02A3;
 const TIMER_SLIDE: usize = 1;
 
@@ -486,7 +486,7 @@ pub fn update(windows: &[HWND]) {
     });
 }
 
-/// `hive --stack-test [klasör]`: birden çok penceresi olan (yoksa ilk) uygulamanın panosunu ekranın
+/// `winloom --stack-test [klasör]`: birden çok penceresi olan (yoksa ilk) uygulamanın panosunu ekranın
 /// ortasında iki saniye açar; kartları ve küçük resimleri yazar, klasöre ekran görüntüsünü kaydeder.
 pub fn test(out: Option<&str>) -> String {
     let wins = apps::windows();

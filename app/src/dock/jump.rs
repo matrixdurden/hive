@@ -210,7 +210,7 @@ fn link(data: &[u8]) -> Option<Entry> {
     }
 }
 
-/// `hive --jump-test <exe> [kimlik]`: atlama listesini yazdırır.
+/// `winloom --jump-test <exe> [kimlik]`: atlama listesini yazdırır.
 pub fn probe(exe: &str, aumid: Option<&str>) -> String {
     let ids: Vec<String> = aumid.map(String::from).into_iter().collect();
     let l = list(&ids, Some(exe));

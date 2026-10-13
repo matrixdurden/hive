@@ -127,7 +127,7 @@ mod tests {
         assert_eq!(r[0].url, "https://www.myinstants.com/media/sounds/vine-boom.mp3");
     }
 
-    /// Gerçek site: `cargo test -p hive myinstants -- --ignored`.
+    /// Gerçek site: `cargo test -p winloom myinstants -- --ignored`.
     #[test]
     #[ignore]
     fn live_search_and_download() {

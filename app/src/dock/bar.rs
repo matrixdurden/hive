@@ -42,7 +42,7 @@ use super::status::{self, Status, WM_STATUS};
 use super::theme::{self, Theme};
 use super::{Settings, taskbar};
 
-const CLASS: PCWSTR = w!("hive-dock");
+const CLASS: PCWSTR = w!("winloom-dock");
 /// Pencere listesi değişti (kancalardan, birleştirilerek).
 const WM_REFRESH: u32 = WM_APP + 1;
 /// Öndeki pencere yer değiştirdi: dock'un üstüne geldi mi.
@@ -255,7 +255,7 @@ enum Action {
     /// 10'da hızlı ayarlar yok: simgenin kendi paneli (ağ listesi, ses kaydırıcısı, pil
     /// ayarları); `(x, y)` simgenin üst ortası (fiziksel piksel).
     QuickSettings(Part, i32, i32),
-    /// hive'ı dock sayfasında aç.
+    /// winloom'ı dock sayfasında aç.
     Settings,
     /// Windows bildirimleri ve takvim (Win+N).
     Notices,
@@ -2631,7 +2631,7 @@ pub fn notify_reload() {
     }
 }
 
-/// `hive --dock-bench`: dock'u görünmez kurar, simgeler yüklenince büyütme animasyonunun 240
+/// `winloom --dock-bench`: dock'u görünmez kurar, simgeler yüklenince büyütme animasyonunun 240
 /// karesini çizer; kare başına çizim süresini yazar.
 pub fn bench() -> String {
     let mut dock = match create(super::Settings::load(), super::load_pins()) {

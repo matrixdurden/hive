@@ -1,5 +1,5 @@
 // Mikrofon efekti DLL'inin yolunu verir: motor onu içinde taşır, kurulumda Program Files'a yazar.
-// DLL önce derlenmeli (`cargo build -p soundboard-apo`; hive'da `make build` bunu yapar).
+// DLL önce derlenmeli (`cargo build -p soundboard-apo`; winloom'da `make build` bunu yapar).
 use std::path::PathBuf;
 
 fn main() {
@@ -7,6 +7,6 @@ fn main() {
     // OUT_DIR = target/<hedef>/<profil>/build/soundboard-*/out
     let dll = out.ancestors().nth(3).unwrap().join("lyrebird_apo.dll");
     println!("cargo:rerun-if-changed={}", dll.display());
-    assert!(dll.exists(), "{} yok: önce `cargo build -p soundboard-apo` (ya da hive'da `make build`)", dll.display());
+    assert!(dll.exists(), "{} yok: önce `cargo build -p soundboard-apo` (ya da winloom'da `make build`)", dll.display());
     println!("cargo:rustc-env=SOUNDBOARD_APO_DLL={}", dll.display());
 }

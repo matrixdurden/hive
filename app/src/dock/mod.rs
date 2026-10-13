@@ -4,9 +4,9 @@
 //!
 //! Dock'un solunda çalan şarkının şeridi (music/): Spotify, kapak, düğmeler.
 //!
-//! Motor hive sürecinin içinde (bar.rs). Kurmak ayar dosyasını ve dock'un ilk listesini
+//! Motor winloom sürecinin içinde (bar.rs). Kurmak ayar dosyasını ve dock'un ilk listesini
 //! (görev çubuğuna sabitlenmiş kısayollar) yazar.
-//! Kaldırınca (ya da hive kapanınca) görev çubuğu ve masaüstü simgeleri eski haline döner.
+//! Kaldırınca (ya da winloom kapanınca) görev çubuğu ve masaüstü simgeleri eski haline döner.
 
 mod apps;
 mod bar;
@@ -177,7 +177,7 @@ fn shell_verbs(on: bool) {
     }
 }
 
-/// `hive --dock-pin <yol>`: sağ tık menüsünden. Yol dock'un sonuna eklenir, açık dock listeyi
+/// `winloom --dock-pin <yol>`: sağ tık menüsünden. Yol dock'un sonuna eklenir, açık dock listeyi
 /// yeniden okur.
 pub fn pin_from_cli(path: &str) {
     if path.is_empty() || !installed() {
@@ -262,7 +262,7 @@ pub fn focus_app(id: &str) -> bool {
     true
 }
 
-/// `hive --dock-test`
+/// `winloom --dock-test`
 pub fn probe() -> String {
     let pins = if pins_file().exists() { load_pins() } else { seed() };
     apps::probe(&pins)

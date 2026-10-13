@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
 """assets/icon.svg ile aynı şekli bağımlılıksız çizer: assets/icon-*.png ve assets/icon.ico.
 
-hive ikonu: koyu yuvarlak kare içinde dört petek gözü; üçü araçların renginde, biri boş (yeni
-gelecek araç). Şekil yuvarlak dikdörtgen ve altıgenlerden oluştuğu için küçük bir örneklemeli
-tarayıcı yeter.
-Çalıştır: python3 araclar/ikon.py
+winloom ikonu: koyu yuvarlak kare içinde bir tezgâh: üstteki kirişten sarkan üç dikey iplik ve
+aralarından bir altından bir üstünden geçen iki yatay iplik. Tek renk ailesi, tek şekil.
+Çalıştır: python3 app/araclar/ikon.py
 """
 
 import struct
@@ -13,31 +12,24 @@ from pathlib import Path
 
 ASSETS = Path(__file__).resolve().parent.parent / "assets"
 
-import math
+# Tek vurgu rengi: arayüzün varsayılan (Claude teması) vurgusu; yatay iplikler biraz açık.
+WARP = 0xD97757
+WEFT = 0xF0A98A
+BG = 0x0F0F10
 
-R = 19.0  # petek gözlerinin aralığını belirleyen yarıçap; gözler arada boşluk kalsın diye daha küçük
-
-
-def hexagon(cx, cy, r):
-    """Sivri tepeli altıgenin köşeleri."""
-    return [(cx + r * math.cos(math.radians(a)), cy + r * math.sin(math.radians(a))) for a in range(-90, 270, 60)]
-
-
-# ("rrect", x, y, w, h, yarıçap, renk, saydamlık, kontur) ya da ("hex", cx, cy, r, renk, saydamlık, kontur)
-SHAPES = [
-    ("rrect", 4, 4, 120, 120, 28, 0x0F0F10, 1.0, None),
-    ("rrect", 4.75, 4.75, 118.5, 118.5, 27.25, 0xFFFFFF, 0.12, 1.5),
-    ("hex", 56.0, 50.0, R - 2.5, 0xFBBF24, 1.0, None),
-    ("hex", 89.0, 50.0, R - 2.5, 0xF472B6, 1.0, None),
-    ("hex", 72.5, 78.5, R - 2.5, 0xA78BFA, 1.0, None),
-    ("hex", 39.5, 78.5, R - 5.0, 0xFFFFFF, 0.28, 4.0),
-]
+T = 13.0                 # iplik kalınlığı
+BEAM = 30.0              # tezgâhın üst kirişi (y merkezi), kalınlığı T
+WARP_X = [40.0, 64.0, 88.0]   # kirişten sarkan dikey iplikler (x merkezleri)
+WEFT_Y = [62.0, 86.0]         # aralarından geçen yatay iplikler (y merkezleri)
+A, B = 22.0, 106.0       # kirişin uçları
+WA, WB = 30.0, 98.0      # yatay ipliklerin uçları
+BOTTOM = 104.0           # dikey ipliklerin alt ucu
 
 SIZES = [16, 20, 24, 32, 40, 48, 64, 128, 256, 512]
 ICO_SIZES = [16, 20, 24, 32, 40, 48, 64, 256]
 
 
-def inside(px, py, x, y, w, h, r):
+def rrect(px, py, x, y, w, h, r):
     if px < x or py < y or px > x + w or py > y + h:
         return False
     cx = min(max(px, x + r), x + w - r)
@@ -45,34 +37,46 @@ def inside(px, py, x, y, w, h, r):
     return (px - cx) ** 2 + (py - cy) ** 2 <= r * r
 
 
-def in_poly(px, py, pts):
-    """Dışbükey çokgenin içinde mi (köşeler saat yönünde)."""
-    n = len(pts)
-    for i in range(n):
-        (x1, y1), (x2, y2) = pts[i], pts[(i + 1) % n]
-        if (x2 - x1) * (py - y1) - (y2 - y1) * (px - x1) < 0:
-            return False
-    return True
-
-
-def covers(shape, px, py):
-    if shape[0] == "hex":
-        _, cx, cy, r, _, _, stroke = shape
-        if stroke is None:
-            return in_poly(px, py, hexagon(cx, cy, r))
-        o = stroke / 2 / math.cos(math.radians(30))
-        return in_poly(px, py, hexagon(cx, cy, r + o)) and not in_poly(px, py, hexagon(cx, cy, r - o))
-    _, x, y, w, h, r, _, _, stroke = shape
-    if stroke is None:
-        return inside(px, py, x, y, w, h, r)
-    o, i = stroke / 2, stroke / 2
-    return inside(px, py, x - o, y - o, w + 2 * o, h + 2 * o, r + o) and not inside(
-        px, py, x + i, y + i, w - 2 * i, h - 2 * i, max(r - i, 0)
+def rrect_stroke(px, py, x, y, w, h, r, s):
+    o = s / 2
+    return rrect(px, py, x - o, y - o, w + 2 * o, h + 2 * o, r + o) and not rrect(
+        px, py, x + o, y + o, w - 2 * o, h - 2 * o, max(r - o, 0)
     )
 
 
-def color_of(shape):
-    return (shape[4], shape[5]) if shape[0] == "hex" else (shape[6], shape[7])
+def beam(px, py):
+    return rrect(px, py, A, BEAM - T / 2, B - A, T, T / 2)
+
+
+def capsule_v(px, py, cx):
+    """Dikey iplik: kirişten sarkar, alt ucu yuvarlak."""
+    return rrect(px, py, cx - T / 2, BEAM, T, BOTTOM - BEAM, T / 2)
+
+
+def capsule_h(px, py, cy):
+    return rrect(px, py, WA, cy - T / 2, WB - WA, T, T / 2)
+
+
+def crossing(px, py, cx, cy):
+    """Kesişme karesi: yatay iplik üstte kalan yerlerde yeniden çizilir."""
+    return cx - T / 2 <= px <= cx + T / 2 and cy - T / 2 <= py <= cy + T / 2
+
+
+# Çizim sırası: zemin, kenarlık, yatay iplikler, dikey iplikler, sonra (i + j) tek olan
+# kesişmelerde yatay iplik üste alınır: dama gibi bir altından bir üstünden.
+SHAPES = [
+    (lambda x, y: rrect(x, y, 4, 4, 120, 120, 28), BG, 1.0),
+    (lambda x, y: rrect_stroke(x, y, 4.75, 4.75, 118.5, 118.5, 27.25, 1.5), 0xFFFFFF, 0.12),
+]
+SHAPES += [(lambda x, y, cy=cy: capsule_h(x, y, cy), WEFT, 1.0) for cy in WEFT_Y]
+SHAPES += [(lambda x, y, cx=cx: capsule_v(x, y, cx), WARP, 1.0) for cx in WARP_X]
+SHAPES += [(beam, WARP, 1.0)]
+SHAPES += [
+    (lambda x, y, cx=cx, cy=cy: crossing(x, y, cx, cy), WEFT, 1.0)
+    for i, cx in enumerate(WARP_X)
+    for j, cy in enumerate(WEFT_Y)
+    if (i + j) % 2 == 1
+]
 
 
 def render(size):
@@ -88,9 +92,8 @@ def render(size):
                     px = (x * ss + sx + 0.5) * scale
                     py = (y * ss + sy + 0.5) * scale
                     r = g = b = a = 0.0
-                    for shape in SHAPES:
-                        if covers(shape, px, py):
-                            c, sa = color_of(shape)
+                    for covers, c, sa in SHAPES:
+                        if covers(px, py):
                             cr, cg, cb = (c >> 16) / 255, ((c >> 8) & 255) / 255, (c & 255) / 255
                             r, g, b = cr * sa + r * (1 - sa), cg * sa + g * (1 - sa), cb * sa + b * (1 - sa)
                             a = sa + a * (1 - sa)
@@ -128,7 +131,28 @@ def ico(images):
     return head + entries + blobs
 
 
+def svg():
+    def hexc(c):
+        return f"#{c:06x}"
+
+    out = ['<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">']
+    out.append(f'<rect x="4" y="4" width="120" height="120" rx="28" fill="{hexc(BG)}"/>')
+    out.append('<rect x="4.75" y="4.75" width="118.5" height="118.5" rx="27.25" fill="none" stroke="#fff" stroke-opacity=".12" stroke-width="1.5"/>')
+    for cy in WEFT_Y:
+        out.append(f'<rect x="{WA}" y="{cy - T / 2}" width="{WB - WA}" height="{T}" rx="{T / 2}" fill="{hexc(WEFT)}"/>')
+    for cx in WARP_X:
+        out.append(f'<rect x="{cx - T / 2}" y="{BEAM}" width="{T}" height="{BOTTOM - BEAM}" rx="{T / 2}" fill="{hexc(WARP)}"/>')
+    out.append(f'<rect x="{A}" y="{BEAM - T / 2}" width="{B - A}" height="{T}" rx="{T / 2}" fill="{hexc(WARP)}"/>')
+    for i, cx in enumerate(WARP_X):
+        for j, cy in enumerate(WEFT_Y):
+            if (i + j) % 2 == 1:
+                out.append(f'<rect x="{cx - T / 2}" y="{cy - T / 2}" width="{T}" height="{T}" fill="{hexc(WEFT)}"/>')
+    out.append("</svg>")
+    return "\n".join(out) + "\n"
+
+
 def main():
+    (ASSETS / "icon.svg").write_text(svg())
     images = {}
     for size in SIZES:
         images[size] = render(size)

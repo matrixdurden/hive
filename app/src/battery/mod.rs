@@ -1,14 +1,13 @@
 //! battery: dizüstünün üç vitesi. Prizde her şey tam hız; dışarıda rahat kalır (144 Hz, dengeli)
-//! ama RTX uykuda; hayatta kalmada 60 Hz, verimlilik, ekran kısık, işlemci sınırlı. Hiçbir
+//! ama ayrık ekran kartı uykuda; hayatta kalmada 60 Hz, verimlilik, ekran kısık, işlemci sınırlı. Hiçbir
 //! uygulamayı kendisi kapatmaz: pile geçince kapatılması iyi olanları söyler. Şarj
 //! takılıp çıkınca kendiliğinden vites değiştirir; pil eşiğin altına inince yalnızca uyarır,
 //! hayatta kalmaya geçmek kullanıcının elindedir.
 //!
 //! Her dakika pilin ne kadar boşaldığını ölçer ve her vites için "dolu pil kaç saat gider"
-//! hesabını kendi kullanımından kalibre eder. Pildeyken ayrık ekran kartını uyandıran uygulamayı
-//! bildirir (nvidia-smi ile değil: o kartı uyandırır; Windows'un performans sayaçlarıyla).
+//! hesabını kendi kullanımından kalibre eder.
 //!
-//! Motor hive sürecinin içinde (soundboard gibi): güç olayları hive'ın penceresine gelir
+//! Motor winloom sürecinin içinde (soundboard gibi): güç olayları winloom'ın penceresine gelir
 //! (WM_POWERBROADCAST), ölçüm zamanlayıcısı sayfa görünmese de çalışır. Kurulum mevcut ayarları
 //! `ayarlar.ini`'ye yedekler; kaldırma hepsini geri koyar.
 
@@ -59,10 +58,6 @@ const MIN_DRAIN_SAMPLES: usize = 3;
 const RESERVE: f64 = 0.07;
 const SURVIVAL_BRIGHTNESS: u8 = 30;
 const SURVIVAL_CPU: u32 = 40;
-/// RTX'te bundan az bellek tutan süreç sayılmaz (sürücünün küçük ayırmaları).
-const GUARD_MIN_BYTES: i64 = 48 << 20;
-const GUARD_IGNORE: [&str; 7] = ["dwm", "csrss", "explorer", "hive", "System", "svchost", "Registry"];
-
 const DEFAULT_CLOSE: &str = "RobloxPlayerBeta;javaw;ElyPrismLauncher;LightStudio-background;LightStudioHelper;OmenCommandCenterBackground;NVIDIA Overlay";
 const DEFAULT_IGPU: &str = "brave;Spotify;claude;Discord;WhatsApp;Code;msedgewebview2";
 
@@ -93,8 +88,6 @@ pub struct Config {
     auto: bool,
     /// Pil bunun altına inince Hayatta kalma (0 kapalı).
     threshold: u8,
-    /// Pildeyken RTX'i uyandıranı bildir.
-    guard: bool,
     /// Pile geçince kapatılacak süreç adları.
     close: Vec<String>,
     /// Tümleşik ekran kartına zorlanan uygulamalar (süreç adı).
@@ -119,7 +112,6 @@ impl Default for Config {
             mode: PLUGGED,
             auto: true,
             threshold: 30,
-            guard: true,
             close: split(DEFAULT_CLOSE),
             igpu: split(DEFAULT_IGPU),
             hz: 60,
@@ -157,7 +149,6 @@ impl Config {
                 "vites" => c.mode = v.parse().unwrap_or(0).min(SURVIVAL),
                 "otomatik" => c.auto = v == "1",
                 "esik" => c.threshold = v.parse().unwrap_or(30),
-                "bekci" => c.guard = v == "1",
                 "kapat" => c.close = split(v),
                 "igpu" => c.igpu = split(v),
                 "yedek_hz" => c.hz = v.parse().unwrap_or(60),
@@ -185,11 +176,10 @@ impl Config {
     fn save(&self) {
         let _ = std::fs::create_dir_all(dir());
         let mut s = format!(
-            "vites={}\notomatik={}\nesik={}\nbekci={}\nkapat={}\nigpu={}\nyedek_hz={}\nyedek_kapak={}\nyedek_cpu={}\nyedek_katman_ac={}\nyedek_katman_dc={}\n",
+            "vites={}\notomatik={}\nesik={}\nkapat={}\nigpu={}\nyedek_hz={}\nyedek_kapak={}\nyedek_cpu={}\nyedek_katman_ac={}\nyedek_katman_dc={}\n",
             self.mode,
             self.auto as u8,
             self.threshold,
-            self.guard as u8,
             self.close.join(";"),
             self.igpu.join(";"),
             self.hz,
@@ -230,7 +220,7 @@ impl Config {
     }
 }
 
-/// Kaldırırken ve hive kapanmadan: her şeyi kurulumdaki haline döndürür.
+/// Kaldırırken ve winloom kapanmadan: her şeyi kurulumdaki haline döndürür.
 fn restore(cfg: &mut Config) {
     let st = power::status();
     let overlay = if st.ac { cfg.overlay_ac } else { cfg.overlay_dc };
@@ -282,7 +272,7 @@ pub fn leftovers() -> Vec<String> {
     d.exists().then(|| d.display().to_string()).into_iter().collect()
 }
 
-/// `hive --battery-test`: motorun okuduğu her şeyi yazdırır, hiçbir şeyi değiştirmez.
+/// `winloom --battery-test`: motorun okuduğu her şeyi yazdırır, hiçbir şeyi değiştirmez.
 pub fn probe() -> String {
     let st = power::status();
     let mut s = format!(
@@ -307,17 +297,6 @@ pub fn probe() -> String {
     );
     s += &format!("ekran: {} Hz\n", power::refresh_rate().map_or("?".into(), |h| h.to_string()));
     s += &format!("pilde kapak: {:?} · pilde cpu üst sınırı: {:?}\n", power::lid_dc(), power::cpu_max_dc());
-    match procs::nvidia_luid() {
-        Some(luid) => {
-            s += &format!("NVIDIA luid: {luid}\n");
-            let list = procs::list();
-            for (pid, bytes) in procs::gpu_users(&luid) {
-                let name = list.iter().find(|p| p.pid == pid).map_or("?", |p| p.name.as_str());
-                s += &format!("  RTX'te: {name} (pid {pid}) {} MB\n", bytes >> 20);
-            }
-        }
-        None => s += "NVIDIA bağdaştırıcısı yok\n",
-    }
     let cfg = Config::load();
     s += &format!("iGPU hedefleri: {}\n", procs::igpu_targets(&cfg.igpu).join(" · "));
     s += &format!("kurulu: {} · ayarlar: {}\n", installed(), ini().display());
@@ -333,7 +312,6 @@ enum Hit {
     Card(u8),
     Auto,
     Threshold(usize),
-    Guard,
 }
 
 struct Layout {
@@ -342,7 +320,6 @@ struct Layout {
     panel1: Rect,
     auto_row: Rect,
     thr_row: Rect,
-    guard_row: Rect,
     bottom: f32,
 }
 
@@ -370,11 +347,6 @@ pub struct Battery {
     manual: bool,
     /// Pil eşiğin altına indi uyarısı verildi (eşiğin üstüne çıkınca ya da şarj takılınca sıfırlanır).
     low_warned: bool,
-    luid: Option<String>,
-    /// Bu oturumda uyarılan uygulamalar (bir kez).
-    warned: Vec<String>,
-    /// Pildeyken RTX'i tutan uygulamalar (son ölçüm).
-    awake: Vec<String>,
     /// Pildeyken kapatılması iyi olan, şu an çalışan uygulamalar (kapatma listesinden).
     suggest: Vec<String>,
     notice: Option<(String, String)>,
@@ -434,9 +406,6 @@ impl Battery {
             drains: VecDeque::new(),
             manual: false,
             low_warned: false,
-            luid: procs::nvidia_luid(),
-            warned: Vec::new(),
-            awake: Vec::new(),
             suggest: Vec::new(),
             notice: None,
             notifications: Vec::new(),
@@ -461,12 +430,7 @@ impl Battery {
         let first = if d.cfg.auto { d.auto_mode() } else { d.cfg.mode };
         d.switch(first, false);
         d.tick();
-        log!(
-            "battery: {} vitesinde, {} , RTX {}",
-            mode_name(d.mode),
-            if d.ac { "şarjda" } else { "pilde" },
-            d.luid.as_deref().unwrap_or("yok")
-        );
+        log!("battery: {} vitesinde, {}", mode_name(d.mode), if d.ac { "şarjda" } else { "pilde" });
         d
     }
 
@@ -500,7 +464,7 @@ impl Battery {
         if announce {
             let what = match mode {
                 PLUGGED => t!("Full speed again.", "Yine tam hız."),
-                OUT => t!("RTX asleep.", "RTX uykuda."),
+                OUT => t!("Balanced power, discrete GPU asleep.", "Dengeli güç, ayrık ekran kartı uykuda."),
                 _ => t!("60 Hz, dim screen, CPU capped.", "60 Hz, ekran kısık, işlemci sınırlı."),
             };
             let hint = if self.suggest.is_empty() {
@@ -584,7 +548,6 @@ impl Battery {
             if ac != self.ac {
                 self.ac = ac;
                 self.manual = false;
-                self.warned.clear();
                 self.low_warned = false;
                 self.last = None;
                 if self.cfg.auto {
@@ -665,7 +628,7 @@ impl Battery {
         }
     }
 
-    /// Dakikada bir: pil ölçümü, kalibrasyon, RTX bekçisi.
+    /// Dakikada bir: pil ölçümü, kalibrasyon.
     fn tick(&mut self) {
         let st = power::status();
         self.ac = st.ac;
@@ -699,55 +662,11 @@ impl Battery {
                 self.drains.clear();
             }
         }
-        self.guard();
         if self.mode != PLUGGED {
             self.suggest = self.running_junk();
         }
         if self.visible {
             self.redraw();
-        }
-    }
-
-    fn guard(&mut self) {
-        self.awake.clear();
-        if self.ac || !self.cfg.guard {
-            return;
-        }
-        let Some(luid) = self.luid.as_deref() else { return };
-        let users = procs::gpu_users(luid);
-        if users.is_empty() {
-            return;
-        }
-        let procs = procs::list();
-        for (pid, bytes) in users {
-            if bytes < GUARD_MIN_BYTES {
-                continue;
-            }
-            let Some(p) = procs.iter().find(|p| p.pid == pid) else { continue };
-            if GUARD_IGNORE.iter().any(|i| i.eq_ignore_ascii_case(&p.name))
-                || self.awake.iter().any(|a| a.eq_ignore_ascii_case(&p.name))
-            {
-                continue;
-            }
-            self.awake.push(p.name.clone());
-            if self.warned.iter().any(|w| w.eq_ignore_ascii_case(&p.name)) {
-                continue;
-            }
-            self.warned.push(p.name.clone());
-            self.notice = Some((
-                t!("The RTX is awake", "RTX uyanık").into(),
-                t!(
-                    format!(
-                        "{} is using the RTX on battery. Close it, or set it to the power-saving GPU in Windows graphics settings.",
-                        p.name
-                    ),
-                    format!(
-                        "{} pildeyken RTX'i kullanıyor. Kapat ya da Windows grafik ayarlarından güç tasarrufu GPU'suna al.",
-                        p.name
-                    )
-                ),
-            ));
-            log!("battery: RTX'i uyandıran: {} ({} MB)", p.name, bytes >> 20);
         }
     }
 
@@ -805,7 +724,7 @@ impl Battery {
         if self.ac {
             return format!("{} · %{}", t!("Plugged in", "Şarjda"), self.percent);
         }
-        let mut s = match self.remaining() {
+        let s = match self.remaining() {
             Some((h, rate, true)) => format!(
                 "{} {} {} · %{} · {} {}",
                 t!("at least", "en az"),
@@ -820,9 +739,6 @@ impl Battery {
             }
             None => format!("{} · %{}", t!("On battery", "Pilde"), self.percent),
         };
-        if !self.awake.is_empty() {
-            s += &format!(" · RTX: {}", self.awake.join(", "));
-        }
         s
     }
 
@@ -852,9 +768,8 @@ impl Battery {
         y = p1_t + PANEL_HEAD - 12.0;
         let auto_row = inner(y);
         let thr_row = inner(y + ROW);
-        let guard_row = inner(y + 2.0 * ROW);
-        let panel1 = Rect::new(PAD, p1_t, w - PAD, guard_row.b + 8.0);
-        Layout { cards, hint, panel1, auto_row, thr_row, guard_row, bottom: panel1.b + 24.0 }
+        let panel1 = Rect::new(PAD, p1_t, w - PAD, thr_row.b + 8.0);
+        Layout { cards, hint, panel1, auto_row, thr_row, bottom: panel1.b + 24.0 }
     }
 
     fn max_scroll(&self) -> f32 {
@@ -894,9 +809,6 @@ impl Battery {
         if let Some(k) = Self::segments(g, l.thr_row, &Self::threshold_labels()).iter().position(|s| s.contains(x, y)) {
             return Hit::Threshold(k);
         }
-        if l.guard_row.contains(x, y) {
-            return Hit::Guard;
-        }
         Hit::None
     }
 
@@ -931,13 +843,7 @@ impl Battery {
 
     pub fn paint(&self, g: &Gfx) {
         let w = self.w;
-        let dot = if self.ac {
-            pal().green
-        } else if self.awake.is_empty() {
-            accent()
-        } else {
-            pal().red
-        };
+        let dot = if self.ac { pal().green } else { accent() };
         status(g, self.head_x + 16.0, HEAD_CY, dot, &self.status_text(), pal().muted, self.folder_rect().l - 8.0);
         icon_button(g, self.folder_rect(), ICON_FOLDER, pal().muted, self.hover == Hit::Folder);
 
@@ -981,10 +887,6 @@ impl Battery {
             setting(r, t!("Low battery alert", "Pil uyarısı"), t!("a notification; switching stays yours", "bildirim gelir, geçiş sende"), 300.0);
             let sel = THRESHOLDS.iter().position(|&t| t == self.cfg.threshold).unwrap_or(0);
             self.paint_segments(g, r, &Self::threshold_labels(), sel, |k| self.hover == Hit::Threshold(k));
-            let r = l.guard_row;
-            g.fill(Rect::new(r.l, r.t, r.r, r.t + 1.0), 0.0, pal().hover);
-            setting(r, t!("RTX watch", "RTX bekçisi"), t!("names the app that wakes the discrete GPU on battery", "pildeyken RTX'i uyandıran uygulamayı söyler"), 60.0);
-            toggle(g, toggle_rect(r.r, r.cy()), self.cfg.guard, accent(), self.luid.is_some());
 
             if let Some(r) = l.hint {
                 let text = format!("{} · {}", t!("Worth closing", "Kapatman iyi olur"), self.suggest.join(", "));
@@ -1092,12 +994,6 @@ impl ToolPage for Battery {
                 self.low_warned = false;
                 self.redraw();
             }
-            Hit::Guard => {
-                self.cfg.guard = !self.cfg.guard;
-                self.cfg.save();
-                self.guard();
-                self.redraw();
-            }
             Hit::None => {}
         }
     }
@@ -1136,8 +1032,8 @@ impl ToolPage for Battery {
 }
 
 impl Drop for Battery {
-    /// Araç kaldırılırken ya da hive kapanırken: olay kayıtları ve zamanlayıcılar bırakılır.
-    /// Ayarlar olduğu gibi kalır (hive bir sonraki açılışta vitesi yeniden uygular); kaldırmada
+    /// Araç kaldırılırken ya da winloom kapanırken: olay kayıtları ve zamanlayıcılar bırakılır.
+    /// Ayarlar olduğu gibi kalır (winloom bir sonraki açılışta vitesi yeniden uygular); kaldırmada
     /// `uninstall` hepsini geri koyar.
     fn drop(&mut self) {
         unsafe {

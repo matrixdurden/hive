@@ -2,7 +2,7 @@
 //!
 //! Görev çubuğu iki adımda kaybolur: otomatik gizlemeye alınır (pencereler ekranın altına
 //! kadar uzansın) ve penceresi saklanır (fare alta değince çıkmasın). Gizleme kalıcı bir ayar
-//! olduğu için ilk değiştirmeden önceki hali `geri.ini`'ye yazılır: hive çökse ya da bilgisayar
+//! olduğu için ilk değiştirmeden önceki hali `geri.ini`'ye yazılır: winloom çökse ya da bilgisayar
 //! kapansa da bir sonraki açılışta ve kaldırırken doğru hale dönülür. Pencereyi saklamak kalıcı
 //! değildir; Explorer yeniden başlarsa çubuk geri gelir, dock onu yeniden saklar.
 //! Masaüstü simgelerine dokunulmaz (masaüstünün sağ tık menüsünden açılıp kapanır); eski
@@ -85,7 +85,7 @@ fn set_align(v: Option<u32>) {
 }
 
 /// Değiştirmeden önceki hal yazılır: her ayar, dosyada yoksa (henüz değiştirilmeden) bir kez.
-/// Başlat hizası hive kapanınca değil, yalnızca kaldırınca geri alındığından o satır dosyada
+/// Başlat hizası winloom kapanınca değil, yalnızca kaldırınca geri alındığından o satır dosyada
 /// kalabilir; diğerleri ondan bağımsız eklenir.
 fn save_state() {
     let text = std::fs::read_to_string(state_file()).unwrap_or_default();
@@ -108,7 +108,7 @@ fn save_state() {
 
 /// Explorer'ı düzgünce kapatıp yeniden açar: Başlat hizasını yalnızca açılışta okur. Görev
 /// çubuğunun "Explorer'dan çık" komutu kullanılır, ardından explorer.exe başlatılır. `wait`:
-/// bitene kadar bekle (kaldırırken; hive hemen ardından kapanır, Explorer kapalı kalmasın).
+/// bitene kadar bekle (kaldırırken; winloom hemen ardından kapanır, Explorer kapalı kalmasın).
 fn restart_explorer(wait: bool) {
     let run = || unsafe {
         use windows::Win32::System::Threading::{OpenProcess, PROCESS_SYNCHRONIZE, WaitForSingleObject};
@@ -180,7 +180,7 @@ pub fn rehide(hwnd: HWND) {
 }
 
 /// Her şeyi `geri.ini`'deki haline döndürür; dosya yoksa yalnızca görev çubuğunu gösterir.
-/// Başlat hizası yalnızca `full` ise (kaldırırken) geri alınır: hive her kapanıp açıldığında
+/// Başlat hizası yalnızca `full` ise (kaldırırken) geri alınır: winloom her kapanıp açıldığında
 /// Explorer yeniden başlamasın.
 pub fn restore(full: bool) {
     for t in trays() {

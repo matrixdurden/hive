@@ -7,6 +7,8 @@ use crate::data_dir;
 pub struct Sound {
     pub path: PathBuf,
     pub hotkey: Option<Hotkey>,
+    /// Kullanıcının verdiği ad; yoksa dosya adı gösterilir.
+    pub name: Option<String>,
 }
 
 /// Basit `anahtar = değer` dosyası. Bilinmeyen satırlar yok sayılır, eksikler varsayılana düşer.
@@ -48,10 +50,12 @@ impl Config {
                 "kulaklik" => cfg.ear = v.parse().unwrap_or(cfg.ear).min(100),
                 "durdur" => cfg.stop = Hotkey::parse(v),
                 "klip_kisayol" => cfg.clip = Hotkey::parse(v),
-                // ses = <kısayol> | <yol>
+                // ses = <kısayol> | <yol> [| <ad>]  ('|' Windows dosya adında geçemez)
                 "ses" => {
-                    if let Some((key, p)) = v.split_once('|') {
-                        cfg.sounds.push(Sound { path: PathBuf::from(p.trim()), hotkey: Hotkey::parse(key) });
+                    let mut parts = v.splitn(3, '|');
+                    if let (Some(key), Some(p)) = (parts.next(), parts.next()) {
+                        let name = parts.next().map(str::trim).filter(|n| !n.is_empty()).map(String::from);
+                        cfg.sounds.push(Sound { path: PathBuf::from(p.trim()), hotkey: Hotkey::parse(key), name });
                     }
                 }
                 _ => {}
@@ -63,7 +67,7 @@ impl Config {
     pub fn save(&self) {
         let key = |h: &Option<Hotkey>| h.map(|h| h.to_string()).unwrap_or_default();
         let mut text = format!(
-            "# lyrebird ayarları: elle düzenlenebilir, uygulama yeniden başlayınca okunur\n\
+            "# soundboard ayarları: elle düzenlenebilir, uygulama yeniden başlayınca okunur\n\
              mikrofon = {}\nkulaklik = {}\ndurdur = {}\nklip_kisayol = {}\n",
             self.mic,
             self.ear,
@@ -71,7 +75,11 @@ impl Config {
             key(&self.clip)
         );
         for s in &self.sounds {
-            text.push_str(&format!("ses = {} | {}\n", key(&s.hotkey), s.path.display()));
+            text.push_str(&format!("ses = {} | {}", key(&s.hotkey), s.path.display()));
+            if let Some(n) = &s.name {
+                text.push_str(&format!(" | {n}"));
+            }
+            text.push('\n');
         }
         let _ = std::fs::create_dir_all(data_dir());
         if let Err(e) = std::fs::write(path(), text) {

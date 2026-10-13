@@ -1,6 +1,6 @@
 //! Çalan şarkı: Windows'un ortak medya denetimi (Spotify, tarayıcı, ... hepsi buraya yazar).
 //! Spotify'ın kendi API'ına, girişe gerek yok. Ayrı bir iş parçacığı oturumları izler: olay
-//! gelince durumu okur, değiştiyse paylaşılan `Now`'a yazıp hive'ın penceresine haber verir.
+//! gelince durumu okur, değiştiyse paylaşılan `Now`'a yazıp winloom'ın penceresine haber verir.
 //! Düğmeler (çal, sonraki, ...) de aynı iş parçacığına gönderilir; WinRT beklemeleri arayüzü
 //! kilitlemesin.
 
@@ -20,7 +20,7 @@ use windows::Win32::System::Com::{COINIT_MULTITHREADED, CoInitializeEx};
 use windows::Win32::System::SystemInformation::GetSystemTimeAsFileTime;
 use windows::Win32::UI::WindowsAndMessaging::PostMessageW;
 
-/// Çalan şarkı değişti (hive'ın penceresine).
+/// Çalan şarkı değişti (winloom'ın penceresine).
 pub const WM_MEDIA: u32 = windows::Win32::UI::WindowsAndMessaging::WM_APP + 70;
 
 #[derive(Clone, Default, PartialEq)]
@@ -417,7 +417,7 @@ fn command(s: Option<&Session>, c: Cmd) {
     }
 }
 
-/// `hive --music-test`: görülen oturumlar ve gösterilecek olanın durumu.
+/// `winloom --music-test`: görülen oturumlar ve gösterilecek olanın durumu.
 pub fn probe() -> (String, Option<Now>) {
     let mut shown = None;
     let r = (|| -> windows::core::Result<String> {

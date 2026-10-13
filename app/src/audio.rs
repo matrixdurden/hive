@@ -11,7 +11,7 @@
 //! değiştiğinde eski cihaz artık bağlı değilse (Bluetooth koptu, USB çekildi) çalan her medyayı
 //! duraklatır. Elle cihaz değiştirmek bir şey yapmaz: eski cihaz hâlâ bağlıdır.
 //!
-//! Motor hive sürecinin içinde: Core Audio olaylarını hive'ın penceresine iletir, medya
+//! Motor winloom sürecinin içinde: Core Audio olaylarını winloom'ın penceresine iletir, medya
 //! oturumlarını (Spotify, tarayıcı, ...) Windows'un ortak medya denetiminden duraklatır.
 //! Çal/duraklat tuşuna basmaz: zaten duran bir şeyi başlatmaz. Varsayılan cihazı değiştirmek
 //! için Windows'un Ses ayarlarının kullandığı (belgelenmemiş) IPolicyConfig arayüzü kullanılır.
@@ -278,7 +278,7 @@ fn pause_playing() -> windows::core::Result<()> {
     Ok(())
 }
 
-/// `hive --audio-test`: ses cihazlarını ve medya oturumlarını yazdırır, hiçbir şeyi değiştirmez.
+/// `winloom --audio-test`: ses cihazlarını ve medya oturumlarını yazdırır, hiçbir şeyi değiştirmez.
 pub fn probe() -> String {
     let mut s = String::new();
     unsafe {
@@ -406,7 +406,7 @@ impl Audio {
             head_x: 0.0,
             head_r: 0.0,
         };
-        // hive'ın arayüz iş parçacığı COM'u zaten başlatmış (STA).
+        // winloom'ın arayüz iş parçacığı COM'u zaten başlatmış (STA).
         if let Ok(e) = unsafe { CoCreateInstance::<_, IMMDeviceEnumerator>(&MMDeviceEnumerator, None, CLSCTX_ALL) } {
             let client: IMMNotificationClient = Client(hwnd.0 as usize).into();
             let _ = unsafe { e.RegisterEndpointNotificationCallback(&client) };
@@ -799,7 +799,7 @@ impl ToolPage for Audio {
         use windows::Win32::UI::WindowsAndMessaging::{WM_HOTKEY, WM_TIMER};
         match msg {
             WM_TIMER if wp.0 == TIMER_RECHECK => self.timer(wp.0),
-            WM_HOTKEY if wp.0 as i32 >= HK_BASE => self.hotkey(wp.0 as i32),
+            WM_HOTKEY if (HK_BASE..HK_BASE + KEYS as i32).contains(&(wp.0 as i32)) => self.hotkey(wp.0 as i32),
             WM_DEVICE => self.device_changed(),
             WM_MIC => self.mic_changed(),
             _ => return None,

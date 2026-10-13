@@ -106,7 +106,7 @@ pub fn refresh_rate() -> Option<u32> {
 }
 
 /// Yalnızca hızı değiştirir; çözünürlük ve konum olduğu gibi kalır. Kalıcı değildir (kayıt
-/// defterine yazılmaz): hive kapanınca Windows bir sonraki açılışta kendi ayarına döner.
+/// defterine yazılmaz): winloom kapanınca Windows bir sonraki açılışta kendi ayarına döner.
 /// Olmazsa Windows'un dönüş kodu (oturum açılırken ekran sürücüsü henüz hazır değilse
 /// DISP_CHANGE_BADMODE / FAILED gelir; çağıran yeniden dener).
 pub fn set_refresh_rate(hz: u32) -> Result<(), i32> {

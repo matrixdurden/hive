@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/tr/banner.png" alt="hive: Windows araçların tek yerde" width="100%">
+  <img src="docs/tr/banner.png" alt="winloom: Windows araçların tek yerde" width="100%">
 </p>
 
 <p align="center">
@@ -21,21 +21,22 @@ PowerShell'e yapıştır:
 irm https://github.com/matrixdurden/hive/raw/main/install.ps1 | iex
 ```
 
-Yönetici izni gerekmez. Sonrasında hive yeni sürümleri kendisi indirir, doğrular ve bir sonraki açılışında kurar (Ayarlar'dan hemen de kurulur, otomatik güncelleme kapatılabilir).
+Yönetici izni gerekmez. Sonrasında winloom yeni sürümleri kendisi indirir, doğrular ve bir sonraki açılışında kurar (Ayarlar'dan hemen de kurulur, otomatik güncelleme kapatılabilir).
 
 ## Araçlar
 
-Bütün araçlar hive ile gelir: **Araçlar** sayfasından istediğini açarsın, açtığın her araç kenar çubuğunda ve Başlat menüsünde kendi adıyla görünür. "Pil" diye aratınca hive o araçta açılır.
+Bütün araçlar winloom ile gelir: **Araçlar** sayfasından istediğini açarsın, açtığın her araç kenar çubuğunda ve Başlat menüsünde kendi adıyla görünür. "Pil" diye aratınca winloom o araçta açılır.
 
 | | | |
 |:---:|---|---|
-| <img src="app/assets/araclar/soundboard-64.png" width="40"> | **Soundboard** | Sesi doğrudan mikrofona veren soundboard. Sanal mikrofon kurmaz; Discord, oyunlar, OBS, mikrofonu dinleyen her uygulama duyar. Myinstants'ta ses ara (kulaklıkta dinle, tek tıkla ekle); bilgisayarda az önce çalan son 10 saniyeyi kısayolla (`Ctrl+Alt+L`) listeye ekle. |
+| <img src="app/assets/araclar/soundboard-64.png" width="40"> | **Blast** | Sesi doğrudan mikrofona veren soundboard. Sanal mikrofon kurmaz; Discord, oyunlar, OBS, mikrofonu dinleyen her uygulama duyar. Myinstants'ta ses ara (kulaklıkta dinle, tek tıkla ekle); bilgisayarda az önce çalan son 10 saniyeyi kısayolla (`Ctrl+Alt+L`) listeye ekle. |
 | <img src="app/assets/araclar/wallpaper-64.png" width="40"> | **Duvar kâğıdı** | Masaüstü ikonlarının arkasında GPU ile çizilen canlı duvar kâğıtları. Tam ekranda ve pilde kendiliğinden durur. |
-| <img src="app/assets/araclar/tunnel-64.png" width="40"> | **Tünel** | Bütün bilgisayarı ağ engellerinin ötesine geçiren tünel: kendi sunucun üzerinden ya da sunucusuz DPI modunda. [Ayrı depo](https://github.com/matrixdurden/rabbithole). |
+| <img src="app/assets/araclar/tunnel-64.png" width="40"> | **VPN** | Bütün bilgisayarı ağ engellerinin ötesine geçiren VPN: kendi sunucun üzerinden ya da sunucusuz DPI modunda. [Ayrı depo](https://github.com/matrixdurden/rabbithole). |
 | <img src="app/assets/araclar/battery-64.png" width="40"> | **Pil** | Dizüstü için üç vites: prizde, dışarıda bir iki saat, hayatta kalma. Şarj takılıp çıkınca kendi geçer, pildeyken ekran kartını uyutur, her vitesin gerçekte kaç saat gittiğini öğrenir. |
 | <img src="app/assets/araclar/audio-64.png" width="40"> | **Ses aygıtları** | Ses çıkışları ve girişleri tek listede: tıkladığın varsayılan olur. Tek tuşla sonraki çıkışa (`Ctrl+Alt+O`), sonraki girişe (`Ctrl+Alt+I`) geçer ya da mikrofonu susturur (`Ctrl+Alt+K`). Kulaklık kopunca da müzik laptop hoparlöründen devam etmez, durur. |
 | <img src="app/assets/araclar/dock-64.png" width="40"> | **Dock** | Windows görev çubuğunun yerine, Windows 11 görünümünde bir dock: sabitlediğin ve açık uygulamalar yüzen tek bir çubukta, ucunda Wi-Fi, ses, pil ve saat. İmlecin altındaki simgeler büyür, dikkat isteyen uygulama zıplar, üstünde durunca pencerelerinin canlı önizlemesi açılır, sürükleyerek sıralarsın. Hep ekranda durur, büyütülen pencereler onun üstünde biter; tam ekran oyunlarda hiç görünmez. İmleci sol üst köşeye sertçe götürünce bütün pencereler (Win+Tab), sağ alt köşeye götürünce masaüstü açılır (ikisi de kapatılabilir). Win+1…9 uygulamaları dock sırasıyla açar; "Dock'a sabitle" sağ tık menüsünde. Kaldırınca görev çubuğu ve Başlat eski haline döner. |
 | <img src="app/assets/araclar/music-64.png" width="40"> | **Müzik** | Spotify'da çalan, dock'un solunda dock boyunda bir şeritte: kapak, şarkı, sanatçı, önceki / çal / sonraki ve tıklayıp atlayabildiğin ince bir ilerleme çizgisi. Karta tıklayınca açık Spotify penceresi öne gelir. Arka planı kapağın bulanık hali, kapağın rengi ya da dock gibi düz. Spotify uygulamasıyla da tarayıcıdan kurulan Spotify web uygulamasıyla da çalışır; Spotify'a giriş gerekmez. İstersen diğer oynatıcılar (tarayıcıda YouTube, ...) da görünür. |
+| <img src="app/assets/araclar/clicker-64.png" width="40"> | **Tıklayıcı** | Klasik otomatik tıklayıcı. Bir tuşa basılı tut (ya da aç/kapa modunda bir kez bas), imlecin olduğu yere sol, sağ ya da orta düğmeyle iki saniyede birden saniyede yüze kadar tıklar; bırakınca ya da belirlediğin sayıya gelince durur. Tuşu sen seçersin (başlangıçta `F6`). |
 
 <table>
   <tr>
@@ -48,16 +49,16 @@ Bütün araçlar hive ile gelir: **Araçlar** sayfasından istediğini açarsın
   </tr>
 </table>
 
-hive İngilizce ve Türkçe konuşur; Windows'un görüntü dilini izler, Ayarlar'dan değiştirilebilir.
+winloom İngilizce ve Türkçe konuşur; Windows'un görüntü dilini izler, Ayarlar'dan değiştirilebilir.
 
 ## İz bırakmaz
 
-Bir aracı kapatınca açılırken yaptığı her şey geri alınır: dosyalar, kayıt defteri, mikrofon ayarları, hizmetler, PATH, kısayollar. Kapatmanın sonunda hive bunları tek tek denetler; bir şey kalmışsa kapatma başarılı sayılmaz ve neyin kaldığını söyler.
+Bir aracı kapatınca açılırken yaptığı her şey geri alınır: dosyalar, kayıt defteri, mikrofon ayarları, hizmetler, PATH, kısayollar. Kapatmanın sonunda winloom bunları tek tek denetler; bir şey kalmışsa kapatma başarılı sayılmaz ve neyin kaldığını söyler.
 
-hive'ı kaldırmak (Ayarlar'dan ya da Windows'un **Uygulamalar** listesinden) önce açık bütün araçları aynı şekilde kapatır, sonra kendini.
+winloom'ı kaldırmak (Ayarlar'dan ya da Windows'un **Uygulamalar** listesinden) önce açık bütün araçları aynı şekilde kapatır, sonra kendini.
 
 ```powershell
-hive --leftovers    # kapalı araçlardan kalan iz var mı
+winloom --leftovers    # kapalı araçlardan kalan iz var mı
 ```
 
 ## Derleme
@@ -65,14 +66,14 @@ hive --leftovers    # kapalı araçlardan kalan iz var mı
 WSL'den Windows için çapraz derlenir (`x86_64-pc-windows-gnu`, mingw gerekir):
 
 ```sh
-make build      # target/x86_64-pc-windows-gnu/release/hive.exe
-make install    # %LOCALAPPDATA%\Programs\hive altına kur ve başlat
+make build      # target/x86_64-pc-windows-gnu/release/winloom.exe
+make install    # %LOCALAPPDATA%\Programs\winloom altına kur ve başlat
 make release    # app/Cargo.toml'daki sürümle GitHub'da yayın
 ```
 
 | Klasör | |
 |---|---|
-| [`app/`](app) | hive.exe: pencere, araç sayfaları, araçları açıp kapatma |
+| [`app/`](app) | winloom.exe: pencere, araç sayfaları, araçları açıp kapatma |
 | [`soundboard/`](soundboard) | Soundboard motoru ve mikrofon efekti (`apo/`) |
 | [`wallpaper/`](wallpaper) | Duvar kâğıdı motoru ve [`.cheshire` formatı](wallpaper/README.md#the-cheshire-format) |
 

@@ -29,7 +29,7 @@ impl Drop for Handle {
 fn get(url: &str) -> Res<(u32, Vec<u8>)> {
     let rest = url.strip_prefix("https://").ok_or(t!("https only", "yalnızca https"))?;
     let (host, path) = rest.split_once('/').map_or((rest, "/".to_string()), |(h, p)| (h, format!("/{p}")));
-    let agent = wide(concat!("hive/", env!("CARGO_PKG_VERSION")));
+    let agent = wide(concat!("winloom/", env!("CARGO_PKG_VERSION")));
     let (host, path) = (wide(host), wide(&path));
     unsafe {
         let session = Handle::new(WinHttpOpen(

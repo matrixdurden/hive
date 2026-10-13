@@ -19,7 +19,7 @@ pub enum Reason {
 }
 
 impl Reason {
-    /// hive'a giden, dilden bağımsız ad.
+    /// winloom'a giden, dilden bağımsız ad.
     pub fn key(self) -> &'static str {
         match self {
             Reason::User => "user",

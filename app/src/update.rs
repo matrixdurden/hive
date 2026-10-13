@@ -1,7 +1,7 @@
 //! Otomatik güncelleme. Arka planda arada bir GitHub'daki son yayına bakar; bu sürümden yeniyse
-//! `hive.exe`'yi indirir, yanındaki SHA-256 ile doğrular ve `guncelleme\` klasörüne koyar. Hazır
-//! güncelleme hive'ın bir sonraki açılışında (oturum açınca) kendiliğinden kurulur, Ayarlar'dan
-//! hemen de kurulabilir. Kurmak indirilen exe'yi `--install` ile çalıştırmaktır: çalışan hive'ı
+//! `winloom.exe`'yi indirir, yanındaki SHA-256 ile doğrular ve `guncelleme\` klasörüne koyar. Hazır
+//! güncelleme winloom'ın bir sonraki açılışında (oturum açınca) kendiliğinden kurulur, Ayarlar'dan
+//! hemen de kurulabilir. Kurmak indirilen exe'yi `--install` ile çalıştırmaktır: çalışan winloom'ı
 //! kapatır, kendini yerine yazar, araçlarla birlikte yeniden başlatır (ilk kurulumla aynı yol).
 //!
 //! Geliştirme kopyası (WSL'den çalışan) güncellenmez.
@@ -22,7 +22,7 @@ const REPO: &str = "matrixdurden/hive";
 const FIRST: Duration = Duration::from_secs(45);
 const EVERY: Duration = Duration::from_secs(6 * 3600);
 
-/// Durum değişti (hive'ın penceresine): Ayarlar yeniden çizilir.
+/// Durum değişti (winloom'ın penceresine): Ayarlar yeniden çizilir.
 pub const WM_UPDATE: u32 = windows::Win32::UI::WindowsAndMessaging::WM_APP + 6;
 
 #[derive(Clone, PartialEq, Debug)]
@@ -51,7 +51,7 @@ fn dir() -> PathBuf {
 }
 
 fn file(version: &str) -> PathBuf {
-    dir().join(format!("hive-{version}.exe"))
+    dir().join(format!("winloom-{version}.exe"))
 }
 
 /// "v1.2.3" ya da "1.2.3" → (1, 2, 3).
@@ -73,7 +73,7 @@ fn pending() -> Option<(String, PathBuf)> {
     rd.flatten()
         .filter_map(|e| {
             let name = e.file_name().to_string_lossy().to_string();
-            let v = name.strip_prefix("hive-")?.strip_suffix(".exe")?.to_string();
+            let v = name.strip_prefix("winloom-")?.strip_suffix(".exe")?.to_string();
             newer(&v).then(|| (v, e.path()))
         })
         .max_by_key(|(v, _)| parse(v))
@@ -101,8 +101,8 @@ fn check() -> Result<Status, String> {
         return Ok(Status::Ready(version));
     }
     let base = format!("https://github.com/{REPO}/releases/download/{tag}");
-    let exe = net::download(&format!("{base}/hive.exe")).map_err(|e| e.to_string())?;
-    let sum = net::download(&format!("{base}/hive.exe.sha256")).map_err(|e| e.to_string())?;
+    let exe = net::download(&format!("{base}/winloom.exe")).map_err(|e| e.to_string())?;
+    let sum = net::download(&format!("{base}/winloom.exe.sha256")).map_err(|e| e.to_string())?;
     let expected = String::from_utf8_lossy(&sum).split_whitespace().next().unwrap_or_default().to_lowercase();
     let actual = net::sha256(&exe).map_err(|e| e.to_string())?;
     if expected.is_empty() || actual != expected {
@@ -170,7 +170,7 @@ pub fn set_enabled(hwnd: HWND, on: bool) {
     }
 }
 
-/// Hazır güncellemeyi kurar: indirilen exe çalışan hive'ı kapatıp yerine geçer. Başarıyla
+/// Hazır güncellemeyi kurar: indirilen exe çalışan winloom'ı kapatıp yerine geçer. Başarıyla
 /// başlatılırsa `true` (bu süreç birazdan kapatılır).
 pub fn install(hidden: bool) -> bool {
     let Some((version, exe)) = pending() else { return false };
@@ -193,7 +193,7 @@ pub fn install(hidden: bool) -> bool {
 
 /// Açılışta: indirilmiş güncelleme varsa onu kurar (bu süreç başlamadan çıkar). Yalnızca bir
 /// kez denenir: kurulum bir önceki açılışta da denendiyse ve hâlâ bu eski sürüm açılıyorsa
-/// indirilen dosya bozuktur, silinir, hive olduğu gibi açılır.
+/// indirilen dosya bozuktur, silinir, winloom olduğu gibi açılır.
 pub fn install_pending_at_start(hidden: bool) -> bool {
     if util::installed_copy().is_none() || pending().is_none() {
         return false;
@@ -208,7 +208,7 @@ pub fn install_pending_at_start(hidden: bool) -> bool {
     install(hidden)
 }
 
-/// `hive --update-test`: son yayına bakar, yeniyse indirip doğrular (kurmaz).
+/// `winloom --update-test`: son yayına bakar, yeniyse indirip doğrular (kurmaz).
 pub fn probe() -> String {
     let tag = latest_tag();
     let mut out = format!("bu sürüm: {}\nson yayın: {tag:?}\n", env!("CARGO_PKG_VERSION"));
