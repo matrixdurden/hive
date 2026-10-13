@@ -5,7 +5,6 @@
 
 pub use ortak::tool::Tool;
 
-use ortak::util;
 
 use crate::shell;
 
@@ -22,9 +21,9 @@ pub const TOOLS: &[&Tool] = &[
 ];
 pub const COUNT: usize = TOOLS.len();
 
-/// Kimliği (ya da eski kimliği) bu olan araç.
+/// Kimliği bu olan araç.
 pub fn find(id: &str) -> Option<usize> {
-    TOOLS.iter().position(|t| t.id.eq_ignore_ascii_case(id) || t.old_ids.iter().any(|o| o.eq_ignore_ascii_case(id)))
+    TOOLS.iter().position(|t| t.id.eq_ignore_ascii_case(id))
 }
 
 /// winloom süreci başlarken: her aracın `init`'i.
@@ -37,20 +36,6 @@ pub fn init() {
 /// Pencere açmadan çalışan araç komutları: biri karşılarsa çıkış kodu.
 pub fn cli(args: &[String]) -> Option<i32> {
     TOOLS.iter().find_map(|t| (t.cli)(args))
-}
-
-/// Açılışta eski kurulumların izleri: araçlar kendi eski klasörlerini taşır, artık olmayan
-/// araçların kısayolları ve simgeleri silinir.
-pub fn migrate() {
-    for t in TOOLS {
-        (t.migrate)();
-        for old in t.old_ids {
-            let _ = std::fs::remove_file(util::data_dir().join("ikonlar").join(format!("{old}.ico")));
-        }
-    }
-    for name in ["Music widget", "Müzik widget'ı"] {
-        shell::remove_link(name);
-    }
 }
 
 /// Aracın motorunu ve sayfasını başlatır (araç açıkken winloom'ın açılışında ya da açılınca).

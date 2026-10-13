@@ -12,7 +12,6 @@ use ortak::{log, net, util};
 
 pub static TOOL: Tool = Tool {
     id: "tunnel",
-    old_ids: &["rabbithole"],
     names: ["VPN", "VPN"],
     tagline: ["A VPN that takes your whole computer past network blocks", "Bütün bilgisayarı ağ engellerinin ötesine geçiren VPN"],
     note: [

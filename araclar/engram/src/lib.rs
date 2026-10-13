@@ -33,7 +33,6 @@ mod overlay;
 mod page;
 mod pages;
 mod reminders;
-mod shell;
 mod spotify;
 mod system;
 mod ui;
@@ -52,13 +51,8 @@ pub fn installed() -> bool {
     util::data_dir().join("ayarlar.ini").is_file()
 }
 
-/// Aç: tek başına kurulu engram varsa onu winloom'a taşır (kapatır, kayıtlarını siler, ayarlarını
-/// ve anahtarlarını buraya alır), yoksa boş ayarlarla başlar.
+/// Aç: boş ayarlarla başlar (anahtarlar Ayarlar alt sayfasından girilir).
 pub fn install() -> Result<(), String> {
-    unsafe {
-        let _ = windows::Win32::System::Com::CoInitializeEx(None, windows::Win32::System::Com::COINIT_APARTMENTTHREADED);
-    }
-    shell::adopt();
     if !installed() {
         config::Config::load().save();
     }

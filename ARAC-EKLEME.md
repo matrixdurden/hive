@@ -58,7 +58,8 @@ tepsisinden gösterir; winloom'ı kendi sayfasında öne getirmek `ortak::hub::p
        tagline: ["What it does, in one line", "Ne işe yaradığı, tek cümle"],
        note: ["No internet needed", "İnternet gerekmez"],
        off_note: ["What happens when it is turned off.", "Kapatınca ne olacağı."],
-       icons: ortak::icons!("ornek"),
+       glyph: "\u{E74C}", // Segoe Fluent Icons: arayüzdeki tek renkli simgesi
+       icons: ortak::icons!("ornek"), // Başlat menüsü kısayolunun renkli simgesi
        installed: crate::installed,
        install: crate::install,
        uninstall: crate::uninstall,
@@ -68,8 +69,12 @@ tepsisinden gösterir; winloom'ı kendi sayfasında öne getirmek `ortak::hub::p
    };
    ```
 
-   `lib.rs`'in başına `mod tool; pub use tool::TOOL;` ekle. İsteğe bağlı alanlar (`old_ids`,
-   `downloads`, `init`, `cli`, `migrate`) `ortak/src/tool.rs`'de açıklanıyor.
+   `lib.rs`'in başına `mod tool; pub use tool::TOOL;` ekle. İsteğe bağlı alanlar (`downloads`,
+   `init`, `cli`) `ortak/src/tool.rs`'de açıklanıyor.
+
+   Sayfa isterse iki şey daha verir (`ToolPage`): `summary()` Ana sayfadaki kutucuğunda
+   aracın şu anki durumu ("%99" / "Prizde vitesi · şarjda" gibi), `ask(text)` arama kutusuna
+   yazılanı araca bırakmak (engram soru olarak alır).
 
 5. **Merkeze bağla.** İki satır:
    - `merkez/Cargo.toml`: `ornek = { path = "../araclar/ornek" }`

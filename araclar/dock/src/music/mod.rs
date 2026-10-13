@@ -89,24 +89,6 @@ impl Settings {
     }
 }
 
-/// Müzik eskiden ayrı bir araçtı (`music`, önce `mockturtle`): ayarları dock'un klasörüne
-/// taşınır, kendi klasörü silinir.
-pub fn migrate() {
-    let old = ortak::util::data_dir().join("music");
-    if !old.is_dir() {
-        return;
-    }
-    if super::installed() && !ini().exists() {
-        // Eski dosyada yer / boy gibi artık olmayan satırlar da var: yükleyip yeniden yazılır.
-        let _ = std::fs::copy(old.join("ayarlar.ini"), ini());
-        let _ = Settings::load().save();
-    }
-    match std::fs::remove_dir_all(&old) {
-        Ok(()) => ortak::log!("müzik ayarları dock'a taşındı"),
-        Err(e) => ortak::log!("eski müzik klasörü silinemedi: {e}"),
-    }
-}
-
 /// Dock tam ekran bir uygulamanın altında kaldı (ya da çıktı): şerit de saklanır. Dock'un kararı
 /// pencere boyutu değişikliklerini de izler (tarayıcıda video tam ekrana geçince öndeki pencere
 /// değişmez).

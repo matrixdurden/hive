@@ -9,8 +9,6 @@ use crate::ui::ToolPage;
 pub struct Tool {
     /// Kimlik: klasörün adı, veri klasörünün adı, `--tab <id>`. Görünen ad değişse de değişmez.
     pub id: &'static str,
-    /// Eski kimlikler: kayıtlı sekme ve eski kısayollar bunlarla da açılır.
-    pub old_ids: &'static [&'static str],
     /// Görünen ad: [İngilizce, Türkçe].
     pub names: [&'static str; 2],
     /// Ne işe yaradığı, tek cümle: [İngilizce, Türkçe].
@@ -44,15 +42,12 @@ pub struct Tool {
     /// Pencere açmadan çalışan komutlar (`--dock-test` gibi): ilk argüman bu aracınsa çalıştırır,
     /// çıkış kodunu verir.
     pub cli: fn(&[String]) -> Option<i32>,
-    /// Pencere açılırken bir kez: eski kurulumların izlerini (eski adlı klasörler...) taşır.
-    pub migrate: fn(),
 }
 
 impl Tool {
     /// İsteğe bağlı alanların boş hali: `Tool { id: ..., ..Tool::BASE }`.
     pub const BASE: Tool = Tool {
         id: "",
-        old_ids: &[],
         names: ["", ""],
         tagline: ["", ""],
         note: ["", ""],
@@ -67,7 +62,6 @@ impl Tool {
         start: |_| unreachable!("aracın start'ı yok"),
         init: || {},
         cli: |_| None,
-        migrate: || {},
     };
 
     pub fn name(&self) -> &'static str {
@@ -110,16 +104,5 @@ pub fn console(apartment: bool) {
     unsafe {
         let _ = AttachConsole(ATTACH_PARENT_PROCESS);
         let _ = CoInitializeEx(None, if apartment { COINIT_APARTMENTTHREADED } else { COINIT_MULTITHREADED });
-    }
-}
-
-/// Eski adlı veri klasörünü yeni adına taşır (yeni ad zaten varsa dokunmaz).
-pub fn rename_data_dir(old: &str, new: &str) {
-    let (o, n) = (crate::util::data_dir().join(old), crate::util::data_dir().join(new));
-    if o.is_dir() && !n.exists() {
-        match std::fs::rename(&o, &n) {
-            Ok(()) => log!("{old} → {new} taşındı"),
-            Err(e) => log!("{old} → {new} taşınamadı: {e}"),
-        }
     }
 }

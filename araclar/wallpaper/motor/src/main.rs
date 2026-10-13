@@ -172,7 +172,6 @@ fn desktop(args: &[String]) -> Res<()> {
     if shell::installed_copy() {
         update::cleanup();
     }
-    setup::migrate();
 
     let installed = launch.file.map(|f| install(Path::new(f))).transpose()?;
     // Tek örnek: motor zaten çalışıyorsa dosyayı ona ilet ve çık.

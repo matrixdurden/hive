@@ -6,8 +6,6 @@ use ortak::tool::{self, Tool};
 
 pub static TOOL: Tool = Tool {
     id: "dock",
-    // Müzik eskiden ayrı bir araçtı, artık dock'un parçası.
-    old_ids: &["hatter", "mockturtle", "music"],
     names: ["Dock", "Dock"],
     tagline: ["A dock in place of the taskbar", "Görev çubuğunun yerine bir dock"],
     note: [
@@ -26,15 +24,8 @@ pub static TOOL: Tool = Tool {
     leftovers: crate::leftovers,
     start: |hwnd| Box::new(crate::Dock::start(hwnd)),
     cli,
-    migrate,
     ..Tool::BASE
 };
-
-fn migrate() {
-    tool::rename_data_dir("hatter", "dock");
-    tool::rename_data_dir("mockturtle", "music");
-    crate::music::migrate();
-}
 
 fn cli(args: &[String]) -> Option<i32> {
     let arg = |i: usize| args.get(i).map(String::as_str);
@@ -66,7 +57,7 @@ fn cli(args: &[String]) -> Option<i32> {
             print!("{}", crate::bench());
         }
         // Sağ tık menüsündeki "Dock'a sabitle": konsol yok.
-        "--dock-pin" | "--hatter-pin" => {
+        "--dock-pin" => {
             unsafe {
                 let _ = windows::Win32::System::Com::CoInitializeEx(None, windows::Win32::System::Com::COINIT_APARTMENTTHREADED);
             }

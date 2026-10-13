@@ -2,7 +2,7 @@
 //! `%LOCALAPPDATA%\Programs\wallpaper`'a kopyalar, oradaki kopyayı başlatır ve çıkar. Kayıtları
 //! (kısayol, ilişkilendirme, "Uygulamalar ve özellikler") kurulu kopya açılışta kendisi yapar.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::time::Duration;
 
 use windows::Win32::Foundation::{CloseHandle, LPARAM, WAIT_OBJECT_0, WPARAM};
@@ -57,9 +57,6 @@ pub fn uninstall() -> Res<bool> {
     }
     close_running();
     shell::unregister();
-    if let Some(old) = legacy_dir() {
-        let _ = std::fs::remove_dir_all(old);
-    }
     // Bu exe klasörün içinden çalışıyor olabilir: klasörü biz çıktıktan sonra cmd siler.
     let dir = util::app_dir();
     let line = format!("cmd.exe /c ping -n 3 127.0.0.1 >nul & rmdir /s /q \"{}\"", dir.display());
@@ -91,32 +88,5 @@ pub fn wait_for(pid: u32) {
             WaitForSingleObject(process, 10_000);
             let _ = CloseHandle(process);
         }
-    }
-}
-
-/// Eski sürümlerin veri klasörü.
-fn legacy_dir() -> Option<PathBuf> {
-    std::env::var_os("APPDATA").map(|a| PathBuf::from(a).join("cheshire"))
-}
-
-/// Eski sürümler veriyi %APPDATA%\duvar kâğıdı motorunda tutuyordu: ayarları ve duvar kâğıtlarını
-/// kurulum klasörüne taşır, eski klasörü siler.
-pub fn migrate() {
-    let Some(old) = legacy_dir().filter(|d| d.exists()) else { return };
-    let new = util::app_dir();
-    let ini = new.join("cheshire.ini");
-    if !ini.exists() {
-        let _ = std::fs::copy(old.join("ayarlar.txt"), &ini);
-    }
-    for entry in std::fs::read_dir(old.join("duvarlar")).into_iter().flatten().flatten() {
-        let dst = util::wallpapers_dir().join(entry.file_name());
-        if !dst.exists() {
-            let _ = std::fs::create_dir_all(util::wallpapers_dir());
-            let _ = std::fs::copy(entry.path(), dst);
-        }
-    }
-    match std::fs::remove_dir_all(&old) {
-        Ok(()) => log!("eski veri taşındı: {}", old.display()),
-        Err(e) => log!("eski veri klasörü silinemedi ({}): {e}", old.display()),
     }
 }

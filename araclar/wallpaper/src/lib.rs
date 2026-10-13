@@ -5,9 +5,8 @@
 //! Sayfa: üstte durum ve düğmeler, ortada küçük resimli galeri, altta seçili duvar kâğıdının
 //! ayarları. Küçük resimleri motorun `--onizleme` komutu üretir, önbellekte tutulur.
 //!
-//! Diskteki ve kayıt defterindeki adlar (cheshire.exe, %APPDATA%\cheshire, .cheshire dosyaları,
-//! "cheshire" kayıtları) motorun eski, tek başına sürümünden kalma: kurulu olanlar bulunabilsin
-//! ve eski kurulumlar temizlenebilsin diye değişmez.
+//! Diskteki adlar (`Programs\cheshire\cheshire.exe`, .cheshire dosyaları) motorun ilk adından
+//! kalma; kurulu olanlar bulunabilsin diye değişmez.
 
 #[macro_use]
 extern crate ortak;
@@ -26,7 +25,6 @@ use windows::Win32::Foundation::*;
 use windows::Win32::Graphics::Gdi::InvalidateRect;
 use windows::Win32::System::Com::{CLSCTX_INPROC_SERVER, CoCreateInstance, CoTaskMemFree};
 use windows::Win32::System::DataExchange::COPYDATASTRUCT;
-use windows::Win32::System::Registry::{HKEY_CURRENT_USER, RegDeleteKeyValueW, RegDeleteTreeW};
 use windows::Win32::System::Threading::{OpenProcess, PROCESS_SYNCHRONIZE, PROCESS_TERMINATE, TerminateProcess, WaitForSingleObject};
 use windows::Win32::UI::Shell::Common::COMDLG_FILTERSPEC;
 use windows::Win32::UI::Shell::*;
@@ -171,35 +169,10 @@ fn write_engine() -> Result<(), String> {
     Err(format!("{} {last}", t!("could not write cheshire.exe:", "cheshire.exe yazılamadı:")))
 }
 
-/// Motorun eski, tek başına sürümünün kendi kayıtları (Windows ile başlama, Programlar listesi): artık winloom yönetiyor.
-fn remove_standalone_registrations() {
-    unsafe {
-        let _ = RegDeleteKeyValueW(HKEY_CURRENT_USER, w!(r"Software\Microsoft\Windows\CurrentVersion\Run"), w!("cheshire"));
-        let _ = RegDeleteTreeW(HKEY_CURRENT_USER, w!(r"Software\Microsoft\Windows\CurrentVersion\Uninstall\cheshire"));
-    }
-}
-
-/// Eski sürümün klasörü (%APPDATA%\wallpaper), taşıma sonrası kalmış olabilir.
-fn legacy_dir() -> PathBuf {
-    std::env::var_os("APPDATA").map(PathBuf::from).unwrap_or_default().join("cheshire")
-}
-
-const RUN: &str = r"Software\Microsoft\Windows\CurrentVersion\Run";
-const UNINSTALL: &str = r"Software\Microsoft\Windows\CurrentVersion\Uninstall\cheshire";
-const CLASSES: [&str; 2] = [r"Software\Classes\.cheshire", r"Software\Classes\cheshire.dosya"];
-
 /// Kurulumdan geriye kalan her şey; boşsa iz yok.
 pub fn leftovers() -> Vec<String> {
     let mut left: Vec<String> =
-        [app_dir(), thumbs_dir(), legacy_dir()].iter().filter(|p| p.exists()).map(|p| p.display().to_string()).collect();
-    if util::reg_value_exists(HKEY_CURRENT_USER, RUN, "cheshire") {
-        left.push(format!(r"HKCU\{RUN}\cheshire"));
-    }
-    for key in std::iter::once(UNINSTALL).chain(CLASSES) {
-        if util::reg_key_exists(HKEY_CURRENT_USER, key) {
-            left.push(format!(r"HKCU\{key}"));
-        }
-    }
+        [app_dir(), thumbs_dir()].iter().filter(|p| p.exists()).map(|p| p.display().to_string()).collect();
     if engine_window().is_some() {
         left.push(t!("running wallpaper engine", "çalışan duvar kâğıdı motoru").into());
     }
@@ -208,23 +181,13 @@ pub fn leftovers() -> Vec<String> {
 
 /// Kur: motoru yazar. Örnek duvar kâğıtlarını motor ilk açılışta kendisi koyar.
 pub fn install() -> Result<(), String> {
-    write_engine()?;
-    remove_standalone_registrations();
-    Ok(())
+    write_engine()
 }
 
 /// Kaldır: motoru durdurur; klasörü (duvar kâğıtları dahil), önizlemeleri ve kayıtları siler.
 pub fn uninstall() -> Result<(), String> {
     stop_engine();
-    remove_standalone_registrations();
-    unsafe {
-        let _ = RegDeleteTreeW(HKEY_CURRENT_USER, w!(r"Software\Classes\.cheshire"));
-        let _ = RegDeleteTreeW(HKEY_CURRENT_USER, w!(r"Software\Classes\cheshire.dosya"));
-    }
     let _ = std::fs::remove_dir_all(thumbs_dir());
-    let _ = std::fs::remove_dir_all(legacy_dir());
-    // Explorer dosya simgelerini ve "birlikte aç" listesini unutsun.
-    unsafe { SHChangeNotify(SHCNE_ASSOCCHANGED, SHCNF_IDLIST, None, None) };
     std::fs::remove_dir_all(app_dir()).map_err(|e| format!("{} {}: {e}", t!("could not delete", "silinemedi:"), app_dir().display()))
 }
 
@@ -447,14 +410,12 @@ pub struct Wallpaper {
 }
 
 impl Wallpaper {
-    /// Sayfayı kurar ve motoru başlatır: önceki motor (eski bir winloom'dan ya da tepsideki ayrı
-    /// duvar kâğıdı motorundan) kapatılır, exe güncel değilse yazılır, sonra WM_RELAUNCH ile `--hub` açılır.
+    /// Sayfayı kurar ve motoru başlatır: önceki motor kapatılır, exe güncel değilse yazılır, sonra WM_RELAUNCH ile `--hub` açılır.
     pub fn start(hwnd: HWND) -> Self {
         let st = parse_state(&std::fs::read_to_string(app_dir().join("durum.txt")).unwrap_or_default());
         let raw = hwnd.0 as usize;
         std::thread::spawn(move || {
             stop_engine();
-            remove_standalone_registrations();
             if let Err(e) = write_engine() {
                 log!("{e}");
             }

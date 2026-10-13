@@ -4,7 +4,6 @@ use ortak::tool::Tool;
 
 pub static TOOL: Tool = Tool {
     id: "wallpaper",
-    old_ids: &["cheshire"],
     names: ["Wallpaper", "Duvar kâğıdı"],
     tagline: ["Live wallpapers drawn by your GPU", "GPU ile çizilen canlı duvar kâğıdı"],
     note: ["No internet needed", "İnternet gerekmez"],

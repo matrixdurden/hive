@@ -28,11 +28,6 @@ pub fn data_dir() -> PathBuf {
     ortak::util::data_dir().join("engram")
 }
 
-/// engram'ın eski, tek başına kurulumu (%LOCALAPPDATA%\Programs\engram).
-pub fn standalone_dir() -> PathBuf {
-    local_programs().join("engram")
-}
-
 /// Kayıt defterinden DWORD.
 pub fn reg_dword(root: HKEY, path: &str, name: &str) -> Option<u32> {
     let (p, n) = (wide(path), wide(name));

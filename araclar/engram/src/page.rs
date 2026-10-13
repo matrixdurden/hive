@@ -262,10 +262,6 @@ impl Engram {
     fn requests(&mut self) {
         let (tab, redraw, voice) = {
             let mut s = self.shared.borrow_mut();
-            // Tema, çıkış ve kaldırma winloom'ın: engram'ın eski istekleri yok sayılır.
-            s.set_theme = None;
-            s.quit = false;
-            s.remove_requested = false;
             (s.open_tab.take(), std::mem::take(&mut s.redraw), s.voice_req.take())
         };
         if let Some(r) = voice {

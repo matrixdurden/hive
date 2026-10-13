@@ -45,10 +45,7 @@ pub struct State {
     pub train_msg: String,
     /// Sayfaların pencereye istekleri.
     pub open_tab: Option<Tab>,
-    pub set_theme: Option<crate::ui::Theme>,
     pub voice_req: Option<VoiceReq>,
-    pub quit: bool,
-    pub remove_requested: bool,
     pub redraw: bool,
     /// Hafıza sayfası bu notu açsın (yol ya da başlık).
     pub open_note: Option<String>,
@@ -68,10 +65,7 @@ impl State {
             trained: 0,
             train_msg: String::new(),
             open_tab: None,
-            set_theme: None,
             voice_req: None,
-            quit: false,
-            remove_requested: false,
             redraw: false,
             open_note: None,
         }

@@ -169,18 +169,16 @@ fn fnv(data: &[u8]) -> u64 {
 /// - hiç sunulmamış örnek eklenir (yeni sürümle gelen duvar kâğıtları),
 /// - kullanıcının dokunmadığı (özeti kayıtlı olanla aynı) eski örnek yenisiyle değişir,
 /// - kullanıcının sildiği örnek geri gelmez, değiştirdiği ezilmez.
-/// `.sunulan` hiç yoksa (önceki sürümlerden kalma klasör) adı tutan örnekler bizimdir: yenilenir.
 pub fn ensure_wallpapers() {
     let dir = util::wallpapers_dir();
     let _ = std::fs::create_dir_all(&dir);
     let manifest = dir.join(".sunulan");
-    let legacy = !manifest.exists();
     let mut offered: Vec<(String, u64)> = std::fs::read_to_string(&manifest)
         .unwrap_or_default()
         .lines()
         .filter_map(|l| l.split_once(' ').and_then(|(n, h)| Some((n.to_string(), u64::from_str_radix(h, 16).ok()?))))
         .collect();
-    let mut changed = legacy;
+    let mut changed = false;
     for (name, src) in BUNDLED {
         let path = dir.join(name);
         let new = fnv(src.as_bytes());
@@ -191,7 +189,7 @@ pub fn ensure_wallpapers() {
             (None, Some(_)) => false,                     // kullanıcı silmiş
             (Some(c), _) if c == new => false,            // zaten güncel
             (Some(c), Some(k)) => c == k,                 // dokunulmamış eski sürüm
-            (Some(_), None) => legacy,                    // eski klasör: örnek bizim
+            (Some(_), None) => false,                     // aynı adda kullanıcının dosyası
         };
         if write && std::fs::write(&path, src).is_ok() {
             log!("örnek duvar kâğıdı yazıldı: {name}");

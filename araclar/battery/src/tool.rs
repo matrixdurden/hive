@@ -4,7 +4,6 @@ use ortak::tool::{self, Tool};
 
 pub static TOOL: Tool = Tool {
     id: "battery",
-    old_ids: &["dormouse"],
     names: ["Battery", "Pil"],
     tagline: ["Three gears for your laptop's battery", "Dizüstünün pili için üç vites"],
     note: ["Laptops only", "Yalnızca dizüstü"],
@@ -20,7 +19,6 @@ pub static TOOL: Tool = Tool {
     leftovers: crate::leftovers,
     start: |hwnd| Box::new(crate::Battery::start(hwnd)),
     cli,
-    migrate: || tool::rename_data_dir("dormouse", "battery"),
     ..Tool::BASE
 };
 

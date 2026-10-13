@@ -1815,7 +1815,6 @@ pub fn run(hidden: bool, tab: Option<String>) -> Res<()> {
         crate::update::start(hwnd, cfg.auto_update);
         app.sync_tools();
         crate::shell::register_app();
-        crate::shell::migrate_autostart();
         app.autostart = autostart();
         // İstenen ya da son açık sekme; kurulu araç yoksa Araçlar.
         let page = tab.as_deref().and_then(Page::from_id).or_else(|| Page::from_id(&cfg.tab)).unwrap_or(Page::Home);

@@ -122,8 +122,6 @@ fn main() {
     unsafe {
         let _ = SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
     }
-    shell::migrate_from_hive();
-    tools::migrate();
     if let Err(e) = app::run(hidden, tab) {
         log!("hata: {e}");
         util::error_box(&format!("{}\n\n{e}", t!("winloom could not start:", "winloom başlatılamadı:")));

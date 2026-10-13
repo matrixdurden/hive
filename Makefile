@@ -36,9 +36,7 @@ release: build
 	@test -z "$$(git status --porcelain)" || { echo "commit edilmemiş değişiklik var"; exit 1; }
 	@! git rev-parse -q --verify "refs/tags/v$(VERSION)" >/dev/null || { echo "v$(VERSION) zaten var: Cargo.toml'daki sürümü artır"; exit 1; }
 	cd $(OUT) && sha256sum winloom.exe | cut -d' ' -f1 > winloom.exe.sha256
-	# Eski adıyla (hive) kurulu sürümler güncellemeyi hive.exe adıyla arar: aynı dosya o adla da yüklenir.
-	cp $(OUT)/winloom.exe $(OUT)/hive.exe && cp $(OUT)/winloom.exe.sha256 $(OUT)/hive.exe.sha256
-	gh release create "v$(VERSION)" $(OUT)/winloom.exe $(OUT)/winloom.exe.sha256 $(OUT)/hive.exe $(OUT)/hive.exe.sha256 --title "winloom $(VERSION)" --generate-notes
+	gh release create "v$(VERSION)" $(OUT)/winloom.exe $(OUT)/winloom.exe.sha256 --title "winloom $(VERSION)" --generate-notes
 
 # engram'ın yerel sesi (XTTS v2, ekran kartında): WSL'de ~/.local/share/engram-xtts altına ortam ve sunucu.
 # İlk açılışta model (~1,8 GB) Hugging Face'ten iner. Lisans: Coqui Public Model License (ticari değil).

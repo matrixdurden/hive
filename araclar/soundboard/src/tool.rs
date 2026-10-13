@@ -1,20 +1,14 @@
 //! Blast'ın (soundboard) winloom'a tanımı. Açmak mikrofon efektini bağlamaktır (yönetici).
 
-use windows::Win32::Foundation::CloseHandle;
 use windows::Win32::System::Com::{COINIT_APARTMENTTHREADED, CoInitializeEx};
-use windows::Win32::System::Registry::{HKEY_CURRENT_USER, RegDeleteKeyValueW};
-use windows::Win32::System::Threading::{OpenProcess, PROCESS_TERMINATE, TerminateProcess};
-use windows::Win32::UI::WindowsAndMessaging::{FindWindowW, GetWindowThreadProcessId};
-use windows::core::{PCWSTR, w};
 
+use ortak::log;
 use ortak::tool::{self, Tool};
-use ortak::{log, util};
 
 use crate::{ARG_INSTALL, ARG_UNINSTALL, Soundboard};
 
 pub static TOOL: Tool = Tool {
     id: "soundboard",
-    old_ids: &["lyrebird"],
     names: ["Blast", "Blast"],
     tagline: ["A soundboard that plays straight into your microphone", "Sesi doğrudan mikrofona veren soundboard"],
     note: ["Adds an effect to your microphone · needs admin", "Mikrofonuna bir ses efekti takar · yönetici izni ister"],
@@ -28,36 +22,24 @@ pub static TOOL: Tool = Tool {
     install: || setup(true),
     uninstall,
     leftovers,
-    start: |hwnd| {
-        retire_standalone_lyrebird();
-        Box::new(Soundboard::start(hwnd))
-    },
+    start: |hwnd| Box::new(Soundboard::start(hwnd)),
     // Motor da winloom'ın log dosyasına yazsın.
     init: || soundboard_engine::log::set_sink(log::write),
     cli,
     ..Tool::BASE
 };
 
-const RUN: &str = r"Software\Microsoft\Windows\CurrentVersion\Run";
-
 fn uninstall() -> Result<(), String> {
     setup(false)?;
-    // Kullanıcı tarafı: ses listesi, eski tek başına sürüm, onun Windows ile başlaması.
+    // Kullanıcı tarafı: ses listesi.
     let _ = std::fs::remove_dir_all(crate::data_dir());
-    let _ = std::fs::remove_dir_all(util::local_programs().join("lyrebird"));
-    unsafe {
-        let _ = RegDeleteKeyValueW(HKEY_CURRENT_USER, w!(r"Software\Microsoft\Windows\CurrentVersion\Run"), w!("lyrebird"));
-    }
     Ok(())
 }
 
 fn leftovers() -> Vec<String> {
     let exists = |p: std::path::PathBuf| p.exists().then(|| p.display().to_string());
     let mut l = crate::install::leftovers();
-    l.extend([crate::data_dir(), util::local_programs().join("lyrebird")].into_iter().filter_map(exists));
-    if util::reg_value_exists(HKEY_CURRENT_USER, RUN, "lyrebird") {
-        l.push(format!(r"HKCU\{RUN}\lyrebird"));
-    }
+    l.extend([crate::data_dir()].into_iter().filter_map(exists));
     l
 }
 
@@ -92,22 +74,5 @@ fn cli(args: &[String]) -> Option<i32> {
             })
         }
         _ => None,
-    }
-}
-
-/// soundboard artık winloom içinde çalışıyor: ayrı kopya açıksa kapatılır (ortak belleğe aynı anda
-/// iki yazar olamaz), Windows ile başlaması kaldırılır.
-fn retire_standalone_lyrebird() {
-    unsafe {
-        if let Ok(hwnd) = FindWindowW(w!("Lyrebird"), PCWSTR::null()) {
-            let mut pid = 0u32;
-            GetWindowThreadProcessId(hwnd, Some(&mut pid));
-            if let Ok(h) = OpenProcess(PROCESS_TERMINATE, false, pid) {
-                let _ = TerminateProcess(h, 0);
-                let _ = CloseHandle(h);
-                log!("ayrı soundboard kapatıldı (pid {pid})");
-            }
-        }
-        let _ = RegDeleteKeyValueW(HKEY_CURRENT_USER, w!(r"Software\Microsoft\Windows\CurrentVersion\Run"), w!("lyrebird"));
     }
 }

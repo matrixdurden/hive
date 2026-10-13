@@ -4,7 +4,6 @@ use ortak::tool::{self, Tool};
 
 pub static TOOL: Tool = Tool {
     id: "audio",
-    old_ids: &["tweedle"],
     names: ["Audio devices", "Ses aygıtları"],
     tagline: ["Audio outputs and inputs, one key away", "Ses çıkışları ve girişleri, tek tuş uzağında"],
     note: ["No internet needed", "İnternet gerekmez"],
@@ -20,7 +19,6 @@ pub static TOOL: Tool = Tool {
     leftovers: crate::leftovers,
     start: |hwnd| Box::new(crate::Audio::start(hwnd)),
     cli,
-    migrate: || tool::rename_data_dir("tweedle", "audio"),
     ..Tool::BASE
 };
 
