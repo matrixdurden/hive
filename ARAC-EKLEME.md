@@ -99,6 +99,12 @@ tepsisinden gösterir; winloom'ı kendi sayfasında öne getirmek `ortak::hub::p
 - **Arka plandaki iş arayüzü kilitlemez.** `install` ve `uninstall` zaten arka plan iş
   parçacığında çalışır. Sayfanın kendi uzun işleri de iş parçacığında yapılır, sonucu
   `PostMessageW` ile pencereye gelir.
+- **Başlık bandında düğme yok.** Başlıkta winloom aracın simgesini ve adını çizer, sayfa yalnızca
+  tek satırlık durumunu (`status(...)`). Bütün eylemler sayfanın içinde, sayfa kitinin
+  (`ortak::form`) satırlarıdır. Alt ekranları olan araç (engram) başlığın altında sade sekmeler
+  kullanır.
+- **Asistan gibi araçlar** (`top: true`) kenar çubuğunda "Araçlar"ın üstünde durur; Ana sayfada
+  kutucuk yerine en üstte soru kutusu olur (yazılan `ask(text)` ile gider).
 - **Araca özgü komutlar** (`--ornek-test` gibi) aracın `cli`'sinde yazılır, `main.rs`'e eklenmez.
 - **Kimlik aralıkları.** Bütün sayfalar winloom'ın tek penceresini paylaşır. Mesaj, zamanlayıcı ve
   kısayol kimlikleri çakışmasın diye her aracın kendi aralığı var. Yeni araç sıradaki boş aralığı

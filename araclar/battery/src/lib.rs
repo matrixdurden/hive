@@ -71,6 +71,7 @@ const DEFAULT_IGPU: &str = "brave;Spotify;claude;Discord;WhatsApp;Code;msedgeweb
 /// Sayfa satırları (vites satırları vitesin kendi numarasını taşır).
 const R_AUTO: u32 = 10;
 const R_THRESHOLD: u32 = 11;
+const R_FOLDER: u32 = 12;
 
 pub fn dir() -> PathBuf {
     util::data_dir().join("battery")
@@ -314,7 +315,6 @@ pub fn probe() -> String {
 #[derive(Clone, Copy, PartialEq, Debug)]
 enum Hit {
     None,
-    Folder,
     Form(form::Hit),
 }
 
@@ -739,15 +739,11 @@ impl Battery {
 
     // --- Yerleşim ---
 
-    fn folder_rect(&self) -> Rect {
-        Rect::new(self.head_r - 36.0, HEAD_CY - 18.0, self.head_r, HEAD_CY + 18.0)
-    }
-
     fn threshold_labels() -> Vec<String> {
         THRESHOLDS.iter().map(|&t| if t == 0 { t!("Off", "Kapalı").to_string() } else { format!("%{t}") }).collect()
     }
 
-    /// Sayfa kitiyle: vitesler (her biri bir satır, seçili olanda işaret) ve otomatik geçiş.
+    /// Sayfa kitiyle: vitesler (her biri bir satır, seçili olanda işaret), otomatik geçiş ve veriler.
     fn items(&self) -> Vec<Item> {
         let mut items = vec![Item::Section(t!("Gear", "Vites").into())];
         for m in MODES {
@@ -777,6 +773,13 @@ impl Battery {
                 t!("a notification; switching stays yours", "bildirim gelir, geçiş sende"),
                 Ctl::Seg(Self::threshold_labels(), sel),
             )),
+            Item::Section(t!("Data", "Veriler").into()),
+            Item::Row(Row::new(
+                R_FOLDER,
+                t!("Folder", "Klasör"),
+                t!("Settings and measurements", "Ayarlar ve ölçümler"),
+                Ctl::Button(t!("Open", "Aç").into()),
+            )),
         ]);
         items
     }
@@ -791,7 +794,7 @@ impl Battery {
 
     fn hit(&self, g: &Gfx, x: f32, y: f32) -> Hit {
         if y < HEADER {
-            return if self.folder_rect().contains(x, y) { Hit::Folder } else { Hit::None };
+            return Hit::None;
         }
         match self.form().hit(g, x, y) {
             form::Hit::None => Hit::None,
@@ -803,8 +806,7 @@ impl Battery {
 
     pub fn paint(&self, g: &Gfx) {
         let dot = if self.ac { pal().green } else { accent() };
-        status(g, self.head_x + 16.0, HEAD_CY, dot, &self.status_text(), pal().muted, self.folder_rect().l - 8.0);
-        icon_button(g, self.folder_rect(), ICON_FOLDER, pal().muted, self.hover == Hit::Folder);
+        status(g, self.head_x + 16.0, HEAD_CY, dot, &self.status_text(), pal().muted, self.head_r - 8.0);
         let hover = if let Hit::Form(f) = self.hover { f } else { form::Hit::None };
         let f = self.form();
         g.clip(Rect::new(0.0, HEADER, self.w, self.h), || f.paint(g, hover, None));
@@ -904,7 +906,7 @@ impl ToolPage for Battery {
             return;
         }
         match hit {
-            Hit::Folder => self.open_folder(),
+            Hit::Form(form::Hit::Button(R_FOLDER)) => self.open_folder(),
             Hit::Form(form::Hit::Row(m)) if m <= SURVIVAL as u32 => {
                 self.manual = true;
                 self.switch(m as u8, false);
@@ -936,15 +938,6 @@ impl ToolPage for Battery {
 
     fn interactive(&self, g: &Gfx, x: f32, y: f32) -> bool {
         self.hit(g, x, y) != Hit::None
-    }
-
-    fn tip(&self) -> Option<(Rect, String)> {
-        match self.hover {
-            Hit::Folder => {
-                Some((self.folder_rect(), t!("Settings and measurements folder", "Ayar ve ölçüm klasörü").into()))
-            }
-            _ => None,
-        }
     }
 
     fn set_visible(&mut self, visible: bool) {

@@ -3,7 +3,7 @@
 //! penceresine gelir, buradan dağıtılır. engram'ın kendi penceresi yok; yalnızca konuşurken
 //! ekranda ışık katmanı (overlay) görünür.
 
-use std::cell::{Cell, RefCell};
+use std::cell::RefCell;
 use std::path::PathBuf;
 use std::rc::Rc;
 
@@ -17,6 +17,8 @@ use crate::gfx::{Gfx, Rect};
 use crate::log;
 use crate::ui::*;
 
+/// Başlığın altındaki sekme şeridi (Sohbet · Hafıza · Ayarlar).
+const TABS: f32 = 40.0;
 /// Ses notunun değişip değişmediğine bakan zamanlayıcı.
 const NOTE_TIMER: usize = 0x6e74;
 
@@ -50,7 +52,7 @@ impl Tab {
 
     pub fn label(self) -> &'static str {
         match self {
-            Tab::Home => t!("Home", "Ana"),
+            Tab::Home => t!("Chat", "Sohbet"),
             Tab::Memory => t!("Memory", "Hafıza"),
             Tab::Settings => t!("Settings", "Ayarlar"),
         }
@@ -82,8 +84,6 @@ pub struct Engram {
     h: f32,
     head_x: f32,
     head_r: f32,
-    /// Başlıktaki geçişin sağ ucu (son çizimde ölçülen).
-    nav_end: Cell<f32>,
     /// Sayfa ekranda (winloom'da seçili ve pencere açık).
     visible: bool,
     /// Bilgisayar kontrolü için winloom küçültüldü: yazılı tur bitince geri gelsin.
@@ -113,7 +113,6 @@ impl Engram {
             h: 0.0,
             head_x: 0.0,
             head_r: 0.0,
-            nav_end: Cell::new(0.0),
             visible: false,
             restore_after: false,
             notice: None,
@@ -181,79 +180,61 @@ impl Engram {
 
     // --- Yerleşim ---
 
-    /// Başlıktaki geçiş: (sayfa, düğme).
+    /// Başlığın altındaki sekmeler: (sayfa, yer).
     fn nav_rects(&self, g: &Gfx) -> Vec<(Tab, Rect)> {
-        let tabs = [Tab::Home, Tab::Memory];
-        let mut x = self.head_x + 16.0;
-        tabs.iter()
+        let mut x = PAD;
+        Tab::ALL
+            .iter()
             .map(|&t| {
-                let wi = g.measure(t.label(), &g.f.button) + 36.0;
-                let r = Rect::new(x, HEAD_CY - 15.0, x + wi, HEAD_CY + 15.0);
-                x += wi;
+                let wi = g.measure(t.label(), &g.f.button) + 24.0;
+                let r = Rect::new(x, HEADER, x + wi, HEADER + TABS);
+                x += wi + 4.0;
                 (t, r)
             })
             .collect()
     }
 
-    fn gear_rect(&self) -> Rect {
-        let r = self.head_r - 8.0;
-        Rect::new(r - 36.0, HEAD_CY - 16.0, r, HEAD_CY + 16.0)
-    }
-
-    /// Alt sayfaya boyutunu verir: başlık bandında kendi düğmelerinin yeri geçişten ayarlar
-    /// düğmesine kadar. Geçişin genişliği yazıya bağlı: ilk çizime kadar yaklaşık tutulur.
+    /// Alt sayfaya boyutunu verir: sekme şeridinin altındaki alan (alt sayfa kendi köşesinden
+    /// çizer, başlık bandını kullanmaz).
     fn layout_page(&mut self) {
-        let (w, h) = (self.w, self.h);
-        let hx = self.nav_end.get().max(self.head_x + 200.0) + 12.0;
-        let hr = self.gear_rect().l - 8.0;
-        self.page().layout(w, h, hx, hr);
+        let (w, h) = (self.w, self.h - TABS);
+        self.page().layout(w, h, PAD, w - PAD);
     }
 
     fn hit(&self, g: &Gfx, x: f32, y: f32) -> Hit {
         if y < HEADER {
-            if self.gear_rect().contains(x, y) {
-                return Hit::Nav(Tab::Settings);
-            }
-            if let Some((t, _)) = self.nav_rects(g).into_iter().find(|(_, r)| r.contains(x, y)) {
-                return Hit::Nav(t);
-            }
+            return Hit::None;
+        }
+        if y < HEADER + TABS {
+            return self.nav_rects(g).into_iter().find(|(_, r)| r.contains(x, y)).map_or(Hit::None, |(t, _)| Hit::Nav(t));
         }
         Hit::Content
     }
 
     fn click(&mut self, hit: Hit) {
         if let Hit::Nav(t) = hit {
-            // Ayarlar düğmesi açıkken tekrar basılınca geri döner.
-            let t = if t == Tab::Settings && self.tab == Tab::Settings { Tab::Home } else { t };
             self.select(t);
         }
     }
 
+    /// Başlıkta durum; altında sade sekmeler (seçilinin altında çizgi).
     fn paint_nav(&self, g: &Gfx) {
-        let navs = self.nav_rects(g);
-        if let Some(last) = navs.last() {
-            self.nav_end.set(last.1.r);
+        if let Some((state, how)) = self.summary() {
+            let s = self.shared.borrow();
+            let busy = s.brain.busy || !matches!(s.voice_state, crate::voice::State::Idle);
+            let dot = if busy { pal().green } else { pal().faint };
+            drop(s);
+            status(g, self.head_x + 16.0, HEAD_CY, dot, &format!("{state} · {how}"), pal().muted, self.head_r - 8.0);
         }
-        if let (Some(first), Some(last)) = (navs.first(), navs.last()) {
-            let track = Rect::new(first.1.l - 3.0, first.1.t - 3.0, last.1.r + 3.0, last.1.b + 3.0);
-            g.fill(track, track.h() / 2.0, pal().panel);
-        }
-        for (t, r) in navs {
+        g.fill(Rect::new(0.0, HEADER + TABS - 1.0, self.w, HEADER + TABS), 0.0, pal().line);
+        for (t, r) in self.nav_rects(g) {
             let selected = self.tab == t;
             let hovered = self.hover == Hit::Nav(t);
-            if selected {
-                g.fill(r, r.h() / 2.0, pal().sel.alpha(1.6));
-            } else if hovered {
-                g.fill(r, r.h() / 2.0, pal().hover);
-            }
             g.text(t.label(), &g.f.button, r, if selected || hovered { pal().text } else { pal().muted });
+            if selected {
+                g.fill(Rect::new(r.l + 8.0, r.b - 3.0, r.r - 8.0, r.b - 1.0), 1.0, accent());
+            }
         }
-        let gear = self.gear_rect();
-        let on = self.tab == Tab::Settings;
-        if on {
-            g.fill(gear, 6.0, pal().sel);
-        }
-        icon_button(g, gear, ICON_SETTINGS, if on { pal().text } else { pal().muted }, self.hover == Hit::Nav(Tab::Settings));
     }
 
     // --- İstekler ---
@@ -461,16 +442,22 @@ impl ToolPage for Engram {
 
     fn paint(&self, g: &Gfx) {
         let p = self.page_ref();
-        p.paint(g);
+        // Alt sayfa şeridin altına kayar; yalnızca o alana çizer.
+        let (ox, oy) = g.offset();
+        g.clip(Rect::new(0.0, HEADER + TABS, self.w, self.h), || {
+            g.translate(ox, oy + TABS);
+            p.paint(g);
+            if let Some((r, text)) = p.tip() {
+                let tw = g.measure(&text, &g.f.small);
+                let l = ((r.l + r.r) / 2.0 - tw / 2.0 - 10.0).clamp(8.0, self.w - tw - 28.0);
+                let tip = Rect::new(l, r.b + 6.0, l + tw + 20.0, r.b + 32.0);
+                g.fill(tip, 4.0, pal().tip);
+                g.stroke(tip, 4.0, pal().line, 1.0);
+                g.text(&text, &g.f.small_center, tip, pal().text);
+            }
+            g.translate(ox, oy);
+        });
         self.paint_nav(g);
-        if let Some((r, text)) = p.tip() {
-            let tw = g.measure(&text, &g.f.small);
-            let l = ((r.l + r.r) / 2.0 - tw / 2.0 - 10.0).clamp(8.0, self.w - tw - 28.0);
-            let tip = Rect::new(l, r.b + 6.0, l + tw + 20.0, r.b + 32.0);
-            g.fill(tip, 4.0, pal().tip);
-            g.stroke(tip, 4.0, pal().line, 1.0);
-            g.text(&text, &g.f.small_center, tip, pal().text);
-        }
     }
 
     fn mouse_move(&mut self, g: &Gfx, x: f32, y: f32) {
@@ -483,7 +470,7 @@ impl ToolPage for Engram {
             self.redraw();
         }
         if hit == Hit::Content || self.pressed == Hit::Content {
-            self.page().mouse_move(g, x, y);
+            self.page().mouse_move(g, x, y - TABS);
         }
         self.requests();
     }
@@ -497,7 +484,7 @@ impl ToolPage for Engram {
     fn mouse_down(&mut self, g: &Gfx, x: f32, y: f32) {
         self.pressed = self.hit(g, x, y);
         if self.pressed == Hit::Content {
-            self.page().mouse_down(g, x, y);
+            self.page().mouse_down(g, x, y - TABS);
         }
         self.requests();
     }
@@ -505,7 +492,7 @@ impl ToolPage for Engram {
     fn mouse_up(&mut self, g: &Gfx, x: f32, y: f32) {
         let pressed = std::mem::replace(&mut self.pressed, Hit::None);
         if pressed == Hit::Content {
-            self.page().mouse_up(g, x, y);
+            self.page().mouse_up(g, x, y - TABS);
         } else if self.hit(g, x, y) == pressed {
             self.click(pressed);
         }
@@ -513,7 +500,7 @@ impl ToolPage for Engram {
     }
 
     fn wheel(&mut self, g: &Gfx, x: f32, y: f32, delta: f32) {
-        self.page().wheel(g, x, y, delta);
+        self.page().wheel(g, x, y - TABS, delta);
         self.requests();
     }
 
@@ -544,7 +531,8 @@ impl ToolPage for Engram {
     fn interactive(&self, g: &Gfx, x: f32, y: f32) -> bool {
         match self.hit(g, x, y) {
             Hit::Nav(_) => true,
-            _ => self.page_ref().interactive(g, x, y),
+            Hit::Content => self.page_ref().interactive(g, x, y - TABS),
+            Hit::None => false,
         }
     }
 

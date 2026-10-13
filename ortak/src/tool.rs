@@ -19,6 +19,9 @@ pub struct Tool {
     pub off_note: [&'static str; 2],
     /// Açarken bir şey indirir (düğmede "İndiriliyor…").
     pub downloads: bool,
+    /// Araçlardan biri değil, winloom'ın kendisi gibi (asistan): kenar çubuğunda "Araçlar"ın
+    /// üstünde durur, Ana sayfada kutucuk yerine en üstte soru kutusu olur.
+    pub top: bool,
     /// Arayüzdeki simgesi: Segoe Fluent Icons kod noktası, tek renk (kenar çubuğu, sayfa başlığı,
     /// kutucuklar). Renkli PNG'ler yalnızca Başlat menüsü kısayollarında.
     pub glyph: &'static str,
@@ -53,6 +56,7 @@ impl Tool {
         note: ["", ""],
         off_note: ["", ""],
         downloads: false,
+        top: false,
         glyph: "\u{E74C}",
         icons: &[],
         installed: || false,

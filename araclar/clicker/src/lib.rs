@@ -43,7 +43,6 @@ pub const TIMER_UI: usize = 602;
 const HOLD_MS: u32 = 30;
 const UI_MS: u32 = 100;
 const ICON_MOUSE: &str = "\u{E962}";
-const ICON_STOP: &str = "\u{E71A}";
 /// Aracın rengi (ikonuyla aynı), bildirimde.
 const COLOR: u32 = 0xA3E635;
 
@@ -373,8 +372,8 @@ const R_MODE: u32 = 2;
 const R_BUTTON: u32 = 3;
 const R_SPEED: u32 = 4;
 const R_LIMIT: u32 = 5;
-/// Başlıktaki Durdur düğmesi (`Hit::Button(STOP)`); satırlarla çakışmaz.
-const STOP: u32 = 100;
+/// Tıklarken Tetik'in başındaki Durdur satırı.
+const R_STOP: u32 = 6;
 
 pub struct Clicker {
     hwnd: HWND,
@@ -618,7 +617,16 @@ impl Clicker {
         }
     }
 
-    /// Sayfanın içeriği: Tetik ve Tıklama bölümleri.
+    /// Tıklarken durum: kaç tıklama (sınır varsa ondan kaçı).
+    fn run_text(&self) -> String {
+        let n = self.run.as_ref().map_or(0, Run::count);
+        match self.settings.limit {
+            0 => t!(format!("Clicking · {n}"), format!("Tıklıyor · {n}")),
+            l => t!(format!("Clicking · {n} / {l}"), format!("Tıklıyor · {n} / {l}")),
+        }
+    }
+
+    /// Sayfanın içeriği: Tetik (tıklarken başında Durdur) ve Tıklama bölümleri.
     fn items(&self) -> Vec<Item> {
         let s = &self.settings;
         let key_sub = if self.conflict() {
@@ -631,8 +639,11 @@ impl Clicker {
             Mode::Toggle => t!("Press once to start, again to stop", "Bir basış başlatır, bir basış durdurur"),
         };
         let seg = |labels: &[&str], sel: Option<usize>| Ctl::Seg(labels.iter().map(|l| l.to_string()).collect(), sel.unwrap_or(0));
-        vec![
-            Item::Section(t!("Trigger", "Tetik").into()),
+        let mut items = vec![Item::Section(t!("Trigger", "Tetik").into())];
+        if self.running() {
+            items.push(Item::Row(Row::new(R_STOP, self.run_text(), "", Ctl::Primary(t!("Stop", "Durdur").into()))));
+        }
+        items.extend([
             Item::Row(Row::new(
                 R_ON,
                 t!("On", "Açık"),
@@ -660,7 +671,8 @@ impl Clicker {
                 "",
                 Ctl::Slider(limit_to_v(s.limit), fmt_limit(s.limit)),
             )),
-        ]
+        ]);
+        items
     }
 
     fn form(&self) -> Form {
@@ -671,14 +683,10 @@ impl Clicker {
         (self.form().bottom() + self.scroll - self.h).max(0.0)
     }
 
-    fn stop_rect(&self, g: &Gfx) -> Rect {
-        button_rect_right(g, self.head_r, HEAD_CY - 17.0, t!("Stop", "Durdur"), true)
-    }
-
-    /// Başlıkta yalnız Durdur düğmesi; altı sayfa kitinin.
+    /// Başlıkta düğme yok; altı sayfa kitinin.
     fn hit(&self, g: &Gfx, x: f32, y: f32) -> Hit {
         if y < HEADER {
-            return if self.running() && self.stop_rect(g).contains(x, y) { Hit::Button(STOP) } else { Hit::None };
+            return Hit::None;
         }
         self.form().hit(g, x, y)
     }
@@ -705,7 +713,7 @@ impl Clicker {
             Hit::Chip(R_KEY) => self.start_bind(),
             Hit::Seg(R_MODE, k) => self.set_mode(Mode::ALL[k]),
             Hit::Seg(R_BUTTON, k) => self.set_button(Button::ALL[k]),
-            Hit::Button(STOP) => self.end(true),
+            Hit::Button(R_STOP) => self.end(true),
             _ => {}
         }
     }
@@ -714,7 +722,6 @@ impl Clicker {
 
     pub fn paint(&self, g: &Gfx) {
         let key = self.key_name();
-        let n = self.run.as_ref().map_or(0, Run::count);
         let (dot, head, color) = match () {
             _ if !self.settings.enabled => (
                 pal().faint,
@@ -729,12 +736,7 @@ impl Clicker {
             _ if self.settings.key.is_none() => {
                 (pal().faint, t!("Pick a key to start", "Başlamak için bir tuş seç").to_string(), pal().muted)
             }
-            _ if self.running() && self.settings.limit > 0 => (
-                pal().green,
-                t!(format!("Clicking · {n} / {}", self.settings.limit), format!("Tıklıyor · {n} / {}", self.settings.limit)),
-                pal().text,
-            ),
-            _ if self.running() => (pal().green, t!(format!("Clicking · {n}"), format!("Tıklıyor · {n}")), pal().text),
+            _ if self.running() => (pal().green, self.run_text(), pal().text),
             _ if self.settings.mode == Mode::Hold => {
                 (pal().faint, t!(format!("Hold {key} to click"), format!("Tıklamak için {key} tuşunu basılı tut")), pal().muted)
             }
@@ -744,13 +746,7 @@ impl Clicker {
                 pal().muted,
             ),
         };
-        let mut right = self.head_r - 8.0;
-        if self.running() {
-            let r = self.stop_rect(g);
-            button(g, r, t!("Stop", "Durdur"), Some(ICON_STOP), Some(accent()), self.hover == Hit::Button(STOP));
-            right = r.l - 12.0;
-        }
-        status(g, self.head_x + 16.0, HEAD_CY, dot, &head, color, right);
+        status(g, self.head_x + 16.0, HEAD_CY, dot, &head, color, self.head_r - 8.0);
 
         let form = self.form();
         g.clip(Rect::new(0.0, HEADER, self.w, self.h), || form.paint(g, self.hover, self.drag));

@@ -14,6 +14,7 @@ pub static TOOL: Tool = Tool {
         "engram stops listening; its settings, keys and voice cache are deleted. Your notes stay in their folder.",
         "engram dinlemeyi bırakır; ayarları, anahtarları ve ses önbelleği silinir. Notların kendi klasöründe kalır.",
     ],
+    top: true,
     glyph: "\u{EA80}",
     icons: ortak::icons!("engram"),
     installed: crate::installed,

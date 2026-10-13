@@ -1,7 +1,7 @@
 //! soundboard sayfası. Motor (çözme, ortak bellek, kulaklık) motor/'da ve
 //! winloom sürecinde çalışır; mikrofon efekti (APO) audiodg.exe içinde.
 //!
-//! Sayfa ortak sayfa kitiyle (`ortak::form`): başlıkta mikrofonun durumu ve "hepsini sustur",
+//! Sayfa ortak sayfa kitiyle (`ortak::form`): başlıkta mikrofonun durumu,
 //! altında tek sütunda bölümler.
 //! - Mikrofon ve kulaklık: bağlantı, iki ses düzeyi, hepsini susturmanın kısayolu.
 //! - Seslerim: her ses bir satır; tıklamak çalar / durdurur, sağda kısayolu, adı düzenle, kaldır.
@@ -126,11 +126,10 @@ fn level_index(id: u32) -> usize {
     if id == R_MIC_LEVEL { 0 } else { 1 }
 }
 
-/// Tıklanan / üstüne gelinen: başlıktaki düğme, sayfa kiti ya da ses satırının sağındakiler.
+/// Tıklanan / üstüne gelinen: sayfa kiti ya da ses satırının sağındakiler.
 #[derive(Clone, Copy, PartialEq, Debug)]
 enum Hit {
     None,
-    Stop,
     Form(form::Hit),
     Key(usize),
     Rename(usize),
@@ -151,7 +150,7 @@ impl Hit {
         match self {
             Hit::Form(h) => h,
             Hit::Key(n) | Hit::Rename(n) | Hit::Remove(n) => form::Hit::Row(R_SOUND + n as u32),
-            Hit::None | Hit::Stop => form::Hit::None,
+            Hit::None => form::Hit::None,
         }
     }
 }
@@ -833,10 +832,6 @@ impl Soundboard {
         (self.form().bottom() - 24.0 + self.scroll + 12.0 - self.h).max(0.0)
     }
 
-    fn stop_rect(&self) -> Rect {
-        Rect::new(self.head_r - 36.0, HEAD_CY - 18.0, self.head_r, HEAD_CY + 18.0)
-    }
-
     /// Ses satırının sağındaki ikonlar: (adı düzenle, kaldır).
     fn sound_icons(&self, f: &Form, n: usize) -> Option<(Rect, Rect)> {
         let c = f.control(R_SOUND + n as u32)?;
@@ -865,7 +860,7 @@ impl Soundboard {
 
     fn hit(&self, g: &Gfx, x: f32, y: f32) -> Hit {
         if y < HEADER {
-            return if self.stop_rect().contains(x, y) { Hit::Stop } else { Hit::None };
+            return Hit::None;
         }
         let f = self.form();
         let h = f.hit(g, x, y);
@@ -886,8 +881,7 @@ impl Soundboard {
     // --- Çizim ---
 
     pub fn paint(&self, g: &Gfx) {
-        // Başlık: mikrofonun durumu ve hepsini sustur.
-        let stop = self.stop_rect();
+        // Başlık: mikrofonun durumu.
         let label = self.mic_label();
         if !label.is_empty() {
             let (dot, text) = match &self.mic {
@@ -898,10 +892,8 @@ impl Soundboard {
                 MicState::Busy => (accent(), label.into()),
                 _ => (pal().faint, label.into()),
             };
-            status(g, self.head_x + 14.0, HEAD_CY, dot, &text, pal().muted, stop.l - 12.0);
+            status(g, self.head_x + 14.0, HEAD_CY, dot, &text, pal().muted, self.head_r - 8.0);
         }
-        let playing_any = !self.playing.is_empty();
-        icon_button(g, stop, ICON_MUTE, if playing_any { accent() } else { pal().muted }, self.hover == Hit::Stop);
 
         let f = self.form();
         g.clip(Rect::new(0.0, HEADER, self.w, self.h), || {
@@ -1051,7 +1043,6 @@ impl Soundboard {
             return;
         }
         match hit {
-            Hit::Stop => self.player.stop_all(),
             Hit::Key(n) => self.start_bind(Bind::Sound(n)),
             Hit::Rename(n) if self.renaming(n) => self.end_rename(true),
             Hit::Rename(n) => self.start_rename(n),
@@ -1522,7 +1513,6 @@ impl ToolPage for Soundboard {
     fn tip(&self) -> Option<(Rect, String)> {
         let icons = |n| self.sound_icons(&self.form(), n);
         match self.hover {
-            Hit::Stop => Some((self.stop_rect(), t!("Mute all", "Hepsini sustur").into())),
             Hit::Rename(n) => icons(n).map(|(r, _)| (r, t!("Rename", "Adını değiştir").into())),
             Hit::Remove(n) => icons(n).map(|(_, r)| (r, t!("Remove", "Kaldır").into())),
             _ => None,

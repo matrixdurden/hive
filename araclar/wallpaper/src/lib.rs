@@ -2,8 +2,8 @@
 //! GPU tarafındaki bir çökme winloom'ı götürmesin. Komutlar `WM_COPYDATA` ile gider, motor
 //! durumunu `durum.txt`'ye yazıp WM_STATE ile haber verir (bkz. wallpaper/src/hub.rs).
 //!
-//! Sayfa: başlıkta durum ve düğmeler; altında sayfa kitiyle küçük resimli galeri, seçili duvar
-//! kâğıdının ayarları ve genel ayarlar. Küçük resimleri motorun `--onizleme` komutu üretir,
+//! Sayfa: başlıkta yalnız durum; altında sayfa kitiyle küçük resimli galeri, ekle / klasör,
+//! seçili duvar kâğıdının ayarları ve genel ayarlar. Küçük resimleri motorun `--onizleme` komutu üretir,
 //! önbellekte tutulur.
 //!
 //! Diskteki adlar (`Programs\cheshire\cheshire.exe`, .cheshire dosyaları) motorun ilk adından
@@ -63,6 +63,9 @@ const GALLERY: u32 = 1000;
 const RESET: u32 = 1001;
 const FPS_ROW: u32 = 1002;
 const BATTERY: u32 = 1003;
+const PAUSE: u32 = 1004;
+const ADD: u32 = 1005;
+const FOLDER: u32 = 1006;
 
 /// %LOCALAPPDATA%\Programs\wallpaper — motorun exe'si, ayarları ve duvar kâğıtları.
 pub fn app_dir() -> PathBuf {
@@ -360,9 +363,6 @@ fn parse_state(text: &str) -> State {
 #[derive(Clone, Copy, PartialEq, Debug)]
 enum Hit {
     None,
-    Pause,
-    Folder,
-    Add,
     Wall(usize),
     /// Renk seçeneği: parametre ve sırası.
     Swatch(usize, usize),
@@ -550,18 +550,6 @@ impl Wallpaper {
 
     // --- Yerleşim (sayfanın kendi köşesine göre; içerik `scroll` kadar yukarı kayık) ---
 
-    fn pause_rect(&self) -> Rect {
-        Rect::new(self.head_r - 112.0, HEAD_CY - 18.0, self.head_r - 76.0, HEAD_CY + 18.0)
-    }
-
-    fn folder_rect(&self) -> Rect {
-        Rect::new(self.head_r - 74.0, HEAD_CY - 18.0, self.head_r - 38.0, HEAD_CY + 18.0)
-    }
-
-    fn add_rect(&self) -> Rect {
-        Rect::new(self.head_r - 36.0, HEAD_CY - 18.0, self.head_r, HEAD_CY + 18.0)
-    }
-
     /// Galeri ızgarası bu genişlikte: sütun sayısı, kutucuğun genişliği ve yüksekliği.
     fn grid(width: f32) -> (usize, f32, f32) {
         let cols = (((width + GAP) / (CARD_MIN + GAP)).floor() as usize).max(1);
@@ -604,7 +592,8 @@ impl Wallpaper {
         self.st.walls.iter().find(|w| w.0 == self.st.selected).map(|w| pick(&w.1, &w.2))
     }
 
-    /// Sayfanın içeriği: galeri, seçili duvar kâğıdının ayarları, bütün duvar kâğıtları için olanlar.
+    /// Sayfanın içeriği: galeri, ekle / klasör, seçili duvar kâğıdının ayarları, bütün duvar
+    /// kâğıtları için olanlar.
     fn form(&self) -> Form {
         let st = &self.st;
         let mut items = vec![Item::Section(t!("Wallpapers", "Duvar kâğıtları").into())];
@@ -616,6 +605,11 @@ impl Wallpaper {
             let rows = st.walls.len().div_ceil(cols);
             items.push(Item::Custom(GALLERY, rows as f32 * (ch + GAP) - GAP));
         }
+        items.push(Item::Section(String::new()));
+        let add_sub = t!("Copy .cheshire files into the gallery", ".cheshire dosyalarını galeriye kopyalar");
+        items.push(Item::Row(Row::new(ADD, t!("Add wallpapers", "Duvar kâğıdı ekle"), add_sub, Ctl::Button(t!("Add", "Ekle").into()))));
+        let dir = wallpapers_dir().display().to_string();
+        items.push(Item::Row(Row::new(FOLDER, t!("Folder", "Klasör"), dir, Ctl::Button(t!("Open", "Aç").into()))));
 
         items.push(Item::Section(self.selected_name().unwrap_or(t!("Wallpaper", "Duvar kâğıdı")).into()));
         for (n, p) in st.params.iter().enumerate() {
@@ -643,6 +637,12 @@ impl Wallpaper {
         }
 
         items.push(Item::Section(t!("General", "Genel").into()));
+        // Açık: kullanıcı duraklattı. Motor kendiliğinden duraklattıysa sebebi altında.
+        let pause_sub = match self.pause_why() {
+            Some(why) if st.reason != "user" => format!("{} ({why})", t!("Paused", "Duraklatıldı")),
+            _ => String::new(),
+        };
+        items.push(Item::Row(Row::new(PAUSE, t!("Pause", "Duraklat"), pause_sub, Ctl::Toggle(st.user_paused))));
         let fps = FPS.iter().map(|f| f.to_string()).collect();
         let sel = FPS.iter().position(|&f| f == st.fps).unwrap_or(usize::MAX);
         items.push(Item::Row(Row::new(FPS_ROW, t!("Frame rate", "Kare hızı"), "", Ctl::Seg(fps, sel))));
@@ -659,12 +659,7 @@ impl Wallpaper {
 
     fn hit(&self, g: &Gfx, x: f32, y: f32) -> Hit {
         if y < HEADER {
-            return match () {
-                _ if self.pause_rect().contains(x, y) => Hit::Pause,
-                _ if self.folder_rect().contains(x, y) => Hit::Folder,
-                _ if self.add_rect().contains(x, y) => Hit::Add,
-                _ => Hit::None,
-            };
+            return Hit::None;
         }
         let f = self.form();
         match f.hit(g, x, y) {
@@ -726,20 +721,25 @@ impl Wallpaper {
 
     // --- Çizim ---
 
+    /// Duraklamanın sebebi, seçili dilde; duraklamadıysa yok.
+    fn pause_why(&self) -> Option<&'static str> {
+        Some(match self.st.reason.as_str() {
+            "" => return None,
+            "user" => t!("by you", "elle"),
+            "locked" => t!("screen locked", "ekran kilitli"),
+            "display_off" => t!("screen off", "ekran kapalı"),
+            "fullscreen" => t!("desktop hidden", "masaüstü görünmüyor"),
+            _ => t!("on battery", "pilde"),
+        })
+    }
+
     /// Başlıktaki durum, seçili dilde (motor yalnızca ham bilgiyi bildirir).
     fn status_text(&self) -> String {
         let st = &self.st;
         if self.starting {
             return t!("starting…", "açılıyor…").into();
         }
-        if !st.reason.is_empty() {
-            let why = match st.reason.as_str() {
-                "user" => t!("by you", "elle"),
-                "locked" => t!("screen locked", "ekran kilitli"),
-                "display_off" => t!("screen off", "ekran kapalı"),
-                "fullscreen" => t!("desktop hidden", "masaüstü görünmüyor"),
-                _ => t!("on battery", "pilde"),
-            };
+        if let Some(why) = self.pause_why() {
             return format!("{} ({why})", t!("paused", "duraklatıldı"));
         }
         if st.status.starts_with("derleniyor") {
@@ -807,13 +807,9 @@ impl Wallpaper {
     }
 
     pub fn paint(&self, g: &Gfx) {
-        // Başlık: yalnızca durum ve düğmeler.
+        // Başlık: yalnızca durum.
         let dot = if self.st.reason.is_empty() { pal().green } else { pal().muted };
-        status(g, self.head_x + 16.0, HEAD_CY, dot, &self.status_text(), pal().muted, self.pause_rect().l - 8.0);
-        let pause_icon = if self.st.user_paused { ICON_PLAY } else { ICON_PAUSE };
-        icon_button(g, self.pause_rect(), pause_icon, pal().muted, self.hover == Hit::Pause);
-        icon_button(g, self.folder_rect(), ICON_FOLDER, pal().muted, self.hover == Hit::Folder);
-        icon_button(g, self.add_rect(), ICON_ADD, pal().muted, self.hover == Hit::Add);
+        status(g, self.head_x + 16.0, HEAD_CY, dot, &self.status_text(), pal().muted, self.head_r - 8.0);
 
         let f = self.form();
         let hover = if let Hit::Form(h) = self.hover { h } else { form::Hit::None };
@@ -906,9 +902,9 @@ impl ToolPage for Wallpaper {
             return;
         }
         match hit {
-            Hit::Pause => self.cmd(if self.st.user_paused { "duraklat 0" } else { "duraklat 1" }),
-            Hit::Folder => self.cmd("klasor"),
-            Hit::Add => self.modal = Some(Modal::AddFiles),
+            Hit::Form(form::Hit::Toggle(PAUSE)) => self.cmd(if self.st.user_paused { "duraklat 0" } else { "duraklat 1" }),
+            Hit::Form(form::Hit::Button(FOLDER)) => self.cmd("klasor"),
+            Hit::Form(form::Hit::Button(ADD)) => self.modal = Some(Modal::AddFiles),
             Hit::Wall(i) => {
                 if let Some((file, _, _)) = self.st.walls.get(i) {
                     self.st.selected = file.clone();
@@ -955,16 +951,6 @@ impl ToolPage for Wallpaper {
 
     fn interactive(&self, g: &Gfx, x: f32, y: f32) -> bool {
         self.hit(g, x, y) != Hit::None
-    }
-
-    fn tip(&self) -> Option<(Rect, String)> {
-        let (r, t) = match self.hover {
-            Hit::Pause => (self.pause_rect(), if self.st.user_paused { t!("Resume", "Devam et") } else { t!("Pause", "Duraklat") }),
-            Hit::Folder => (self.folder_rect(), t!("Wallpaper folder", "Duvar kâğıdı klasörü")),
-            Hit::Add => (self.add_rect(), t!("Add wallpapers", "Duvar kâğıdı ekle")),
-            _ => return None,
-        };
-        Some((r, t.into()))
     }
 
     fn set_visible(&mut self, visible: bool) {

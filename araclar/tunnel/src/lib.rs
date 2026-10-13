@@ -255,7 +255,6 @@ enum Hit {
     Field,
     /// Kutudakini kaydet.
     Save,
-    Doctor,
 }
 
 impl Hit {
@@ -273,8 +272,10 @@ const R_MODE: u32 = 0;
 const R_SERVER: u32 = 1;
 const R_LINK: u32 = 2;
 const R_AUTOSTART: u32 = 3;
-/// Ağ testinin raporu (kendi çizdiğimiz alan).
-const D_REPORT: u32 = 10;
+const R_TEST: u32 = 4;
+/// Ağ testinin durum satırı (Kapat) ve raporu (kendi çizdiğimiz alan).
+const D_STATUS: u32 = 10;
+const D_REPORT: u32 = 11;
 
 const LINK_MAX: usize = 4096;
 
@@ -495,13 +496,13 @@ impl Tunnel {
 
     // --- Yerleşim ---
 
-    fn doctor_open(&self) -> bool {
-        self.doctor.is_some()
-    }
-
-    fn doctor_rect(&self, g: &Gfx) -> Rect {
-        let label = if self.doctor_open() { t!("Close", "Kapat") } else { t!("Test network", "Ağı test et") };
-        button_rect_right(g, self.head_r, HEAD_CY - 17.0, label, !self.doctor_open())
+    /// Ağ testi bittiyse kapatır (sürerken kapanmaz).
+    fn close_doctor(&mut self) {
+        if !self.doctor.as_ref().is_some_and(|d| d.lock().unwrap().running) {
+            self.doctor = None;
+            self.scroll = 0.0;
+            self.redraw();
+        }
     }
 
     /// Mod seçicide seçili olan: sunucu · DPI · kapalı.
@@ -524,12 +525,14 @@ impl Tunnel {
     fn form(&self) -> Form {
         let items = if let Some(d) = &self.doctor {
             let d = d.lock().unwrap();
-            let mut items = vec![Item::Section(t!("Network test", "Ağ testi").into())];
+            // Sürerken kapanmaz: Kapat test bitince gelir.
+            let status = match d.running {
+                true => Row::new(D_STATUS, t!("Testing the network…", "Ağ test ediliyor…"), t!("Takes 10–20 seconds", "10–20 saniye sürer"), Ctl::None),
+                false => Row::new(D_STATUS, t!("Test finished", "Test bitti"), "", Ctl::Button(t!("Close", "Kapat").into())),
+            };
+            let mut items = vec![Item::Section(t!("Network test", "Ağ testi").into()), Item::Row(status)];
             if !d.lines.is_empty() {
                 items.push(Item::Custom(D_REPORT, d.lines.len() as f32 * LINE_H + 32.0));
-            }
-            if d.running {
-                items.push(Item::Note(t!("Testing the network, takes 10–20 seconds…", "Ağ test ediliyor, 10–20 saniye sürer…").into(), false));
             }
             items
         } else {
@@ -539,6 +542,12 @@ impl Tunnel {
             let mut items = vec![
                 Item::Section(t!("Connection", "Bağlantı").into()),
                 Item::Row(Row::new(R_MODE, t!("Mode", "Mod"), sub, Ctl::Seg(modes, self.current_mode()))),
+                Item::Row(Row::new(
+                    R_TEST,
+                    t!("Network test", "Ağ testi"),
+                    t!("Finds where the block is, step by step", "Engel nerede, adım adım bakar"),
+                    Ctl::Button(t!("Test", "Test et").into()),
+                )),
             ];
             if let Some((m, err)) = self.note() {
                 items.push(Item::Note(m, err));
@@ -579,9 +588,6 @@ impl Tunnel {
     }
 
     fn hit(&self, g: &Gfx, x: f32, y: f32) -> Hit {
-        if self.doctor_rect(g).contains(x, y) {
-            return Hit::Doctor;
-        }
         if y < HEADER {
             return Hit::None;
         }
@@ -644,19 +650,13 @@ impl Tunnel {
     }
 
     pub fn paint(&self, g: &Gfx) {
-        // Başlık: durum ve Ağı test et.
-        let dr = self.doctor_rect(g);
-        if self.doctor_open() {
-            button(g, dr, t!("Close", "Kapat"), None, None, self.hover == Hit::Doctor);
-        } else {
-            button(g, dr, t!("Test network", "Ağı test et"), Some(ICON_REFRESH), None, self.hover == Hit::Doctor);
-        }
+        // Başlık: yalnızca durum.
         let dot = match (self.busy, self.st.state) {
             (None, Some(State::On)) => pal().green,
             (Some(_), _) | (_, Some(State::Starting | State::Stopping)) => pal().muted,
             _ => pal().faint,
         };
-        status(g, self.head_x + 16.0, HEAD_CY, dot, &self.state_text().0, pal().muted, dr.l - 8.0);
+        status(g, self.head_x + 16.0, HEAD_CY, dot, &self.state_text().0, pal().muted, self.head_r - 8.0);
 
         let f = self.form();
         let hover = if let Hit::Form(h) = self.hover { h } else { form::Hit::None };
@@ -774,17 +774,8 @@ impl ToolPage for Tunnel {
             Hit::Form(form::Hit::Seg(R_MODE, _)) => self.set_mode(None),
             Hit::Form(form::Hit::Toggle(R_AUTOSTART)) => self.toggle_autostart(),
             Hit::Save => self.add_link(),
-            Hit::Doctor => {
-                if self.doctor_open() {
-                    if !self.doctor.as_ref().is_some_and(|d| d.lock().unwrap().running) {
-                        self.doctor = None;
-                        self.scroll = 0.0;
-                        self.redraw();
-                    }
-                } else {
-                    self.run_doctor();
-                }
-            }
+            Hit::Form(form::Hit::Button(R_TEST)) => self.run_doctor(),
+            Hit::Form(form::Hit::Button(D_STATUS)) => self.close_doctor(),
             _ => {}
         }
     }

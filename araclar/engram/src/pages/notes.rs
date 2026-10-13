@@ -16,6 +16,8 @@ const TREE_W: f32 = 230.0;
 const SIDE_W: f32 = 190.0;
 const ROW: f32 = 28.0;
 const TOP: f32 = HEADER + 12.0;
+/// Notların üstündeki satır: başlık ("Tüm notlar · 9") ve düğmeler (Düzenle, Klasörü aç...).
+const BAR_CY: f32 = TOP + 19.0;
 
 const CARD_H: f32 = 132.0;
 /// Okuma sütununun en geniş hali: satırlar ~75 karakteri geçmesin.
@@ -83,9 +85,6 @@ pub struct NotesPage {
     h: f32,
     /// Son çizimdeki yalnızca simgeli düğmeler ve açıklamaları (ipucu için).
     icon_tips: RefCell<Vec<(Hit, Rect, &'static str)>>,
-    /// Başlık bandında sayfa düğmelerine kalan aralık.
-    head_x: f32,
-    head_r: f32,
     /// Düzenlenen not (yol) ve düzenleyici.
     editing: Option<String>,
     editor: TextField,
@@ -106,8 +105,6 @@ impl NotesPage {
             w: 0.0,
             h: 0.0,
             icon_tips: RefCell::new(Vec::new()),
-            head_x: 0.0,
-            head_r: 0.0,
             editing: None,
             editor: {
                 let mut e = TextField::new("", "");
@@ -142,7 +139,7 @@ impl NotesPage {
 
     fn editor_rect(&self) -> Rect {
         let (l, w) = self.read_col();
-        Rect::new(l - 14.0, TOP + 4.0, l + w + 14.0, self.h - 16.0)
+        Rect::new(l - 14.0, TOP + 44.0, l + w + 14.0, self.h - 16.0)
     }
 
     fn search_rect(&self) -> Rect {
@@ -380,18 +377,20 @@ impl NotesPage {
         } else {
             vec![(Hit::OpenFolder, t!("Open folder", "Klasörü aç"), Some(ICON_FOLDER), false)]
         };
-        // Yazılı düğmeler sığmıyorsa simgeli olanlar yalnızca simge kalır (açıklama ipucunda).
+        // Notların üstündeki satırda, sağa yaslı. Yazılı düğmeler sığmıyorsa simgeli olanlar
+        // yalnızca simge kalır (açıklama ipucunda).
+        let area = self.note_rect();
         let full: f32 = items.iter().map(|(_, l, i, _)| button_rect(g, 0.0, 0.0, l, i.is_some()).w() + 8.0).sum();
-        let compact = self.head_r - full < self.head_x;
-        let mut right = self.head_r;
+        let compact = area.r - PAD - full < area.l + PAD + 220.0;
+        let mut right = area.r - PAD;
         let mut tips = Vec::new();
         let out: Vec<_> = items
             .into_iter()
             .map(|(h, label, icon, primary)| {
                 let r = if compact && icon.is_some() {
-                    Rect::new(right - 36.0, HEAD_CY - 16.0, right, HEAD_CY + 16.0)
+                    Rect::new(right - 36.0, BAR_CY - 16.0, right, BAR_CY + 16.0)
                 } else {
-                    let b = button_rect_right(g, right, HEAD_CY - 16.0, label, icon.is_some());
+                    let b = button_rect_right(g, right, BAR_CY - 16.0, label, icon.is_some());
                     Rect::new(b.l, b.t, b.r, b.t + 32.0)
                 };
                 right = r.l - 8.0;
@@ -411,8 +410,8 @@ impl NotesPage {
     }
 
     fn hit(&self, g: &Gfx, x: f32, y: f32) -> Hit {
-        if y < HEADER {
-            return self.head_buttons(g).into_iter().find(|b| b.1.contains(x, y)).map_or(Hit::None, |b| b.0);
+        if let Some(b) = self.head_buttons(g).into_iter().find(|b| b.1.contains(x, y)) {
+            return b.0;
         }
         if self.editing.is_some() && self.editor_rect().contains(x, y) {
             return Hit::Editor;
@@ -625,11 +624,9 @@ impl NotesPage {
 }
 
 impl Page for NotesPage {
-    fn layout(&mut self, w: f32, h: f32, head_x: f32, head_r: f32) {
+    fn layout(&mut self, w: f32, h: f32, _head_x: f32, _head_r: f32) {
         self.w = w;
         self.h = h;
-        self.head_x = head_x;
-        self.head_r = head_r;
         // Sohbetten "bu notu aç" isteği.
         let req = self.shared.borrow_mut().open_note.take();
         if let Some(p) = req {
@@ -657,7 +654,7 @@ impl Page for NotesPage {
         self.paint_tree(g);
         if self.editing.is_some() {
             self.editor.draw(g, self.editor_rect(), self.hover == Hit::Editor);
-            g.text(t!("Ctrl+S saves", "Ctrl+S kaydeder"), &g.f.small, Rect::new(TREE_W + PAD, HEAD_CY - 10.0, TREE_W + 240.0, HEAD_CY + 10.0), pal().faint);
+            g.text(t!("Ctrl+S saves", "Ctrl+S kaydeder"), &g.f.small, Rect::new(TREE_W + PAD, BAR_CY - 10.0, TREE_W + 240.0, BAR_CY + 10.0), pal().faint);
             return;
         }
         self.paint_body(g);

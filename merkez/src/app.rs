@@ -171,6 +171,8 @@ enum Hit {
     Content,
     /// Ana sayfadaki kutucuk: aracın sayfasına gider.
     Open(usize),
+    /// Ana sayfadaki soru kutusu.
+    Ask,
     /// Araç ekle ve Ayarlar sayfalarının (sayfa kiti) öğeleri.
     Form(form::Hit),
 }
@@ -201,6 +203,8 @@ struct App {
     self_errors: Arc<Mutex<Vec<String>>>,
     /// Kenar çubuğunun başındaki arama kutusu ve seçili sonuç.
     search: TextField,
+    /// Ana sayfadaki soru kutusu (asistana).
+    ask: TextField,
     pick: usize,
     hover: Hit,
     pressed: Hit,
@@ -300,9 +304,20 @@ impl App {
     /// Kenar çubuğu sırasıyla sayfalar: Ana sayfa, açık araçlar, Araç ekle, Ayarlar.
     fn pages(&self) -> Vec<Page> {
         std::iter::once(Page::Home)
-            .chain((0..TOOLS.len()).filter(|&i| self.installed(i)).map(Page::Tool))
+            .chain(self.top_tools().into_iter().map(Page::Tool))
+            .chain(self.live_tools().into_iter().map(Page::Tool))
             .chain([Page::Store, Page::Settings])
             .collect()
+    }
+
+    /// Açık "üst" araçlar (asistan): Ana sayfanın hemen altında, Araçlar'dan ayrı.
+    fn top_tools(&self) -> Vec<usize> {
+        (0..TOOLS.len()).filter(|&i| self.installed(i) && TOOLS[i].top).collect()
+    }
+
+    /// Soru kutusunun aracı (asistan): açık ve soru alıyorsa.
+    fn asker(&self) -> Option<usize> {
+        self.top_tools().into_iter().next()
     }
 
     /// Aracın görünen adı: açıksa sayfasının verdiği (engram: asistanın adı), değilse kendi adı.
@@ -318,9 +333,9 @@ impl App {
         }
     }
 
-    /// Açık araçlar, kenar çubuğu sırasıyla.
+    /// Açık araçlar ("Araçlar" başlığının altındakiler), kenar çubuğu sırasıyla.
     fn live_tools(&self) -> Vec<usize> {
-        (0..TOOLS.len()).filter(|&i| self.installed(i)).collect()
+        (0..TOOLS.len()).filter(|&i| self.installed(i) && !TOOLS[i].top).collect()
     }
 
     /// Kurulu değilse araç sayfası yerine Araçlar açılır.
@@ -465,15 +480,21 @@ impl App {
         // Dar kenar çubuğunda "Araçlar" başlığı yerine ince bir çizgi.
         let section = if self.narrow(w) { 12.0 } else { SECTION_H };
         let top = HEADER + 4.0 + if self.narrow(w) { 0.0 } else { SEARCH_H };
-        // Araçlar sığmazsa satırları sıkışır (en az 30 px), alttaki Araç ekle'nin üstüne binmez.
-        let tools_top = top + NAV + section;
+        // Ana sayfanın altında üst araçlar (asistan), sonra "Araçlar" başlığı ve araçlar. Araçlar
+        // sığmazsa satırları sıkışır (en az 30 px), alttaki Araç ekle'nin üstüne binmez.
+        let tops = self.top_tools();
+        let tools_top = top + NAV + 2.0 + tops.len() as f32 * (NAV + 2.0) + section - 2.0;
         let store_top = h - 10.0 - 2.0 * NAV - 2.0;
         let n = self.live_tools().len().max(1) as f32;
         let row = ((store_top - 10.0 - tools_top) / n).clamp(30.0, NAV + 2.0);
         let (t, height) = match page {
             Page::Home => (top, NAV),
+            Page::Tool(i) if TOOLS[i].top => {
+                let k = tops.iter().position(|&j| j == i).unwrap_or(0);
+                (top + (k + 1) as f32 * (NAV + 2.0), NAV)
+            }
             Page::Tool(i) => {
-                let k = (0..i).filter(|&j| self.installed(j)).count();
+                let k = (0..i).filter(|&j| self.installed(j) && !TOOLS[j].top).count();
                 (tools_top + k as f32 * row, row - 2.0)
             }
             Page::Store => (store_top, NAV),
@@ -612,6 +633,9 @@ impl App {
                 if y < HEADER + 70.0 {
                     return Hit::None;
                 }
+                if self.ask_rect(w).is_some_and(|r| r.contains(x, y)) {
+                    return Hit::Ask;
+                }
                 let tools = self.live_tools();
                 (0..tools.len()).find(|&k| self.tile(k, w).contains(x, y)).map_or(Hit::None, |k| Hit::Open(tools[k]))
             }
@@ -650,6 +674,10 @@ impl App {
             }
             Hit::Found(k) => self.run_found(k),
             Hit::Open(i) => self.select(Page::Tool(i)),
+            Hit::Ask => {
+                self.ask.focus(false);
+                self.redraw();
+            }
             Hit::Form(f) => self.form_click(f),
             Hit::None | Hit::Content => {}
         }
@@ -695,7 +723,9 @@ impl App {
             self.paint_nav(p, w, h);
         }
         // Ana sayfa ile araçlar arasında "Araçlar" başlığı (dar çubukta ince çizgi).
-        let home = self.nav_rect(Page::Home, w, h);
+        // Ana sayfa ve üst araçların altında: "Araçlar" başlığı (dar çubukta ince çizgi).
+        let above = self.top_tools().last().map_or(Page::Home, |&i| Page::Tool(i));
+        let home = self.nav_rect(above, w, h);
         if self.narrow(w) {
             g.fill(Rect::new(14.0, home.b + 6.0, sw - 14.0, home.b + 7.0), 0.0, pal().line);
         } else {
@@ -807,7 +837,14 @@ impl App {
     fn paint_search(&self, w: f32) {
         let Some(r) = self.search_rect(w) else { return };
         let g = &self.gfx;
-        self.search.paint(g, r, t!("Search", "Ara"));
+        let hint = match self.asker() {
+            Some(i) => {
+                let name = self.tool_name(i);
+                t!(format!("Search or ask {name}"), format!("Ara ya da {}'{} sor", name, dative(&name)))
+            }
+            None => t!("Search", "Ara").to_string(),
+        };
+        self.search.paint(g, r, &hint);
         if self.search.text.is_empty() {
             let hint = Rect::new(r.l, r.t, r.r - 12.0, r.b);
             g.text("Ctrl+Space", &g.f.small_right, hint, pal().faint);
@@ -830,6 +867,33 @@ impl App {
         }
     }
 
+    /// Ana sayfadaki soru kutusu (asistan açıksa): selamın altında, bütün genişlikte.
+    fn ask_rect(&self, w: f32) -> Option<Rect> {
+        self.asker()?;
+        let (l, r) = (self.side_w(w) + PAGE_PAD, w - PAGE_PAD);
+        let t = HEADER + 76.0 - self.scroll;
+        Some(Rect::new(l, t, r, t + 48.0))
+    }
+
+    fn tiles_top(&self) -> f32 {
+        HEADER + 76.0 + if self.asker().is_some() { 48.0 + 24.0 } else { 0.0 }
+    }
+
+    /// Soru kutusunun yazısı asistana gider, sayfası açılır.
+    fn send_ask(&mut self) {
+        let text = self.ask.text.trim().to_string();
+        let Some(i) = self.asker() else { return };
+        if text.is_empty() {
+            return;
+        }
+        self.ask.set("");
+        self.ask.blur();
+        self.select(Page::Tool(i));
+        if let Some(p) = self.page_mut(i) {
+            p.ask(&text);
+        }
+    }
+
     /// Ana sayfanın `k`'inci kutucuğu: içerik genişliğine sığdığı kadar sütun.
     fn tile(&self, k: usize, w: f32) -> Rect {
         let (l, r) = (self.side_w(w) + PAGE_PAD, w - PAGE_PAD);
@@ -837,7 +901,7 @@ impl App {
         let tw = (r - l - TILE_GAP * (cols - 1) as f32) / cols as f32;
         let (col, row) = (k % cols, k / cols);
         let x = l + col as f32 * (tw + TILE_GAP);
-        let y = HEADER + 76.0 + row as f32 * (TILE_H + TILE_GAP) - self.scroll;
+        let y = self.tiles_top() + row as f32 * (TILE_H + TILE_GAP) - self.scroll;
         Rect::new(x, y, x + tw, y + TILE_H)
     }
 
@@ -861,6 +925,12 @@ impl App {
             return;
         }
         g.clip(Rect::new(self.side_w(w), HEADER + 70.0, w, h), || {
+            if let (Some(r), Some(i)) = (self.ask_rect(w), self.asker()) {
+                let name = self.tool_name(i);
+                let hint = t!(format!("Ask {name} or tell it something…"), format!("{}'{} sor ya da bir şey söyle…", name, dative(&name)));
+                self.ask.paint(g, r, &hint);
+                g.text("Enter", &g.f.small_right, Rect::new(r.l, r.t, r.r - 14.0, r.b), pal().faint);
+            }
             for (k, &i) in tools.iter().enumerate() {
                 let r = self.tile(k, w);
                 let hovered = self.hover == Hit::Open(i);
@@ -1328,6 +1398,10 @@ impl App {
                 if self.search.focused && !matches!(self.pressed, Hit::Search | Hit::Found(_)) {
                     self.close_search();
                 }
+                if self.ask.focused && self.pressed != Hit::Ask {
+                    self.ask.blur();
+                    self.redraw();
+                }
                 unsafe { SetCapture(self.hwnd) };
                 if self.pressed == Hit::Content
                     && let Some(p) = live.and_then(|i| self.tools[i].as_deref_mut())
@@ -1380,6 +1454,12 @@ impl App {
                     }
                     return Some(LRESULT(0));
                 }
+                if self.ask.focused {
+                    if self.ask.char(c) {
+                        self.redraw();
+                    }
+                    return Some(LRESULT(0));
+                }
                 let p = live.and_then(|i| self.tools[i].as_deref_mut())?;
                 if !p.char(c) {
                     return None;
@@ -1409,6 +1489,15 @@ impl App {
                             FieldKey::Escape => self.close_search(),
                             _ => self.pick = 0,
                         },
+                    }
+                    self.redraw();
+                    return Some(LRESULT(0));
+                }
+                if self.ask.focused {
+                    match self.ask.key(vk.0, ctrl) {
+                        FieldKey::Enter => self.send_ask(),
+                        FieldKey::Escape => self.ask.blur(),
+                        _ => {}
                     }
                     self.redraw();
                     return Some(LRESULT(0));
@@ -1627,6 +1716,7 @@ pub fn run(hidden: bool, tab: Option<String>) -> Res<()> {
             narrow_pref: cfg.narrow,
             scroll: 0.0,
             search: TextField::new(80),
+            ask: TextField::new(400),
             pick: 0,
             autostart: autostart(),
             tools: (0..tools::COUNT).map(|_| None).collect(),

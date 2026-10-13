@@ -499,6 +499,14 @@ impl Gfx {
         }
     }
 
+    /// Şu anki kaydırma (`translate`'in verdiği): iç içe sayfalar kendi köşelerini buna göre kurar.
+    pub fn offset(&self) -> (f32, f32) {
+        let Some((rt, _)) = &self.rt else { return (0.0, 0.0) };
+        let mut m = windows_numerics::Matrix3x2::default();
+        unsafe { rt.GetTransform(&mut m) };
+        (m.M31, m.M32)
+    }
+
     pub fn clip(&self, r: Rect, f: impl FnOnce()) {
         let Some((rt, _)) = &self.rt else { return };
         unsafe { rt.PushAxisAlignedClip(&r.d2d(), D2D1_ANTIALIAS_MODE_ALIASED) };
