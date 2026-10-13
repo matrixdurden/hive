@@ -934,6 +934,14 @@ impl Wallpaper {
 }
 
 impl ToolPage for Wallpaper {
+    fn summary(&self) -> Option<(String, String)> {
+        let st = &self.st;
+        let name = st.walls.iter().find(|w| w.0 == st.selected).map_or("", |w| pick(&w.1, &w.2)).to_string();
+        let status = self.status_text();
+        let detail = status.strip_prefix(&name).map_or(status.clone(), |r| r.trim_start_matches(" · ").to_string());
+        Some(if name.is_empty() { (status, String::new()) } else { (name, detail) })
+    }
+
     fn message(
         &mut self,
         g: &mut ortak::gfx::Gfx,

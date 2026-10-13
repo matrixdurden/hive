@@ -421,6 +421,22 @@ impl Drop for Engram {
 }
 
 impl ToolPage for Engram {
+    fn summary(&self) -> Option<(String, String)> {
+        let s = self.shared.borrow();
+        let state = match s.voice_state {
+            crate::voice::State::Listening | crate::voice::State::FollowUp => t!("Listening…", "Dinliyor…"),
+            crate::voice::State::Speaking => t!("Speaking", "Konuşuyor"),
+            _ if s.brain.busy => t!("Thinking…", "Düşünüyor…"),
+            _ => t!("Ready", "Hazır"),
+        };
+        let how = if s.wake_phrase.is_empty() {
+            t!(format!("Hold {} to talk", s.config.hotkey), format!("Konuşmak için {} tuşunu basılı tut", s.config.hotkey))
+        } else {
+            t!(format!("Say \"{}\"", s.wake_phrase), format!("\"{}\" de", s.wake_phrase))
+        };
+        Some((state.into(), how))
+    }
+
     fn layout(&mut self, w: f32, h: f32, head_x: f32, head_r: f32) {
         self.w = w;
         self.h = h;

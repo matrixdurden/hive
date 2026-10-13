@@ -795,6 +795,12 @@ impl Audio {
 }
 
 impl ToolPage for Audio {
+    fn summary(&self) -> Option<(String, String)> {
+        let out = self.out.as_ref().map_or_else(|| t!("No output", "Çıkış yok").to_string(), |d| d.name.clone());
+        let mic = if self.muted { t!("Microphone off", "Mikrofon kapalı") } else { t!("Microphone on", "Mikrofon açık") };
+        Some((out, mic.to_string()))
+    }
+
     fn message(
         &mut self,
         _g: &mut ortak::gfx::Gfx,

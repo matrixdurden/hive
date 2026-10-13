@@ -572,6 +572,14 @@ impl Dock {
 }
 
 impl ToolPage for Dock {
+    fn summary(&self) -> Option<(String, String)> {
+        let n = &self.music.now;
+        if self.music.settings.show && n.active {
+            return Some((n.title.clone(), n.artist.clone()));
+        }
+        Some((t!("On", "Açık").into(), t!("In place of the taskbar", "Görev çubuğunun yerinde").into()))
+    }
+
     fn layout(&mut self, w: f32, h: f32, head_x: f32, head_r: f32) {
         self.w = w;
         self.h = h;

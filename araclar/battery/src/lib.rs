@@ -911,6 +911,17 @@ impl Battery {
 }
 
 impl ToolPage for Battery {
+    fn summary(&self) -> Option<(String, String)> {
+        let gear = mode_name(self.mode);
+        let gear = t!(format!("{gear} gear"), format!("{gear} vitesi"));
+        let state = match self.remaining() {
+            _ if self.ac => t!("plugged in", "şarjda").to_string(),
+            Some((h, _, _)) => format!("{} {}", hm(h), t!("left", "kaldı")),
+            None => t!("on battery", "pilde").to_string(),
+        };
+        Some((format!("%{}", self.percent), format!("{gear} · {state}")))
+    }
+
     fn message(
         &mut self,
         _g: &mut ortak::gfx::Gfx,

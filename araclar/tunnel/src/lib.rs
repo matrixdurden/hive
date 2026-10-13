@@ -567,6 +567,26 @@ impl Tunnel {
         });
     }
 
+    /// Durum: büyük satır ve altındaki açıklama (sayfada ve Ana sayfadaki kutucukta).
+    fn state_text(&self) -> (String, String) {
+        match (self.busy, self.st.state, self.st.mode) {
+            (Some(b), _, _) => (b.to_string(), String::new()),
+            (_, Some(State::On), Some(Mode::Server)) => {
+                let lat = self.latency.lock().unwrap().map(|ms| format!(" · {ms} ms")).unwrap_or_default();
+                (t!("On · through the server", "Açık · sunucu üzerinden").into(), format!("{}{lat}", self.st.host.clone().unwrap_or_default()))
+            }
+            (_, Some(State::On), _) => (
+                t!("On · DPI", "Açık · DPI").into(),
+                t!("No server: DNS over HTTPS, handshakes split", "Sunucusuz: DNS HTTPS üzerinden, el sıkışmaları bölünüyor").into(),
+            ),
+            (_, Some(State::Starting), _) => {
+                (t!("Connecting…", "Bağlanıyor…").into(), t!("Waiting for the network or the server", "Ağ ya da sunucu bekleniyor").into())
+            }
+            (_, Some(State::Stopping), _) => (t!("Turning off…", "Kapanıyor…").into(), String::new()),
+            _ => (t!("Off", "Kapalı").into(), t!("The computer uses its normal connection", "Bilgisayar normal bağlantısını kullanıyor").into()),
+        }
+    }
+
     pub fn paint(&self, g: &Gfx) {
         let (w, cy) = (self.w, self.circle_cy());
         let accent_live = self.st.state == Some(State::On);
@@ -594,22 +614,7 @@ impl Tunnel {
         }
         g.text("\u{E7E8}", &g.f.icon_large, ring, if accent_live { accent() } else { pal().faint });
 
-        let (label, sub) = match (self.busy, self.st.state, self.st.mode) {
-            (Some(b), _, _) => (b.to_string(), String::new()),
-            (_, Some(State::On), Some(Mode::Server)) => {
-                let lat = self.latency.lock().unwrap().map(|ms| format!(" · {ms} ms")).unwrap_or_default();
-                (t!("On · through the server", "Açık · sunucu üzerinden").into(), format!("{}{lat}", self.st.host.clone().unwrap_or_default()))
-            }
-            (_, Some(State::On), _) => (
-                t!("On · DPI", "Açık · DPI").into(),
-                t!("No server: DNS over HTTPS, handshakes split", "Sunucusuz: DNS HTTPS üzerinden, el sıkışmaları bölünüyor").into(),
-            ),
-            (_, Some(State::Starting), _) => {
-                (t!("Connecting…", "Bağlanıyor…").into(), t!("Waiting for the network or the server", "Ağ ya da sunucu bekleniyor").into())
-            }
-            (_, Some(State::Stopping), _) => (t!("Turning off…", "Kapanıyor…").into(), String::new()),
-            _ => (t!("Off", "Kapalı").into(), t!("The computer uses its normal connection", "Bilgisayar normal bağlantısını kullanıyor").into()),
-        };
+        let (label, sub) = self.state_text();
         text_center(g, &label, &g.f.heading, w / 2.0, cy + r + 14.0, cy + r + 44.0, pal().text);
         text_center(g, &sub, &g.f.small, w / 2.0, cy + r + 44.0, cy + r + 66.0, pal().muted);
 
@@ -690,6 +695,10 @@ impl Tunnel {
 }
 
 impl ToolPage for Tunnel {
+    fn summary(&self) -> Option<(String, String)> {
+        Some(self.state_text())
+    }
+
     fn message(
         &mut self,
         _g: &mut ortak::gfx::Gfx,

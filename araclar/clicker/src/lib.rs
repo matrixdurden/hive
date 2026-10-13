@@ -880,6 +880,15 @@ impl Clicker {
 }
 
 impl ToolPage for Clicker {
+    fn summary(&self) -> Option<(String, String)> {
+        let s = &self.settings;
+        if !s.enabled {
+            return Some((t!("Off", "Kapalı").into(), t!("The key does nothing", "Tuş bir şey yapmaz").into()));
+        }
+        let key = if s.key.is_some() { self.key_name() } else { t!("No key", "Tuş yok").into() };
+        Some((key, format!("{} · {}", s.mode.label(), fmt_cps(s.cps))))
+    }
+
     fn message(&mut self, _g: &mut Gfx, msg: u32, wp: WPARAM, _lp: LPARAM) -> Option<LRESULT> {
         match msg {
             WM_TIMER if wp.0 == TIMER_HOLD || wp.0 == TIMER_UI => self.timer(wp.0),

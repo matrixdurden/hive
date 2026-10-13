@@ -454,6 +454,11 @@ pub trait ToolPage {
     fn take_notice(&mut self) -> Option<(String, String)> {
         None
     }
+    /// Ana sayfadaki kutucuğu: (öne çıkan satır, altındaki satır), aracın şu anki durumu.
+    /// `None`: kutucukta aracın açıklaması durur.
+    fn summary(&self) -> Option<(String, String)> {
+        None
+    }
 }
 
 /// Dosya seçme penceresi: seçilen yollar.

@@ -66,6 +66,8 @@ const ICON_HOME: &str = "\u{E80F}";
 const TILE_W: f32 = 220.0;
 const TILE_H: f32 = 104.0;
 const TILE_GAP: f32 = 14.0;
+/// Ana sayfa açıkken kutucukları tazeleyen zamanlayıcı (araçların durumu değişir).
+const TIMER_HOME: usize = 9;
 /// Kenar çubuğundaki "Araçlar" başlığının yüksekliği.
 const SECTION_H: f32 = 30.0;
 
@@ -313,6 +315,13 @@ impl App {
     fn sync_visible(&mut self) {
         let on = self.visible();
         let page = self.page;
+        unsafe {
+            if on && page == Page::Home {
+                SetTimer(Some(self.hwnd), TIMER_HOME, 2000, None);
+            } else {
+                let _ = KillTimer(Some(self.hwnd), TIMER_HOME);
+            }
+        }
         for (i, t) in self.tools.iter_mut().enumerate() {
             if let Some(t) = t {
                 t.set_visible(on && page == Page::Tool(i));
@@ -857,11 +866,13 @@ impl App {
                 let hovered = self.hover == Hit::Open(i);
                 g.fill(r, 10.0, if hovered { pal().sel } else { pal().panel });
                 g.stroke(r, 10.0, pal().line, 1.0);
-                let ic = Rect::new(r.l + 16.0, r.t + 14.0, r.l + 40.0, r.t + 38.0);
-                g.text(TOOLS[i].glyph, &g.f.icon, ic, accent());
-                g.text(TOOLS[i].name(), &g.f.strong, Rect::new(r.l + 16.0, r.t + 46.0, r.r - 16.0, r.t + 70.0), pal().text);
-                let sub = Rect::new(r.l + 16.0, r.t + 70.0, r.r - 16.0, r.b - 12.0);
-                g.text(TOOLS[i].tagline(), &g.f.small, sub, pal().muted);
+                // Üstte simge ve ad, altında aracın şu anki durumu (yoksa açıklaması).
+                let ic = Rect::new(r.l + 14.0, r.t + 12.0, r.l + 36.0, r.t + 36.0);
+                g.text(TOOLS[i].glyph, &g.f.icon_small, ic, accent());
+                g.text(TOOLS[i].name(), &g.f.small, Rect::new(r.l + 42.0, r.t + 12.0, r.r - 14.0, r.t + 36.0), pal().muted);
+                let (big, sub) = self.page_ref(i).and_then(|p| p.summary()).unwrap_or_else(|| (TOOLS[i].name().into(), TOOLS[i].tagline().into()));
+                g.text(&big, &g.f.heading, Rect::new(r.l + 14.0, r.t + 42.0, r.r - 14.0, r.t + 72.0), pal().text);
+                g.text(&sub, &g.f.small, Rect::new(r.l + 14.0, r.t + 72.0, r.r - 14.0, r.b - 10.0), pal().muted);
             }
         });
     }
@@ -1437,6 +1448,7 @@ impl App {
                 self.open_tab(&String::from_utf8_lossy(bytes));
                 return Some(LRESULT(1));
             }
+            WM_TIMER if wp.0 == TIMER_HOME => self.redraw(),
             WM_PENDING_TAB => {
                 if let Some(tab) = ortak::hub::take_tab() {
                     self.open_tab(&tab);

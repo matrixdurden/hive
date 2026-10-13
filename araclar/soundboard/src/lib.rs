@@ -1682,6 +1682,11 @@ fn file_dialog(hwnd: HWND) -> Result<Vec<PathBuf>, String> {
 }
 
 impl ToolPage for Soundboard {
+    fn summary(&self) -> Option<(String, String)> {
+        let n = self.items.len();
+        Some((t!(format!("{n} sounds"), format!("{n} ses")), self.pill_label().to_string()))
+    }
+
     fn message(
         &mut self,
         _g: &mut ortak::gfx::Gfx,
