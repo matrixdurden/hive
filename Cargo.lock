@@ -15,10 +15,30 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d3fb67a6e08acf24fdeccbac2cb6ac4305825bd1f117462e0e6f2f193345ad56"
 
 [[package]]
+name = "audio"
+version = "0.5.0"
+dependencies = [
+ "ortak",
+ "windows",
+ "windows-core",
+ "windows-numerics",
+]
+
+[[package]]
 name = "autocfg"
 version = "1.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f2032f911046de80f0a198e0901378627c33f59ea0ac00e363d481118bd70a53"
+
+[[package]]
+name = "battery"
+version = "0.5.0"
+dependencies = [
+ "ortak",
+ "windows",
+ "windows-core",
+ "windows-numerics",
+]
 
 [[package]]
 name = "bit-set"
@@ -80,6 +100,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f079e83a288787bcd14a6aea84cee5c87a67c5a3e660c30f557a3d24761b3527"
 
 [[package]]
+name = "clicker"
+version = "0.5.0"
+dependencies = [
+ "ortak",
+ "windows",
+ "windows-core",
+ "windows-numerics",
+]
+
+[[package]]
 name = "codespan-reporting"
 version = "0.13.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -95,6 +125,16 @@ name = "crunchy"
 version = "0.2.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "460fbee9c2c2f33933d720630a6a0bac33ba7053db5344fac858d4b8952d77d5"
+
+[[package]]
+name = "dock"
+version = "0.5.0"
+dependencies = [
+ "ortak",
+ "windows",
+ "windows-core",
+ "windows-numerics",
+]
 
 [[package]]
 name = "document-features"
@@ -314,6 +354,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "ortak"
+version = "0.5.0"
+dependencies = [
+ "windows",
+ "windows-numerics",
+]
+
+[[package]]
 name = "parking_lot"
 version = "0.12.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -491,15 +539,27 @@ checksum = "f9395f0f0eee849a9b707b2f06bb92a6a422090e2123bb2ef8e87a0e61892a8e"
 
 [[package]]
 name = "soundboard"
-version = "0.1.0"
+version = "0.5.0"
 dependencies = [
+ "ortak",
+ "soundboard-motor",
  "windows",
+ "windows-core",
+ "windows-numerics",
 ]
 
 [[package]]
 name = "soundboard-apo"
 version = "0.1.0"
 dependencies = [
+ "windows",
+]
+
+[[package]]
+name = "soundboard-motor"
+version = "0.1.0"
+dependencies = [
+ "ortak",
  "windows",
 ]
 
@@ -570,6 +630,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "tunnel"
+version = "0.5.0"
+dependencies = [
+ "ortak",
+ "windows",
+ "windows-core",
+ "windows-numerics",
+]
+
+[[package]]
 name = "unicode-ident"
 version = "1.0.26"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -589,6 +659,16 @@ checksum = "ebc1c04c71510c7f702b52b7c350734c9ff1295c464a03335b00bb84fc54f853"
 
 [[package]]
 name = "wallpaper"
+version = "0.5.0"
+dependencies = [
+ "ortak",
+ "windows",
+ "windows-core",
+ "windows-numerics",
+]
+
+[[package]]
+name = "wallpaper-motor"
 version = "0.1.1"
 dependencies = [
  "bytemuck",
@@ -929,10 +1009,16 @@ dependencies = [
 name = "winloom"
 version = "0.5.0"
 dependencies = [
+ "audio",
+ "battery",
+ "clicker",
+ "dock",
+ "ortak",
  "soundboard",
+ "tunnel",
+ "wallpaper",
  "windows",
  "windows-core",
- "windows-numerics",
 ]
 
 [[package]]

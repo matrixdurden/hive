@@ -1,0 +1,10 @@
+[package]
+name = "ortak"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "winloom'ın merkezinin ve araçlarının paylaştığı kod"
+
+[dependencies]
+windows.workspace = true
+windows-numerics.workspace = true

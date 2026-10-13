@@ -1,0 +1,12 @@
+[package]
+name = "clicker"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "winloom aracı · Tıklayıcı: tuşu basılı tuttuğun sürece tıklar"
+
+[dependencies]
+ortak.workspace = true
+windows.workspace = true
+windows-core.workspace = true
+windows-numerics.workspace = true

@@ -29,14 +29,14 @@ Bütün araçlar winloom ile gelir: **Araçlar** sayfasından istediğini açars
 
 | | | |
 |:---:|---|---|
-| <img src="app/assets/araclar/soundboard-64.png" width="40"> | **Blast** | Sesi doğrudan mikrofona veren soundboard. Sanal mikrofon kurmaz; Discord, oyunlar, OBS, mikrofonu dinleyen her uygulama duyar. Myinstants'ta ses ara (kulaklıkta dinle, tek tıkla ekle); bilgisayarda az önce çalan son 10 saniyeyi kısayolla (`Ctrl+Alt+L`) listeye ekle. |
-| <img src="app/assets/araclar/wallpaper-64.png" width="40"> | **Duvar kâğıdı** | Masaüstü ikonlarının arkasında GPU ile çizilen canlı duvar kâğıtları. Tam ekranda ve pilde kendiliğinden durur. |
-| <img src="app/assets/araclar/tunnel-64.png" width="40"> | **VPN** | Bütün bilgisayarı ağ engellerinin ötesine geçiren VPN: kendi sunucun üzerinden ya da sunucusuz DPI modunda. [Ayrı depo](https://github.com/matrixdurden/rabbithole). |
-| <img src="app/assets/araclar/battery-64.png" width="40"> | **Pil** | Dizüstü için üç vites: prizde, dışarıda bir iki saat, hayatta kalma. Şarj takılıp çıkınca kendi geçer, pildeyken ekran kartını uyutur, her vitesin gerçekte kaç saat gittiğini öğrenir. |
-| <img src="app/assets/araclar/audio-64.png" width="40"> | **Ses aygıtları** | Ses çıkışları ve girişleri tek listede: tıkladığın varsayılan olur. Tek tuşla sonraki çıkışa (`Ctrl+Alt+O`), sonraki girişe (`Ctrl+Alt+I`) geçer ya da mikrofonu susturur (`Ctrl+Alt+K`). Kulaklık kopunca da müzik laptop hoparlöründen devam etmez, durur. |
-| <img src="app/assets/araclar/dock-64.png" width="40"> | **Dock** | Windows görev çubuğunun yerine, Windows 11 görünümünde bir dock: sabitlediğin ve açık uygulamalar yüzen tek bir çubukta, ucunda Wi-Fi, ses, pil ve saat. İmlecin altındaki simgeler büyür, dikkat isteyen uygulama zıplar, üstünde durunca pencerelerinin canlı önizlemesi açılır, sürükleyerek sıralarsın. Hep ekranda durur, büyütülen pencereler onun üstünde biter; tam ekran oyunlarda hiç görünmez. İmleci sol üst köşeye sertçe götürünce bütün pencereler (Win+Tab), sağ alt köşeye götürünce masaüstü açılır (ikisi de kapatılabilir). Win+1…9 uygulamaları dock sırasıyla açar; "Dock'a sabitle" sağ tık menüsünde. Kaldırınca görev çubuğu ve Başlat eski haline döner. |
-| <img src="app/assets/araclar/music-64.png" width="40"> | **Müzik** | Spotify'da çalan, dock'un solunda dock boyunda bir şeritte: kapak, şarkı, sanatçı, önceki / çal / sonraki ve tıklayıp atlayabildiğin ince bir ilerleme çizgisi. Karta tıklayınca açık Spotify penceresi öne gelir. Arka planı kapağın bulanık hali, kapağın rengi ya da dock gibi düz. Spotify uygulamasıyla da tarayıcıdan kurulan Spotify web uygulamasıyla da çalışır; Spotify'a giriş gerekmez. İstersen diğer oynatıcılar (tarayıcıda YouTube, ...) da görünür. |
-| <img src="app/assets/araclar/clicker-64.png" width="40"> | **Tıklayıcı** | Klasik otomatik tıklayıcı. Bir tuşa basılı tut (ya da aç/kapa modunda bir kez bas), imlecin olduğu yere sol, sağ ya da orta düğmeyle iki saniyede birden saniyede yüze kadar tıklar; bırakınca ya da belirlediğin sayıya gelince durur. Tuşu sen seçersin (başlangıçta `F6`). |
+| <img src="araclar/soundboard/ikon/soundboard-64.png" width="40"> | **Blast** | Sesi doğrudan mikrofona veren soundboard. Sanal mikrofon kurmaz; Discord, oyunlar, OBS, mikrofonu dinleyen her uygulama duyar. Myinstants'ta ses ara (kulaklıkta dinle, tek tıkla ekle); bilgisayarda az önce çalan son 10 saniyeyi kısayolla (`Ctrl+Alt+L`) listeye ekle. |
+| <img src="araclar/wallpaper/ikon/wallpaper-64.png" width="40"> | **Duvar kâğıdı** | Masaüstü ikonlarının arkasında GPU ile çizilen canlı duvar kâğıtları. Tam ekranda ve pilde kendiliğinden durur. |
+| <img src="araclar/tunnel/ikon/tunnel-64.png" width="40"> | **VPN** | Bütün bilgisayarı ağ engellerinin ötesine geçiren VPN: kendi sunucun üzerinden ya da sunucusuz DPI modunda. [Ayrı depo](https://github.com/matrixdurden/rabbithole). |
+| <img src="araclar/battery/ikon/battery-64.png" width="40"> | **Pil** | Dizüstü için üç vites: prizde, dışarıda bir iki saat, hayatta kalma. Şarj takılıp çıkınca kendi geçer, pildeyken ekran kartını uyutur, her vitesin gerçekte kaç saat gittiğini öğrenir. |
+| <img src="araclar/audio/ikon/audio-64.png" width="40"> | **Ses aygıtları** | Ses çıkışları ve girişleri tek listede: tıkladığın varsayılan olur. Tek tuşla sonraki çıkışa (`Ctrl+Alt+O`), sonraki girişe (`Ctrl+Alt+I`) geçer ya da mikrofonu susturur (`Ctrl+Alt+K`). Kulaklık kopunca da müzik laptop hoparlöründen devam etmez, durur. |
+| <img src="araclar/dock/ikon/dock-64.png" width="40"> | **Dock** | Windows görev çubuğunun yerine, Windows 11 görünümünde bir dock: sabitlediğin ve açık uygulamalar yüzen tek bir çubukta, ucunda Wi-Fi, ses, pil ve saat. İmlecin altındaki simgeler büyür, dikkat isteyen uygulama zıplar, üstünde durunca pencerelerinin canlı önizlemesi açılır, sürükleyerek sıralarsın. Hep ekranda durur, büyütülen pencereler onun üstünde biter; tam ekran oyunlarda hiç görünmez. İmleci sol üst köşeye sertçe götürünce bütün pencereler (Win+Tab), sağ alt köşeye götürünce masaüstü açılır (ikisi de kapatılabilir). Win+1…9 uygulamaları dock sırasıyla açar; "Dock'a sabitle" sağ tık menüsünde. Kaldırınca görev çubuğu ve Başlat eski haline döner. |
+| <img src="araclar/dock/ikon/dock-64.png" width="40"> | **Müzik** | Spotify'da çalan, dock'un solunda dock boyunda bir şeritte: kapak, şarkı, sanatçı, önceki / çal / sonraki ve tıklayıp atlayabildiğin ince bir ilerleme çizgisi. Karta tıklayınca açık Spotify penceresi öne gelir. Arka planı kapağın bulanık hali, kapağın rengi ya da dock gibi düz. Spotify uygulamasıyla da tarayıcıdan kurulan Spotify web uygulamasıyla da çalışır; Spotify'a giriş gerekmez. İstersen diğer oynatıcılar (tarayıcıda YouTube, ...) da görünür. |
+| <img src="araclar/clicker/ikon/clicker-64.png" width="40"> | **Tıklayıcı** | Klasik otomatik tıklayıcı. Bir tuşa basılı tut (ya da aç/kapa modunda bir kez bas), imlecin olduğu yere sol, sağ ya da orta düğmeyle iki saniyede birden saniyede yüze kadar tıklar; bırakınca ya da belirlediğin sayıya gelince durur. Tuşu sen seçersin (başlangıçta `F6`). |
 
 <table>
   <tr>
@@ -68,14 +68,18 @@ WSL'den Windows için çapraz derlenir (`x86_64-pc-windows-gnu`, mingw gerekir):
 ```sh
 make build      # target/x86_64-pc-windows-gnu/release/winloom.exe
 make install    # %LOCALAPPDATA%\Programs\winloom altına kur ve başlat
-make release    # app/Cargo.toml'daki sürümle GitHub'da yayın
+make release    # Cargo.toml'daki sürümle GitHub'da yayın
 ```
 
 | Klasör | |
 |---|---|
-| [`app/`](app) | winloom.exe: pencere, araç sayfaları, araçları açıp kapatma |
-| [`soundboard/`](soundboard) | Soundboard motoru ve mikrofon efekti (`apo/`) |
-| [`wallpaper/`](wallpaper) | Duvar kâğıdı motoru ve [`.cheshire` formatı](wallpaper/README.md#the-cheshire-format) |
+| [`merkez/`](merkez) | winloom.exe: pencere, tepsi, araçları açıp kapatma, güncelleme, kurulum |
+| [`ortak/`](ortak) | Bütün araçların paylaştığı kod: çizim, arayüz parçaları, log, ağ, dil, araç sözleşmesi |
+| [`araclar/<id>/`](araclar) | Her araca bir klasör: sayfası (`src/`), ikonu (`ikon/`), varsa motoru (`motor/`) |
+| [`araclar/soundboard/motor/`](araclar/soundboard/motor) | Soundboard motoru; mikrofon efekti [`apo/`](araclar/soundboard/apo) içinde |
+| [`araclar/wallpaper/motor/`](araclar/wallpaper/motor) | Duvar kâğıdı motoru ve [`.cheshire` formatı](araclar/wallpaper/motor/README.md#the-cheshire-format) |
+
+Yeni araç eklemek: [ARAC-EKLEME.md](ARAC-EKLEME.md).
 
 ## Lisans
 

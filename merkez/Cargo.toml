@@ -1,0 +1,19 @@
+[package]
+name = "winloom"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "winloom: matrixdurden'in Windows araçları tek yerde"
+
+[dependencies]
+ortak.workspace = true
+windows.workspace = true
+windows-core.workspace = true
+# Araçlar: her biri araclar/<id>/ altında. Yeni araç buraya ve src/tools.rs'deki listeye eklenir.
+soundboard = { path = "../araclar/soundboard" }
+wallpaper = { path = "../araclar/wallpaper" }
+tunnel = { path = "../araclar/tunnel" }
+battery = { path = "../araclar/battery" }
+audio = { path = "../araclar/audio" }
+dock = { path = "../araclar/dock" }
+clicker = { path = "../araclar/clicker" }

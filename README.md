@@ -29,14 +29,14 @@ Every tool comes with winloom: turn on the ones you want on the **Tools** page. 
 
 | | | |
 |:---:|---|---|
-| <img src="app/assets/araclar/soundboard-64.png" width="40"> | **Blast** | A soundboard that plays straight into your microphone. No virtual microphone: Discord, games, OBS, anything that listens to the mic hears it. Find sounds on Myinstants without leaving it (listen on your headphones, add with one click), and grab the last 10 seconds your computer played with a shortcut (`Ctrl+Alt+L`). |
-| <img src="app/assets/araclar/wallpaper-64.png" width="40"> | **Wallpaper** | Live wallpapers drawn by your GPU behind the desktop icons. Pauses on its own in fullscreen and on battery. |
-| <img src="app/assets/araclar/tunnel-64.png" width="40"> | **VPN** | A VPN that takes your whole computer past network blocks: through your own server, or serverless in DPI mode. [Separate repository](https://github.com/matrixdurden/rabbithole). |
-| <img src="app/assets/araclar/battery-64.png" width="40"> | **Battery** | Three gears for a laptop: plugged in, out for an hour or two, survival. Switches on its own when the charger comes and goes, keeps the discrete GPU asleep on battery and learns how long each gear really lasts. |
-| <img src="app/assets/araclar/audio-64.png" width="40"> | **Audio devices** | Audio outputs and inputs in one list: click one to make it the default. One key switches to the next output (`Ctrl+Alt+O`), next input (`Ctrl+Alt+I`) or mutes the microphone (`Ctrl+Alt+K`). And when your headphones drop, the music pauses instead of carrying on from the laptop speakers. |
-| <img src="app/assets/araclar/dock-64.png" width="40"> | **Dock** | A dock in place of the Windows taskbar, in the Windows 11 look: your pinned apps and the running ones in one floating bar, with Wi-Fi, sound, battery and the clock at its end. Icons under the cursor grow, apps bounce when they want your attention, hovering shows live previews of their windows and you rearrange them by dragging. It always stays on screen, maximized windows end above it, and it stays out of fullscreen games. Throw the cursor into the top-left corner to see all windows (Win+Tab), into the bottom-right corner for the desktop (both can be turned off). Win+1…9 opens the apps in dock order; "Pin to dock" is in the right-click menu. Remove it and the taskbar and Start come back as they were. |
-| <img src="app/assets/araclar/music-64.png" width="40"> | **Music** | What Spotify is playing, in a strip next to the dock, as tall as the dock: cover, song, artist, previous / play / next and a thin progress line you can click to seek. Click the strip and your open Spotify window comes forward. Its background is the cover blurred, the cover's color, or plain like the dock. Works with the Spotify app and the Spotify web app installed from the browser; no Spotify login. Other players (YouTube in the browser, ...) can show up too. |
-| <img src="app/assets/araclar/clicker-64.png" width="40"> | **Clicker** | A classic auto clicker. Hold a key (or press it once to toggle) and it clicks where the cursor is with the left, right or middle button, from one click every two seconds up to a hundred a second; it stops when you let go, or after the number of clicks you set. The key is yours to pick (`F6` to start with). |
+| <img src="araclar/soundboard/ikon/soundboard-64.png" width="40"> | **Blast** | A soundboard that plays straight into your microphone. No virtual microphone: Discord, games, OBS, anything that listens to the mic hears it. Find sounds on Myinstants without leaving it (listen on your headphones, add with one click), and grab the last 10 seconds your computer played with a shortcut (`Ctrl+Alt+L`). |
+| <img src="araclar/wallpaper/ikon/wallpaper-64.png" width="40"> | **Wallpaper** | Live wallpapers drawn by your GPU behind the desktop icons. Pauses on its own in fullscreen and on battery. |
+| <img src="araclar/tunnel/ikon/tunnel-64.png" width="40"> | **VPN** | A VPN that takes your whole computer past network blocks: through your own server, or serverless in DPI mode. [Separate repository](https://github.com/matrixdurden/rabbithole). |
+| <img src="araclar/battery/ikon/battery-64.png" width="40"> | **Battery** | Three gears for a laptop: plugged in, out for an hour or two, survival. Switches on its own when the charger comes and goes, keeps the discrete GPU asleep on battery and learns how long each gear really lasts. |
+| <img src="araclar/audio/ikon/audio-64.png" width="40"> | **Audio devices** | Audio outputs and inputs in one list: click one to make it the default. One key switches to the next output (`Ctrl+Alt+O`), next input (`Ctrl+Alt+I`) or mutes the microphone (`Ctrl+Alt+K`). And when your headphones drop, the music pauses instead of carrying on from the laptop speakers. |
+| <img src="araclar/dock/ikon/dock-64.png" width="40"> | **Dock** | A dock in place of the Windows taskbar, in the Windows 11 look: your pinned apps and the running ones in one floating bar, with Wi-Fi, sound, battery and the clock at its end. Icons under the cursor grow, apps bounce when they want your attention, hovering shows live previews of their windows and you rearrange them by dragging. It always stays on screen, maximized windows end above it, and it stays out of fullscreen games. Throw the cursor into the top-left corner to see all windows (Win+Tab), into the bottom-right corner for the desktop (both can be turned off). Win+1…9 opens the apps in dock order; "Pin to dock" is in the right-click menu. Remove it and the taskbar and Start come back as they were. |
+| <img src="araclar/dock/ikon/dock-64.png" width="40"> | **Music** | What Spotify is playing, in a strip next to the dock, as tall as the dock: cover, song, artist, previous / play / next and a thin progress line you can click to seek. Click the strip and your open Spotify window comes forward. Its background is the cover blurred, the cover's color, or plain like the dock. Works with the Spotify app and the Spotify web app installed from the browser; no Spotify login. Other players (YouTube in the browser, ...) can show up too. |
+| <img src="araclar/clicker/ikon/clicker-64.png" width="40"> | **Clicker** | A classic auto clicker. Hold a key (or press it once to toggle) and it clicks where the cursor is with the left, right or middle button, from one click every two seconds up to a hundred a second; it stops when you let go, or after the number of clicks you set. The key is yours to pick (`F6` to start with). |
 
 <table>
   <tr>
@@ -68,14 +68,18 @@ Cross-compiled for Windows from WSL (`x86_64-pc-windows-gnu`, needs mingw):
 ```sh
 make build      # target/x86_64-pc-windows-gnu/release/winloom.exe
 make install    # install under %LOCALAPPDATA%\Programs\winloom and start it
-make release    # GitHub release with the version in app/Cargo.toml
+make release    # GitHub release with the version in Cargo.toml
 ```
 
 | Folder | |
 |---|---|
-| [`app/`](app) | winloom.exe: window, tool pages, turning tools on and off |
-| [`soundboard/`](soundboard) | Soundboard engine and its microphone effect (`apo/`) |
-| [`wallpaper/`](wallpaper) | Wallpaper engine and the [`.cheshire` format](wallpaper/README.md#the-cheshire-format) |
+| [`merkez/`](merkez) | winloom.exe: window, tray, turning tools on and off, updates, install |
+| [`ortak/`](ortak) | Code every tool shares: drawing, UI parts, logging, network, language, the tool contract |
+| [`araclar/<id>/`](araclar) | One folder per tool: its page (`src/`), icon (`ikon/`) and engine if it has one (`motor/`) |
+| [`araclar/soundboard/motor/`](araclar/soundboard/motor) | Soundboard engine; its microphone effect in [`apo/`](araclar/soundboard/apo) |
+| [`araclar/wallpaper/motor/`](araclar/wallpaper/motor) | Wallpaper engine and the [`.cheshire` format](araclar/wallpaper/motor/README.md#the-cheshire-format) |
+
+Adding a new tool: [ARAC-EKLEME.md](ARAC-EKLEME.md) (Turkish).
 
 ## License
 
